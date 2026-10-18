@@ -86,7 +86,9 @@ var funcs = template.FuncMap{
 	},
 	"lower":  strings.ToLower,
 	"status": statusClass,
-	"add":    func(a, b int) int { return a + b },
+	// statuslabel is a status as a person reads it: awaiting_hr is "awaiting HR".
+	"statuslabel": statusLabel,
+	"add":         func(a, b int) int { return a + b },
 	// units names what a count of a type's unit is: "3 working days",
 	// "1 weekend".
 	"units": unitLabel,
@@ -177,6 +179,11 @@ var notices = map[string]string{
 	"drafts-generated":   "Requests created for anyone who did not have them yet.",
 	"shutdown-deleted":   "Shutdown deleted, with its unsubmitted requests.",
 	"not-deletable":      "Someone has already submitted leave for this shutdown, so it can no longer be deleted.",
+	"escalated":          "Approved, and sent on to the next person, because it needs special permission.",
+	"negative-requested": "Sent to HR. They need to allow this before you can submit it, and you will be emailed.",
+	"negative-granted":   "Permission granted. The request is waiting for them to submit it.",
+	"negative-refused":   "Request refused.",
+	"coverage-saved":     "Coverage limit saved.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }
 

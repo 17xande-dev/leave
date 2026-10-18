@@ -1,0 +1,7 @@
+{{define "subject"}}You may now submit: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+Your request for {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}) was allowed to go below zero. Please open it and submit it; it then goes for approval as usual.
+{{with .Note}}
+Their note: {{.}}
+{{end}}{{end}}

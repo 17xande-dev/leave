@@ -40,7 +40,7 @@ func TestAdminPagesRender(t *testing.T) {
 	hr := hs.signIn("hr")
 	for _, p := range []string{"/admin", "/admin/requests", "/admin/requests?status=pending&from=2026-01-01",
 		"/admin/users", "/admin/users/1", "/admin/types", "/admin/types/new", "/admin/types/1",
-		"/admin/holidays", "/admin/holidays?year=2027", "/admin/outbox"} {
+		"/admin/holidays", "/admin/holidays?year=2027", "/admin/outbox", "/admin/coverage", "/admin/permissions"} {
 		if code, body := hs.get(hr, p); code != 200 {
 			t.Errorf("%s: %d\n%s", p, code, body)
 		}

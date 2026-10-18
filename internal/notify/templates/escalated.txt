@@ -1,0 +1,12 @@
+{{define "subject"}}Special permission needed: {{.Request.UserName}}, {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Request.UserName}} has applied for {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}), and it needs special permission. It has now come to you.
+{{with .Coverage}}
+Why: {{.}}
+{{end}}{{with .ApprovedBy}}
+Already approved by {{.}}.
+{{end}}{{with .Request.Note}}
+Their note: {{.}}
+{{end}}
+Approving it here sends it on to the next person, or approves it if you are the last. Declining ends it.{{end}}

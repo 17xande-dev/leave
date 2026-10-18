@@ -208,3 +208,117 @@ func TestShutdownNotifications(t *testing.T) {
 		t.Fatalf("auto-approval email:\n%s", m.Text)
 	}
 }
+
+func (e *env) dept(t *testing.T, name string, who ...string) {
+	t.Helper()
+	us := users.NewStore(e.db)
+	for _, w := range who {
+		p := e.people[w]
+		u, err := us.Upsert(e.ctx, directory.User{ID: p.DN, DN: p.DN, Username: p.Username, Name: p.Name, Email: p.Email,
+			ManagerDN: p.ManagerDN, Admin: p.Admin, Department: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.people[w] = u
+	}
+}
+
+func TestSpecialPermissionNotifications(t *testing.T) {
+	e := setup(t)
+	e.dept(t, "Pair", "staff", "hr")
+	if err := e.svc.SetCoverageRule(e.ctx, "Pair", 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Submit(e.ctx, e.people["hr"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14"}); err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Override: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	if len(jobs) != 1 {
+		t.Fatalf("submit jobs = %+v", jobs)
+	}
+	m := email(t, jobs[0])
+	if m.To[0] != "head@x.test" || !strings.Contains(m.Text, "needs special permission") ||
+		!strings.Contains(m.Text, "100% of Pair (2 of 2) would be away on Mon 12 Oct. The limit is 50%.") {
+		t.Fatalf("submitted email:\n%s", m.Text)
+	}
+
+	// The head approves; the email goes to the pastor, says why and who already did.
+	if _, err := e.svc.Decide(e.ctx, e.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	if len(jobs) != 1 || jobs[0].kind != "email" {
+		t.Fatalf("escalation jobs = %+v", jobs)
+	}
+	m = email(t, jobs[0])
+	if m.To[0] != "pastor@x.test" || !strings.Contains(m.Subject, "Special permission needed: Sam Staff") ||
+		!strings.Contains(m.Text, "Hi Senior") || !strings.Contains(m.Text, "100% of Pair (2 of 2)") ||
+		!strings.Contains(m.Text, "Already approved by Olivia Head") || !strings.Contains(m.Text, "https://leave.test/leave/"+itoa(r.ID)) {
+		t.Fatalf("escalated email:\n%s\n%s", m.Subject, m.Text)
+	}
+
+	// The final approval is the usual one: the requester hears, and the calendar gets it.
+	e.svc.Decide(e.ctx, e.people["pastor"], r.ID, true, "")
+	jobs = e.drain(t)
+	if len(jobs) != 2 || email(t, jobs[0]).To[0] != "staff@x.test" || jobs[1].kind != "calendar_create" {
+		t.Fatalf("final jobs = %+v", jobs)
+	}
+}
+
+func TestNegativeBalanceNotifications(t *testing.T) {
+	e := setup(t)
+	r, _ := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-30"})
+	e.svc.Decide(e.ctx, e.people["head"], r.ID, true, "")
+	e.drain(t)
+
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-11-02", End: "2026-11-04",
+		Note: "wedding abroad", Negative: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every admin but the requester; hr2 has no address and is skipped.
+	jobs := e.drain(t)
+	if len(jobs) != 1 {
+		t.Fatalf("negative-request jobs = %+v", jobs)
+	}
+	m := email(t, jobs[0])
+	if m.To[0] != "hr@x.test" || !strings.Contains(m.Subject, "Permission needed to go below zero: Sam Staff") ||
+		!strings.Contains(m.Text, "3 working days below zero") || !strings.Contains(m.Text, "wedding abroad") ||
+		!strings.Contains(m.Text, "https://leave.test/admin/permissions") {
+		t.Fatalf("negative email:\n%s\n%s", m.Subject, m.Text)
+	}
+
+	// Granting tells the person to submit.
+	if _, err := e.svc.GrantNegative(e.ctx, e.people["hr"], r.ID, "just this once"); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	if len(jobs) != 1 {
+		t.Fatalf("grant jobs = %+v", jobs)
+	}
+	m = email(t, jobs[0])
+	if m.To[0] != "staff@x.test" || !strings.Contains(m.Subject, "You may now submit") ||
+		!strings.Contains(m.Text, "just this once") || !strings.Contains(m.Text, "https://leave.test/leave/"+itoa(r.ID)) {
+		t.Fatalf("granted email:\n%s\n%s", m.Subject, m.Text)
+	}
+
+	// Refusing is the declined email, to the person.
+	r2, _ := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-11-09", End: "2026-11-09",
+		Note: "again", Negative: true})
+	e.drain(t)
+	e.svc.RefuseNegative(e.ctx, e.people["hr"], r2.ID, "not twice")
+	jobs = e.drain(t)
+	if len(jobs) != 1 {
+		t.Fatalf("refusal jobs = %+v", jobs)
+	}
+	if m := email(t, jobs[0]); m.To[0] != "staff@x.test" || !strings.Contains(m.Text, "declined by Hannah HR") ||
+		!strings.Contains(m.Text, "not twice") {
+		t.Fatalf("refusal email:\n%s", m.Text)
+	}
+}

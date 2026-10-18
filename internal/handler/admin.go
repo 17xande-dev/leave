@@ -41,6 +41,11 @@ func (h *Handler) adminRoutes() []route {
 		a("GET /admin/shutdowns/{id}", h.AdminShutdown),
 		a("POST /admin/shutdowns/{id}/generate", h.AdminGenerateDrafts),
 		a("POST /admin/shutdowns/{id}/delete", h.AdminDeleteShutdown),
+		a("GET /admin/permissions", h.AdminPermissions),
+		a("POST /admin/permissions/{id}/grant", h.AdminGrantNegative),
+		a("POST /admin/permissions/{id}/refuse", h.AdminRefuseNegative),
+		a("GET /admin/coverage", h.AdminCoverage),
+		a("POST /admin/coverage", h.AdminSaveCoverage),
 		a("GET /admin/outbox", h.AdminOutbox),
 		a("POST /admin/outbox/{id}/retry", h.AdminRetry),
 	}
@@ -52,9 +57,10 @@ func pathID(r *http.Request) (int64, bool) {
 }
 
 type adminHomeData struct {
-	Pending  int
-	Problems int
-	Users    int
+	Pending    int
+	AwaitingHR int
+	Problems   int
+	Users      int
 }
 
 func (h *Handler) AdminHome(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +79,13 @@ func (h *Handler) AdminHome(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
+	hr, err := h.leave.AwaitingHR(r.Context())
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
 	h.render(w, r, http.StatusOK, "admin_home.html", view{Title: "Admin",
-		Data: adminHomeData{Pending: len(pending), Problems: len(problems), Users: len(us)}})
+		Data: adminHomeData{Pending: len(pending), AwaitingHR: len(hr), Problems: len(problems), Users: len(us)}})
 }
 
 // --- Requests ------------------------------------------------------------
@@ -87,7 +98,8 @@ type adminRequestsData struct {
 }
 
 var statuses = map[string]bool{"": true, leave.StatusPending: true, leave.StatusApproved: true,
-	leave.StatusDeclined: true, leave.StatusWithdrawn: true, leave.StatusCancelled: true}
+	leave.StatusDeclined: true, leave.StatusWithdrawn: true, leave.StatusCancelled: true,
+	leave.StatusAwaitingHR: true, leave.StatusDraft: true}
 
 func filterFrom(r *http.Request) leave.Filter {
 	q := r.URL.Query()
@@ -403,7 +415,8 @@ type typeFormData struct {
 }
 
 func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
-	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays, Restricted: leave.RestrictMin}}
+	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays,
+		Restricted: leave.RestrictMin, CoverageRule: leave.CoverageLimit}}
 	if r.PathValue("id") != "" {
 		id, ok := pathID(r)
 		if !ok {
@@ -434,7 +447,7 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	sort, _ := strconv.Atoi(f("sort"))
 	t := leave.Type{ID: id, Code: f("code"), Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
 		Backdate: f("backdate") == "1", RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
-		Restricted: f("restricted")}
+		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance"))}
 	if d.Allowance != "" {
 		n, err := strconv.Atoi(d.Allowance)

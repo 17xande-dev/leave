@@ -1,0 +1,8 @@
+{{define "subject"}}Permission needed to go below zero: {{.Request.UserName}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Request.UserName}} asks to take {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}), which would put them {{.Shortfall}} below zero.
+{{with .Request.Note}}
+Their reason: {{.}}
+{{end}}
+If you allow it they will be asked to submit the request, and it then goes through the usual approval. If you refuse it, it is declined.{{end}}

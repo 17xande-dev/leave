@@ -62,6 +62,14 @@ const (
 	// EventDraftsCreated: a shutdown created drafts for someone to submit.
 	// Request is their first draft; one event per person, not per draft.
 	EventDraftsCreated EventKind = "drafts"
+	// EventEscalated: an approver approved a request needing special
+	// permission and it moved up to the next level, now Request.ApproverID.
+	EventEscalated EventKind = "escalated"
+	// EventNegativeRequested: someone asked HR to let them go below zero.
+	EventNegativeRequested EventKind = "negative_requested"
+	// EventNegativeGranted: HR allowed it; the request is a draft for the
+	// person to submit.
+	EventNegativeGranted EventKind = "negative_granted"
 )
 
 type Event struct {
@@ -71,6 +79,14 @@ type Event struct {
 	// Cancelled is the leave a just-approved cancellation cancelled.
 	Cancelled *Request
 	Actor     users.User
+	// Coverage and Steps accompany an escalated request: the warning as the
+	// department stands, and who has approved so far.
+	Coverage *Coverage
+	Steps    []Step
+	// Shortfall is how many days below zero a negative-balance request asks for.
+	Shortfall int
+	// Note is what the actor said, where it is not on the request (a grant).
+	Note string
 }
 
 // EventHook runs inside the transaction making the change. An error rolls the

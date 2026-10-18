@@ -1,0 +1,29 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Permissions</h1>
+<p class="muted">People asking to take leave that would put their balance below zero. Granting returns the request to them as a draft to submit, and it then goes through the usual approval. Refusing declines it.</p>
+{{with .Data}}
+{{if .Rows}}
+{{range .Rows}}
+<form method="post" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2><a href="/leave/{{.ID}}">{{.UserName}}: {{.TypeName}}</a></h2>
+  <p>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}, {{.Days}} {{units .Days .TypeUnit}}.
+  {{if .Shortfall}}That is <strong>{{.Shortfall}} {{units .Shortfall .TypeUnit}}</strong> below zero.{{else}}Their balance now covers it.{{end}}</p>
+  <p><strong>Their reason:</strong> {{.Note}}</p>
+  <div class="field">
+    <label for="note-{{.ID}}">Note <small>(required to refuse)</small></label>
+    <textarea id="note-{{.ID}}" name="note" rows="2">{{if eq .ID $.Data.For}}{{$.Data.Note}}{{end}}</textarea>
+    {{if eq .ID $.Data.For}}{{template "err" index $.Data.Errors "note"}}{{end}}
+  </div>
+  <div class="actions">
+    <button type="submit" formaction="/admin/permissions/{{.ID}}/grant">Grant</button>
+    <button type="submit" formaction="/admin/permissions/{{.ID}}/refuse" class="quiet">Refuse</button>
+  </div>
+</form>
+{{end}}
+{{else}}
+<p class="muted">Nobody is waiting for permission.</p>
+{{end}}
+{{end}}
+{{end}}

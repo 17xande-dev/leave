@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -68,7 +68,30 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err != nil {
 			return err
 		}
-		if err := n.send(ctx, tx, "submitted", to, r, e.Kind == leave.EventReassigned, "Review the request", ""); err != nil {
+		if err := n.send(ctx, tx, "submitted", to, r, e.Kind == leave.EventReassigned, "Review the request", "", special(e)); err != nil {
+			return err
+		}
+	case leave.EventEscalated:
+		to, err := approvers(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		if err := n.send(ctx, tx, "escalated", to, r, false, "Review the request", "", special(e)); err != nil {
+			return err
+		}
+	case leave.EventNegativeRequested:
+		// No approver: r.ApproverID is 0, so this is every admin but the requester.
+		to, err := approvers(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		if err := n.send(ctx, tx, "negative", to, r, false, "Review the request", "/admin/permissions",
+			func(d *msgData) { d.Shortfall = daysOf(e.Shortfall, r.TypeUnit) }); err != nil {
+			return err
+		}
+	case leave.EventNegativeGranted:
+		if err := n.send(ctx, tx, "granted", []recipient{{r.UserName, r.UserEmail}}, r, false, "Submit your leave", "",
+			func(d *msgData) { d.Note = e.Note }); err != nil {
 			return err
 		}
 	case leave.EventWithdrawn:
@@ -134,6 +157,30 @@ type msgData struct {
 	Dates      string
 	Days       string
 	Reassigned bool
+	// Coverage is the department warning sentence and ApprovedBy who has
+	// approved so far, for a request needing special permission.
+	Coverage   string
+	ApprovedBy string
+	// Shortfall is the days below zero asked for ("3 working days").
+	Shortfall string
+	Note      string
+}
+
+// special fills in what a special-permission message says: why, and who has
+// already approved.
+func special(e leave.Event) func(*msgData) {
+	return func(d *msgData) {
+		if e.Coverage != nil {
+			d.Coverage = e.Coverage.Sentence()
+		}
+		var names []string
+		for _, st := range e.Steps {
+			if st.Decision == "approved" {
+				names = append(names, st.ApproverName)
+			}
+		}
+		d.ApprovedBy = strings.Join(names, ", ")
+	}
 }
 
 // send renders one message per recipient (each is greeted by name) and
@@ -141,7 +188,8 @@ type msgData struct {
 // a warning: failing the approval because of a missing mail attribute would
 // punish the wrong person.
 // path is where the button goes; empty means the request's own page.
-func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recipient, r leave.Request, reassigned bool, linkText, path string) error {
+// extra adjusts the data each message is rendered from.
+func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recipient, r leave.Request, reassigned bool, linkText, path string, extra ...func(*msgData)) error {
 	if path == "" {
 		path = fmt.Sprintf("/leave/%d", r.ID)
 	}
@@ -153,8 +201,12 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			slog.Warn("notify: recipient has no email address in the directory", "name", p.Name, "request", r.ID)
 			continue
 		}
-		m, err := n.render(tmpl, msgData{To: firstName(p.Name), Request: r, Dates: Dates(r.Start, r.End),
-			Days: days(r), Reassigned: reassigned}, n.baseURL+path, linkText)
+		d := msgData{To: firstName(p.Name), Request: r, Dates: Dates(r.Start, r.End),
+			Days: days(r), Reassigned: reassigned}
+		for _, f := range extra {
+			f(&d)
+		}
+		m, err := n.render(tmpl, d, n.baseURL+path, linkText)
 		if err != nil {
 			return err
 		}
@@ -216,21 +268,23 @@ func Dates(start, end string) string {
 	return s.Format("Mon 2 Jan 2006") + " – " + e.Format("Mon 2 Jan 2006")
 }
 
-func days(r leave.Request) string {
-	switch r.TypeUnit {
+func days(r leave.Request) string { return daysOf(r.Days, r.TypeUnit) }
+
+func daysOf(n int, unit string) string {
+	switch unit {
 	case leave.UnitWeekend:
-		if r.Days == 1 {
+		if n == 1 {
 			return "1 weekend"
 		}
-		return fmt.Sprintf("%d weekends", r.Days)
+		return fmt.Sprintf("%d weekends", n)
 	case leave.UnitCalendar:
-		if r.Days == 1 {
+		if n == 1 {
 			return "1 day"
 		}
-		return fmt.Sprintf("%d days", r.Days)
+		return fmt.Sprintf("%d days", n)
 	}
-	if r.Days == 1 {
+	if n == 1 {
 		return "1 working day"
 	}
-	return fmt.Sprintf("%d working days", r.Days)
+	return fmt.Sprintf("%d working days", n)
 }

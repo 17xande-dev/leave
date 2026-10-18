@@ -24,6 +24,12 @@ const (
 	RestrictNever = "never" // not at all: floating holidays are not for the restricted day
 )
 
+// What department coverage limits do with a type; see Type.CoverageRule.
+const (
+	CoverageLimit = "limit" // counts as away and can be blocked by the limit
+	CoverageCount = "count" // counts as away, never blocked
+)
+
 // Type is a kind of leave and its allowance.
 type Type struct {
 	ID   int64
@@ -39,6 +45,9 @@ type Type struct {
 	Sort         int
 	// Restricted is the rule for the restricted day; see the Restrict* constants.
 	Restricted string
+	// CoverageRule is the rule for department coverage limits: CoverageLimit
+	// or CoverageCount.
+	CoverageRule string
 
 	inactive bool // seed only: the default's Active is the inverse
 }
@@ -49,37 +58,37 @@ func intp(n int) *int { return &n }
 // five-day week, seeded into an empty database. An admin edits them from there;
 // the seed never overwrites.
 var bceaDefaults = []Type{
-	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictMin},
+	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays, CoverageRule: CoverageLimit, Restricted: RestrictMin},
 	// 30 days per 36-month cycle, usable in arrears. Nobody plans being ill
 	// around the restricted day, and neither do the other statutory types.
-	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true, Restricted: RestrictAny},
-	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, Restricted: RestrictAny},
+	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
+	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
 	// Four consecutive months, stored as 120 calendar days.
-	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar, Restricted: RestrictAny},
-	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar, Restricted: RestrictAny},
-	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, Restricted: RestrictMin},
+	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny},
+	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny},
+	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageLimit, Restricted: RestrictMin},
 	// Not BCEA: days off the employer grants that do not touch annual leave.
 	// Seeded inactive with no days, because how many is a policy decision;
 	// an admin sets the allowance and switches it on. Never on the
 	// restricted day: that is what weekends off are for.
-	{Code: "floating", Name: "Floating holidays", Allowance: intp(0), CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictNever, inactive: true},
+	{Code: "floating", Name: "Floating holidays", Allowance: intp(0), CycleMonths: 12, Unit: UnitWorkdays, CoverageRule: CoverageLimit, Restricted: RestrictNever, inactive: true},
 	// Weekends off: a yearly allowance of whole weekends, the one way to have
 	// the restricted day off without taking a run of leave around it.
-	{Code: "weekend", Name: "Weekends off", Allowance: intp(0), CycleMonths: 12, Unit: UnitWeekend, Restricted: RestrictAny, inactive: true},
+	{Code: "weekend", Name: "Weekends off", Allowance: intp(0), CycleMonths: 12, Unit: UnitWeekend, CoverageRule: CoverageLimit, Restricted: RestrictAny, inactive: true},
 	// The free part of a company shutdown: unlimited, and inactive so nobody
 	// can apply for it themselves -- only shutdown requests use it.
-	{Code: "closure", Name: "Company closure", CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictAny, inactive: true},
+	{Code: "closure", Name: "Company closure", CycleMonths: 12, Unit: UnitWorkdays, CoverageRule: CoverageCount, Restricted: RestrictAny, inactive: true},
 }
 
 // ErrNotFound is returned for a missing type or request.
 var ErrNotFound = errors.New("leave: not found")
 
-const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule`
+const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule, coverage_rule`
 
 func scanType(row interface{ Scan(...any) error }) (Type, error) {
 	var t Type
 	var allowance sql.NullInt64
-	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted)
+	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted, &t.CoverageRule)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Type{}, ErrNotFound
 	}
@@ -154,6 +163,12 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	if t.Restricted != RestrictAny && t.Restricted != RestrictMin && t.Restricted != RestrictNever {
 		errs["restricted"] = "Choose a rule for the restricted day."
 	}
+	if t.CoverageRule == "" {
+		t.CoverageRule = CoverageLimit
+	}
+	if t.CoverageRule != CoverageLimit && t.CoverageRule != CoverageCount {
+		errs["coverage_rule"] = "Choose how department limits treat this type."
+	}
 	if t.CycleMonths != 12 && t.CycleMonths != 36 {
 		errs["cycle_months"] = "The cycle is 12 or 36 months."
 	}
@@ -169,9 +184,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	}
 	if t.ID == 0 {
 		res, err := s.db.ExecContext(ctx, `INSERT INTO leave_types
-			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
-			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted)
+			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule, coverage_rule)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
+			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.CoverageRule)
 		if err != nil {
 			return 0, err
 		}
@@ -181,9 +196,10 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 		return res.LastInsertId()
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET code = ?, name = ?, allowance_days = ?,
-		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?
-		WHERE id = ?`,
-		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.ID)
+		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?,
+		coverage_rule = ? WHERE id = ?`,
+		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted,
+		t.CoverageRule, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return 0, FieldErrors{"code": "Another leave type already uses that code."}

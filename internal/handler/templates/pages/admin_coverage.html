@@ -1,0 +1,45 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Coverage limits</h1>
+<p class="muted">The most people of one department that may be away on any single day, as a percentage of the department. A request that would go over it is refused unless the person asks for special permission, which then needs every level of approval up to the final approver. Only leave types marked as blockable are refused; the others still count as being away. Leave a limit empty for no limit.</p>
+{{with .Data}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Department</th><th class="num">People</th><th>Most away on one day</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>All other departments<br><small>The default, for a department with no limit of its own.</small></td>
+      <td class="num">–</td>
+      <td>
+        <form method="post" action="/admin/coverage" class="row">
+          {{template "csrf" $.CSRF}}
+          <input type="hidden" name="department" value="">
+          <label class="visually-hidden" for="pct-default">Default limit, percent</label>
+          <input id="pct-default" name="percent" inputmode="numeric" size="4" value="{{.Default.Percent}}"> %
+          <button type="submit">Save</button>
+        </form>
+        {{template "err" .Default.Error}}
+      </td>
+    </tr>
+  {{range $i, $d := .Rows}}
+    <tr>
+      <td>{{$d.Name}}</td>
+      <td class="num">{{$d.Size}}</td>
+      <td>
+        <form method="post" action="/admin/coverage" class="row">
+          {{template "csrf" $.CSRF}}
+          <input type="hidden" name="department" value="{{$d.Name}}">
+          <label class="visually-hidden" for="pct-{{$i}}">{{$d.Name}} limit, percent</label>
+          <input id="pct-{{$i}}" name="percent" inputmode="numeric" size="4" value="{{$d.Percent}}"> %
+          <button type="submit">Save</button>
+        </form>
+        {{template "err" $d.Error}}
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{if not .Rows}}<p class="muted">No department has any people yet.</p>{{end}}
+{{end}}
+{{end}}

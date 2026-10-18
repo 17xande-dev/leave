@@ -91,7 +91,19 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	backdate        INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
 	requires_note   INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
 	active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-	sort            INTEGER NOT NULL DEFAULT 0
+	sort            INTEGER NOT NULL DEFAULT 0,
+	-- How department coverage limits treat this type. limit: it counts as
+	-- someone being away and can be blocked by the limit. count: it counts as
+	-- away but is never blocked (nobody should be refused sick leave).
+	coverage_rule   TEXT NOT NULL DEFAULT 'limit' CHECK (coverage_rule IN ('limit', 'count'))
+) STRICT;
+
+-- The most people of one department that may be away on a single day, as a
+-- percentage of the department. department '' is the default for departments
+-- with no rule of their own; no row at all means no limit.
+CREATE TABLE IF NOT EXISTS coverage_rules (
+	department   TEXT PRIMARY KEY,
+	max_percent  INTEGER NOT NULL CHECK (max_percent BETWEEN 1 AND 100)
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS balance_adjustments (
@@ -151,10 +163,14 @@ CREATE TABLE IF NOT EXISTS requests (
 	-- The cycle the days count against: the cycle containing start_date.
 	cycle_start         TEXT NOT NULL,
 	note                TEXT NOT NULL DEFAULT '',
-	-- draft: a shutdown request created for the person, not yet submitted.
-	-- Drafts reserve nothing and block nothing; submitting runs the checks.
+	-- draft: a request waiting for the person to submit it -- a shutdown
+	-- request created for them, or one HR allowed to go below zero. Drafts
+	-- reserve nothing and block nothing; submitting runs the checks.
+	-- awaiting_hr: the person asked to go below a zero balance and an admin
+	-- has not yet decided. It counts for overlap and coverage but, like a
+	-- draft, reserves no balance.
 	status              TEXT NOT NULL CHECK (status IN
-	                      ('draft', 'pending', 'approved', 'declined', 'withdrawn', 'cancelled')),
+	                      ('draft', 'awaiting_hr', 'pending', 'approved', 'declined', 'withdrawn', 'cancelled')),
 	-- Set on a request generated for a company shutdown. Its type and dates
 	-- are fixed, it may take the balance below zero (the days are mandatory),
 	-- and it cannot be withdrawn or cancelled.
@@ -164,6 +180,12 @@ CREATE TABLE IF NOT EXISTS requests (
 	-- request to the admins (any admin but the requester): that is where the
 	-- final approver's own leave goes, since nobody sits above them.
 	approver_id         INTEGER REFERENCES users(id),
+	-- Special permission: the request was over a department coverage limit and
+	-- needs every level of approval up to the final approver, not just the
+	-- first. approver_id moves up one level per approval.
+	escalate            INTEGER NOT NULL DEFAULT 0 CHECK (escalate IN (0, 1)),
+	-- HR allowed this request to take the balance below zero.
+	allow_negative      INTEGER NOT NULL DEFAULT 0 CHECK (allow_negative IN (0, 1)),
 	decided_by_id       INTEGER REFERENCES users(id),
 	decided_at          TEXT,
 	decision_note       TEXT NOT NULL DEFAULT '',
@@ -185,6 +207,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_one_per_shutdown_part
 -- At most one live cancellation per leave request.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_one_cancellation
 	ON requests(cancels_request_id) WHERE status = 'pending';
+
+-- Every decision on an escalated request, and HR's grant or refusal of a
+-- negative balance: the trail the request page shows as it moves up.
+CREATE TABLE IF NOT EXISTS request_steps (
+	id          INTEGER PRIMARY KEY,
+	request_id  INTEGER NOT NULL REFERENCES requests(id),
+	approver_id INTEGER NOT NULL REFERENCES users(id),
+	decision    TEXT NOT NULL CHECK (decision IN ('approved', 'declined', 'granted', 'refused')),
+	note        TEXT NOT NULL DEFAULT '',
+	decided_at  TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_request_steps_request ON request_steps(request_id);
 
 CREATE TABLE IF NOT EXISTS outbox (
 	id               INTEGER PRIMARY KEY,
@@ -240,8 +275,8 @@ func Open(path string) (*sql.DB, error) {
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
 		"users":       {"ext_id", "long_weekend"},
-		"requests":    {"shutdown_part_id"},
-		"leave_types": {"restricted_rule"},
+		"requests":    {"shutdown_part_id", "escalate", "allow_negative"},
+		"leave_types": {"restricted_rule", "coverage_rule"},
 	}
 	for table, cols := range want {
 		have := map[string]bool{}
@@ -279,6 +314,20 @@ func checkCurrent(d *sql.DB) error {
 	}
 	if !strings.Contains(ddl, "'draft'") {
 		return fmt.Errorf("the database predates draft requests; start from a fresh one")
+	}
+	if !strings.Contains(ddl, "'awaiting_hr'") {
+		return fmt.Errorf("the database predates negative-balance permission (awaiting_hr); start from a fresh one")
+	}
+	// A new table is invisible to the column check above: with requests
+	// already there, a missing one means an older build made the database.
+	for _, table := range []string{"coverage_rules", "request_steps"} {
+		var n int
+		if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("the database predates %s; start from a fresh one", table)
+		}
 	}
 	if err := d.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'leave_types'`).Scan(&ddl); err != nil {
 		return err

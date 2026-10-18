@@ -327,11 +327,23 @@ func (s *Service) DeleteShutdown(ctx context.Context, admin users.User, id int64
 	})
 }
 
-// SubmitDraft submits u's shutdown draft. The days are recounted (a holiday
-// may have been added since) and checked for overlap with u's other leave, but
-// not against the balance: the days are mandatory, so annual leave may go
-// below zero. With auto-approve on, it is approved there and then.
+// SubmitDraft submits u's draft; see SubmitDraftOverride.
 func (s *Service) SubmitDraft(ctx context.Context, u users.User, id int64, note string) (Request, error) {
+	return s.SubmitDraftOverride(ctx, u, id, note, false)
+}
+
+// SubmitDraftOverride submits u's draft. There are two kinds.
+//
+// A shutdown draft: the days are recounted (a holiday may have been added
+// since) and checked for overlap with u's other leave, but not against the
+// balance or the coverage limits: the days are mandatory, so annual leave may
+// go below zero. With auto-approve on, it is approved there and then.
+//
+// A draft HR allowed to go below zero: it is an ordinary request apart from
+// the balance, so the past-date, active-type, restricted-day and coverage
+// rules all apply again. If coverage fails, override asks for special
+// permission as it does on the apply form. It then follows the normal chain.
+func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int64, note string, override bool) (Request, error) {
 	d, err := s.Get(ctx, id)
 	if err != nil {
 		return Request{}, err
@@ -339,10 +351,18 @@ func (s *Service) SubmitDraft(ctx context.Context, u users.User, id int64, note 
 	if d.UserID != u.ID || d.Status != StatusDraft {
 		return Request{}, ErrNotAllowed
 	}
+	// A note left blank keeps the one the draft has: the reason someone gave
+	// HR is not something to make them type again.
+	note = strings.TrimSpace(note)
+	if note == "" {
+		note = d.Note
+	}
 	var auto bool
-	if err := s.db.QueryRowContext(ctx, `SELECT sd.auto_approve FROM shutdowns sd
-		JOIN shutdown_parts p ON p.shutdown_id = sd.id WHERE p.id = ?`, d.ShutdownPartID).Scan(&auto); err != nil {
-		return Request{}, err
+	if d.IsShutdown() {
+		if err := s.db.QueryRowContext(ctx, `SELECT sd.auto_approve FROM shutdowns sd
+			JOIN shutdown_parts p ON p.shutdown_id = sd.id WHERE p.id = ?`, d.ShutdownPartID).Scan(&auto); err != nil {
+			return Request{}, err
+		}
 	}
 	in := Input{TypeID: d.TypeID, Start: d.Start, End: d.End, Note: note}
 	if err := s.ensureYears(ctx, in); err != nil {
@@ -354,17 +374,22 @@ func (s *Service) SubmitDraft(ctx context.Context, u users.User, id int64, note 
 	}
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{mandatory: true, excludeID: id})
+		opt := quoteOpts{mandatory: true, excludeID: id}
+		if !d.IsShutdown() {
+			opt = quoteOpts{allowNegative: d.AllowNegative, override: override, excludeID: id}
+		}
+		qt, err := s.quote(ctx, tx, u, in, opt)
 		if err != nil {
 			return err
 		}
+		escalate := !d.IsShutdown() && override && qt.Coverage != nil
 		status, decidedAt, decisionNote := StatusPending, any(nil), ""
 		if auto {
 			status, decidedAt, decisionNote = StatusApproved, stampNow(s.Now()), "Approved automatically: company shutdown."
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = ?, days = ?, cycle_start = ?, note = ?,
-			approver_id = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'draft'`,
-			status, qt.Days, fmtDate(qt.CycleStart), strings.TrimSpace(note), nullID(approver),
+			approver_id = ?, escalate = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'draft'`,
+			status, qt.Days, fmtDate(qt.CycleStart), note, nullID(approver), escalate,
 			decidedAt, decisionNote, id)
 		if err != nil {
 			return err
@@ -379,7 +404,7 @@ func (s *Service) SubmitDraft(ctx context.Context, u users.User, id int64, note 
 		if auto {
 			kind = EventDecided
 		}
-		return s.hook(ctx, tx, Event{Kind: kind, Request: out, Actor: u})
+		return s.emit(ctx, tx, Event{Kind: kind, Request: out, Actor: u})
 	})
 	if errors.Is(err, ErrNotFound) {
 		return Request{}, ErrNotAllowed

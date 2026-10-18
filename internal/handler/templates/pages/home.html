@@ -7,9 +7,9 @@
 {{with .Drafts}}
 <section class="panel attention">
   <h2>Waiting for you to submit</h2>
-  <p class="hint">These were filled in for you for a company shutdown. Open each one, check it and submit it.</p>
+  <p class="hint">Open each one, check it and submit it.</p>
   <ul>
-  {{range .}}<li><a href="/leave/{{.ID}}">{{.ShutdownName}}: {{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a> ({{.Days}} {{plural .Days "day" "days"}})</li>{{end}}
+  {{range .}}<li><a href="/leave/{{.ID}}">{{if .IsShutdown}}{{.ShutdownName}}: {{end}}{{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a> ({{.Days}} {{plural .Days "day" "days"}}){{if .IsShutdown}} <small>Filled in for you for a company shutdown.</small>{{else}} <small>HR has allowed this to go below zero.</small>{{end}}</li>{{end}}
   </ul>
 </section>
 {{end}}

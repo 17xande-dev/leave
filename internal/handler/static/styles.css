@@ -281,6 +281,12 @@ pre.raw {
     background: color-mix(in oklab, var(--pending) 10%, var(--paper-sunk));
   }
 
+  /* Over a department limit: needs every level to approve. */
+  &.special {
+    color: var(--warn);
+    background: color-mix(in oklab, var(--warn) 8%, var(--paper-sunk));
+  }
+
   /* The state worth noticing in a list: this one completed. */
   &.done {
     color: var(--accent);

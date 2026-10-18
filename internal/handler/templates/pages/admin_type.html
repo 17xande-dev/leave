@@ -49,6 +49,14 @@
       </select>
       {{template "err" index .Errors "restricted"}}
     </div>
+    <div class="field">
+      <label for="coverage_rule">Department limits</label>
+      <select id="coverage_rule" name="coverage_rule">
+        <option value="limit"{{if ne .Type.CoverageRule "count"}} selected{{end}}>Can be blocked by department limits</option>
+        <option value="count"{{if eq .Type.CoverageRule "count"}} selected{{end}}>Never blocked (still counts as away)</option>
+      </select>
+      {{template "err" index .Errors "coverage_rule"}}
+    </div>
     <div class="field narrow">
       <label for="sort">Order</label>
       <input id="sort" name="sort" inputmode="numeric" size="4" value="{{.Type.Sort}}">

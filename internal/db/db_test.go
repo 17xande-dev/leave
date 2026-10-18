@@ -69,3 +69,34 @@ func TestOldDatabaseRefused(t *testing.T) {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
+
+// An old requests table that has the shutdown column but not the newer ones
+// is refused naming the missing column.
+func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT, shutdown_part_id INTEGER) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "requests.escalate") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}
+
+// A requests table written before awaiting_hr existed has every column but the
+// status CHECK, which only the DDL shows.
+func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+		allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending'))) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "awaiting_hr") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}

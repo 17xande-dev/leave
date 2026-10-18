@@ -10,7 +10,7 @@
     <label for="status">Status</label>
     <select id="status" name="status">
       <option value="">Any</option>
-      {{range $s := (list "pending" "approved" "declined" "withdrawn" "cancelled")}}<option value="{{$s}}"{{if eq $s $.Data.Filter.Status}} selected{{end}}>{{$s}}</option>{{end}}
+      {{range $s := (list "pending" "awaiting_hr" "draft" "approved" "declined" "withdrawn" "cancelled")}}<option value="{{$s}}"{{if eq $s $.Data.Filter.Status}} selected{{end}}>{{$s}}</option>{{end}}
     </select>
   </div>
   <div class="field">

@@ -15,12 +15,14 @@ const (
 	KindLeave        = "leave"
 	KindCancellation = "cancellation"
 
-	StatusPending   = "pending"
-	StatusApproved  = "approved"
-	StatusDraft     = "draft"
-	StatusDeclined  = "declined"
-	StatusWithdrawn = "withdrawn"
-	StatusCancelled = "cancelled"
+	StatusPending  = "pending"
+	StatusApproved = "approved"
+	StatusDraft    = "draft"
+	// StatusAwaitingHR: asked to go below zero; an admin must allow it first.
+	StatusAwaitingHR = "awaiting_hr"
+	StatusDeclined   = "declined"
+	StatusWithdrawn  = "withdrawn"
+	StatusCancelled  = "cancelled"
 )
 
 // Request is one row of requests with the names a page needs joined in.
@@ -43,6 +45,10 @@ type Request struct {
 	CreatedAt       string
 	// ShutdownPartID is set on a request generated for a company shutdown.
 	ShutdownPartID int64
+	// Escalate: over a department coverage limit, so every level up to the
+	// final approver must approve. AllowNegative: HR let it go below zero.
+	Escalate      bool
+	AllowNegative bool
 
 	UserName     string
 	UserEmail    string
@@ -63,7 +69,7 @@ func (r Request) IsShutdown() bool { return r.ShutdownPartID != 0 }
 const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.cancels_request_id, 0),
 	r.start_date, r.end_date, r.days, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
 	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
-	COALESCE(r.shutdown_part_id, 0),
+	COALESCE(r.shutdown_part_id, 0), r.escalate, r.allow_negative,
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
 	COALESCE(sd.name, '')
 	FROM requests r
@@ -78,7 +84,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
 	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.CycleStart,
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
-		&r.CreatedAt, &r.ShutdownPartID, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
+		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
 		&r.ApproverName, &r.DecidedBy, &r.ShutdownName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
@@ -113,6 +119,21 @@ func (s *Service) Get(ctx context.Context, id int64) (Request, error) { return s
 // or was routed to, whoever decided it, and admins.
 func CanView(u users.User, r Request) bool {
 	return u.Admin || u.ID == r.UserID || u.ID == r.ApproverID || u.ID == r.DecidedByID
+}
+
+// CanWithdraw reports whether u may take r back: their own request, before
+// anyone has decided it. That includes one waiting for HR and a draft HR has
+// allowed -- both are theirs to drop -- but not a shutdown draft, whose days
+// are mandatory.
+func CanWithdraw(u users.User, r Request) bool {
+	if r.UserID != u.ID || r.IsShutdown() {
+		return false
+	}
+	switch r.Status {
+	case StatusPending, StatusAwaitingHR, StatusDraft:
+		return true
+	}
+	return false
 }
 
 // CanDecide reports whether u may approve or decline r now.
@@ -194,6 +215,11 @@ type Input struct {
 	Start  string
 	End    string
 	Note   string
+	// Override asks for special permission: a request over a department's
+	// coverage limit is saved anyway and goes up the whole approval chain.
+	Override bool
+	// Negative asks HR to allow a request that takes the balance below zero.
+	Negative bool
 }
 
 // Quote is what a request would cost, for the form's live preview and for
@@ -206,6 +232,12 @@ type Quote struct {
 	Balance    Balance
 	// After is the balance left if this request is approved; nil when unlimited.
 	After *int
+	// Shortfall is how many days below zero the request would take the
+	// balance, whether or not that is allowed; 0 when it fits.
+	Shortfall int
+	// Coverage is set when the request is over its department's limit,
+	// whether or not that is allowed.
+	Coverage *Coverage
 }
 
 // maxSpan keeps a typo ("2062" for "2026") from becoming a request spanning
@@ -224,10 +256,17 @@ func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, e
 // the type may be one not offered on the apply form (an unlimited "company
 // closure"), the dates may already have passed by the time someone submits,
 // and the balance may go below zero. The overlap check still applies --
-// against everything except the draft being submitted.
+// against everything except the draft being submitted. A mandatory request is
+// also exempt from coverage limits.
+//
+// override and allowNegative relax one rule each for an ordinary request:
+// special permission for a department limit, and HR's permission to go below
+// zero. Both still report what they waived (Quote.Coverage, Quote.Shortfall).
 type quoteOpts struct {
-	mandatory bool
-	excludeID int64
+	mandatory     bool
+	override      bool
+	allowNegative bool
+	excludeID     int64
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -315,12 +354,21 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// over days a shutdown already covers would charge the same days twice.
 	var overlap int
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND kind = 'leave'
-		AND status IN ('draft', 'pending', 'approved') AND start_date <= ? AND end_date >= ? AND id <> ?`,
+		AND status IN ('draft', 'awaiting_hr', 'pending', 'approved') AND start_date <= ? AND end_date >= ? AND id <> ?`,
 		u.ID, fmtDate(end), fmtDate(start), opt.excludeID).Scan(&overlap); err != nil {
 		return Quote{}, err
 	}
 	if overlap > 0 {
 		errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
+	}
+
+	if !opt.mandatory {
+		if qt.Coverage, err = s.coverage(ctx, q, u, t, start, end, holidays, opt.excludeID); err != nil {
+			return Quote{}, err
+		}
+		if qt.Coverage != nil && !opt.override {
+			errs["coverage"] = qt.Coverage.Sentence() + " You can ask for special permission."
+		}
 	}
 
 	// Days count against the cycle the leave starts in. A request crossing
@@ -333,7 +381,10 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	if avail := qt.Balance.Available(); avail != nil {
 		after := *avail - qt.Days
 		qt.After = &after
-		if after < 0 && !opt.mandatory {
+		if after < 0 {
+			qt.Shortfall = -after
+		}
+		if after < 0 && !opt.mandatory && !opt.allowNegative {
 			errs["end"] = fmt.Sprintf("This is %d %s, but you have %d left for this cycle.",
 				qt.Days, plural(qt.Days, "day", "days"), *avail)
 		}
@@ -397,6 +448,14 @@ func plural(n int, one, many string) string {
 }
 
 // Submit validates and saves a leave request, routed to the requester's approver.
+//
+// With in.Override a request over a department limit is saved anyway, marked
+// escalate so it needs every level of approval; one that is not over the limit
+// is saved as an ordinary request, so asking for permission nobody needed
+// costs nothing. With in.Negative a request that would take the balance below
+// zero is saved awaiting HR instead, and an admin decides whether to allow it.
+// That stage does not enforce coverage: the limit is checked when the person
+// submits what HR allowed, where the override is on offer again.
 func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, error) {
 	if err := s.ensureYears(ctx, in); err != nil {
 		return Request{}, err
@@ -409,14 +468,25 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		// Re-quoted inside the transaction: the overlap and balance checks
 		// must see the same state the insert commits against.
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{})
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{
+			override: in.Override || in.Negative, allowNegative: in.Negative})
 		if err != nil {
 			return err
 		}
+		if in.Negative && qt.Shortfall > 0 {
+			return s.saveAwaitingHR(ctx, tx, u, in, qt, &out)
+		}
+		if qt.Coverage != nil && !in.Override {
+			// Negative relaxed coverage too, for a request that turned out
+			// not to need HR; it may not slip past the limit that way.
+			return FieldErrors{"coverage": qt.Coverage.Sentence() + " You can ask for special permission."}
+		}
+		escalate := in.Override && qt.Coverage != nil
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days,
-			cycle_start, note, status, approver_id, created_at) VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+			cycle_start, note, status, approver_id, escalate, created_at)
+			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
-			strings.TrimSpace(in.Note), nullID(approver), stampNow(s.Now()))
+			strings.TrimSpace(in.Note), nullID(approver), escalate, stampNow(s.Now()))
 		if err != nil {
 			return err
 		}
@@ -424,9 +494,30 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
-		return s.hook(ctx, tx, Event{Kind: EventSubmitted, Request: out, Actor: u})
+		return s.emit(ctx, tx, Event{Kind: EventSubmitted, Request: out, Actor: u})
 	})
 	return out, err
+}
+
+// saveAwaitingHR saves a request that needs HR's permission to go below zero.
+// It has no approver: the admins decide it, and it reserves nothing until
+// it comes back as a draft and is submitted.
+func (s *Service) saveAwaitingHR(ctx context.Context, tx *sql.Tx, u users.User, in Input, qt Quote, out *Request) error {
+	if strings.TrimSpace(in.Note) == "" {
+		return FieldErrors{"note": "Say why you need to go below zero, so HR can decide."}
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days,
+		cycle_start, note, status, created_at) VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'awaiting_hr', ?)`,
+		u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
+		strings.TrimSpace(in.Note), stampNow(s.Now()))
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	if *out, err = s.get(ctx, tx, id); err != nil {
+		return err
+	}
+	return s.hook(ctx, tx, Event{Kind: EventNegativeRequested, Request: *out, Actor: u, Shortfall: qt.Shortfall})
 }
 
 // nullID stores 0 as NULL.

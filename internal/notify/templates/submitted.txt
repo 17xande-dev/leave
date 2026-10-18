@@ -7,4 +7,7 @@
 {{with .Request.Note}}
 Their note: {{.}}
 {{end}}
+{{if .Request.Escalate}}
+This needs special permission.{{with .Coverage}} {{.}}{{end}} It goes up through each level, so approving it sends it on to the next person; declining ends it.
+{{end}}
 Please approve or decline it.{{end}}

@@ -12,6 +12,16 @@
     <p><strong>{{.Days}} {{units .Days .Type.Unit}}</strong>
     {{with .After}} — {{.}} left in this cycle afterwards{{end}}</p>
   {{end}}{{end}}
+  {{/* Buttons inside the swapped partial, which is inside the form: they post
+       the form's fields with override=1 or negative=1, and work after a swap. */}}
+  {{if .CanOverride}}
+  <p class="hint">Asking for special permission sends the request to every level of approval, up to the final approver, instead of just yours.</p>
+  <p><button type="submit" name="override" value="1" class="quiet">Request special permission</button></p>
+  {{end}}
+  {{if .CanNegative}}
+  <p class="hint">HR can allow this to take you below zero. Explain why in the note, then ask; you will be emailed, and then asked to submit it.</p>
+  <p><button type="submit" name="negative" value="1" class="quiet">Ask HR to allow going {{.Quote.Shortfall}} {{units .Quote.Shortfall .Quote.Type.Unit}} below zero</button></p>
+  {{end}}
 {{end}}
 </div>
 {{end}}

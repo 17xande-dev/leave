@@ -14,7 +14,8 @@ import (
 type homeData struct {
 	Balances []leave.Balance
 	Requests []leave.Request
-	// Drafts are shutdown requests waiting for the person to submit them.
+	// Drafts are requests waiting for the person to submit them: shutdown
+	// requests created for them, and ones HR allowed to go below zero.
 	Drafts []leave.Request
 }
 
@@ -54,10 +55,18 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	}
 	d := applyData{Types: types, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}}
 	// Re-rendering after a refused submit: show the day count too, so the
-	// form reads the same as it did before the button was pressed.
+	// form reads the same as it did before the button was pressed. The field
+	// errors are already beside their fields; only the coverage warning, which
+	// has no field, is shown with the preview.
 	if in.TypeID != 0 && in.Start != "" && in.End != "" {
-		if qt, err := h.leave.Preview(r.Context(), currentUser(r), in); err == nil || errors.As(err, new(leave.FieldErrors)) {
-			d.Preview = quoteData{Quote: &qt}
+		qt, err := h.leave.Preview(r.Context(), currentUser(r), in)
+		var fe leave.FieldErrors
+		if err == nil || errors.As(err, &fe) {
+			d.Preview = newQuoteData(&qt, fe)
+			d.Preview.Errors = leave.FieldErrors{}
+			if msg := fe["coverage"]; msg != "" {
+				d.Preview.Errors["coverage"] = msg
+			}
 		}
 	}
 	id, err := h.leave.ResolveApprover(r.Context(), currentUser(r))
@@ -85,7 +94,8 @@ func (h *Handler) ApplyForm(w http.ResponseWriter, r *http.Request) {
 func inputFrom(r *http.Request, get func(string) string) leave.Input {
 	id, _ := strconv.ParseInt(get("type"), 10, 64)
 	return leave.Input{TypeID: id, Start: strings.TrimSpace(get("start")),
-		End: strings.TrimSpace(get("end")), Note: get("note")}
+		End: strings.TrimSpace(get("end")), Note: get("note"),
+		Override: get("override") == "1", Negative: get("negative") == "1"}
 }
 
 // quoteData is the live preview under the apply form.
@@ -94,6 +104,29 @@ type quoteData struct {
 	Errors leave.FieldErrors
 	// Incomplete: the form is not filled in far enough to say anything yet.
 	Incomplete bool
+	// CanOverride offers special permission: the request is over a department
+	// limit and nothing else stands in its way but the balance. CanNegative
+	// offers asking HR to go below zero: the balance is the only thing wrong
+	// (a coverage limit does not matter until the request is submitted).
+	CanOverride, CanNegative bool
+}
+
+// newQuoteData reads what a refused quote leaves open to the person. Errors
+// are the quote's own; the "end" error is the balance one only when the quote
+// carries a shortfall, because every earlier "end" error returns before the
+// balance is worked out.
+func newQuoteData(qt *leave.Quote, fe leave.FieldErrors) quoteData {
+	d := quoteData{Quote: qt, Errors: fe}
+	short := fe["end"] != "" && qt.Shortfall > 0
+	other := 0
+	for k := range fe {
+		if k != "coverage" && !(k == "end" && short) {
+			other++
+		}
+	}
+	d.CanOverride = fe["coverage"] != "" && other == 0
+	d.CanNegative = short && other == 0
+	return d
 }
 
 // Quote renders the day count and balance for the dates on the apply form.
@@ -118,7 +151,7 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	// A missing note is not worth shouting about while someone is still
 	// picking dates; Apply will say so if it is still missing.
 	delete(fe, "note")
-	h.renderPartial(w, r, "quote", quoteData{Quote: &qt, Errors: fe})
+	h.renderPartial(w, r, "quote", newQuoteData(&qt, fe))
 }
 
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +171,11 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=submitted", req.ID), http.StatusSeeOther)
+	notice := "submitted"
+	if req.Status == leave.StatusAwaitingHR {
+		notice = "negative-requested"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", req.ID, notice), http.StatusSeeOther)
 }
 
 type requestData struct {
@@ -151,6 +188,15 @@ type requestData struct {
 	CanCancel           bool
 	CanDecide           bool
 	CanSubmit           bool
+	// Coverage is the department warning for a pending request needing special
+	// permission, as it stands now. Next names who it goes to if the viewer
+	// approves it; empty when their approval is the last.
+	Coverage *leave.Coverage
+	Next     string
+	// Steps is the trail of decisions on the request.
+	Steps []leave.Step
+	// Shortfall is how far below zero a request awaiting HR would go.
+	Shortfall int
 	// Candidates is who an admin may reassign a pending request to.
 	Candidates []users.User
 	Errors     leave.FieldErrors
@@ -181,7 +227,7 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 	u := currentUser(r)
 	d := requestData{
 		Request:     req,
-		CanWithdraw: req.UserID == u.ID && req.Status == leave.StatusPending,
+		CanWithdraw: leave.CanWithdraw(u, req),
 		CanCancel:   h.leave.CanRequestCancellation(u, req),
 		CanDecide:   leave.CanDecide(u, req),
 		CanSubmit:   req.UserID == u.ID && req.Status == leave.StatusDraft,
@@ -195,6 +241,29 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 			if c.ID != req.UserID {
 				d.Candidates = append(d.Candidates, c)
 			}
+		}
+	}
+	var err error
+	if d.Steps, err = h.leave.Steps(r.Context(), req.ID); err != nil {
+		return d, err
+	}
+	if req.Escalate && req.Status == leave.StatusPending {
+		if d.Coverage, err = h.leave.CoverageFor(r.Context(), req); err != nil {
+			return d, err
+		}
+		if d.CanDecide {
+			next, ok, err := h.leave.NextApprover(r.Context(), u, req)
+			if err != nil {
+				return d, err
+			}
+			if ok {
+				d.Next = next.Name
+			}
+		}
+	}
+	if req.Status == leave.StatusAwaitingHR {
+		if d.Shortfall, err = h.leave.Shortfall(r.Context(), req); err != nil {
+			return d, err
 		}
 	}
 	if req.IsCancellation() {
@@ -274,14 +343,17 @@ func (h *Handler) RequestCancellation(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=cancel-requested", c.ID), http.StatusSeeOther)
 }
 
-// SubmitDraft submits a shutdown request someone was given pre-filled.
+// SubmitDraft submits a draft: a shutdown request someone was given
+// pre-filled, or one HR allowed to go below zero. override asks for special
+// permission when the second kind is over a coverage limit.
 func (h *Handler) SubmitDraft(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.loadRequest(w, r)
 	if !ok {
 		return
 	}
 	note := r.PostFormValue("note")
-	out, err := h.leave.SubmitDraft(r.Context(), currentUser(r), req.ID, note)
+	out, err := h.leave.SubmitDraftOverride(r.Context(), currentUser(r), req.ID, note,
+		r.PostFormValue("override") == "1")
 	var fe leave.FieldErrors
 	switch {
 	case errors.As(err, &fe):
@@ -327,7 +399,7 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note := r.PostFormValue("note")
-	_, err := h.leave.Decide(r.Context(), currentUser(r), req.ID, approve, note)
+	decided, err := h.leave.Decide(r.Context(), currentUser(r), req.ID, approve, note)
 	var fe leave.FieldErrors
 	switch {
 	case errors.As(err, &fe):
@@ -349,6 +421,9 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 	notice := "declined"
 	if approve {
 		notice = "approved"
+		if decided.Status == leave.StatusPending {
+			notice = "escalated" // moved up a level rather than finished
+		}
 	}
 	// Back to the queue if that is where the decision was made from.
 	if r.PostFormValue("from") == "queue" {
@@ -358,17 +433,46 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", req.ID, notice), http.StatusSeeOther)
 }
 
+// queueRow is a request in the approvals queue with what an approver needs to
+// weigh it: for one needing special permission, the coverage warning as it
+// stands now, and who it would go to next.
+type queueRow struct {
+	leave.Request
+	Coverage *leave.Coverage
+	Next     string
+}
+
 type queueData struct {
-	Queue []leave.Request
+	Queue []queueRow
 }
 
 func (h *Handler) Approvals(w http.ResponseWriter, r *http.Request) {
-	q, err := h.leave.Queue(r.Context(), currentUser(r))
+	u := currentUser(r)
+	q, err := h.leave.Queue(r.Context(), u)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "approvals.html", view{Title: "Approvals", Data: queueData{Queue: q}})
+	rows := make([]queueRow, 0, len(q))
+	for _, req := range q {
+		row := queueRow{Request: req}
+		if req.Escalate {
+			if row.Coverage, err = h.leave.CoverageFor(r.Context(), req); err != nil {
+				h.serverError(w, r, err)
+				return
+			}
+			next, ok, err := h.leave.NextApprover(r.Context(), u, req)
+			if err != nil {
+				h.serverError(w, r, err)
+				return
+			}
+			if ok {
+				row.Next = next.Name
+			}
+		}
+		rows = append(rows, row)
+	}
+	h.render(w, r, http.StatusOK, "approvals.html", view{Title: "Approvals", Data: queueData{Queue: rows}})
 }
 
 func (h *Handler) Team(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +487,7 @@ func (h *Handler) Team(w http.ResponseWriter, r *http.Request) {
 // statusClass maps a status to its badge style.
 func statusClass(s string) string {
 	switch s {
-	case leave.StatusPending, leave.StatusDraft:
+	case leave.StatusPending, leave.StatusDraft, leave.StatusAwaitingHR:
 		return "pending"
 	case leave.StatusApproved:
 		return "done"
@@ -391,4 +495,11 @@ func statusClass(s string) string {
 		return "problem"
 	}
 	return ""
+}
+
+func statusLabel(s string) string {
+	if s == leave.StatusAwaitingHR {
+		return "awaiting HR"
+	}
+	return s
 }
