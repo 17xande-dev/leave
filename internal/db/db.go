@@ -77,15 +77,15 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	-- NULL means unlimited (unpaid leave): there is no balance to exhaust.
 	allowance_days  INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
 	cycle_months    INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
-	-- workdays counts the organisation's working days (WORK_DAYS) that are
+	-- workdays counts the organisation's working days (Admin -> Settings) that are
 	-- not public holidays; calendar counts every day (maternity leave is four
 	-- consecutive months, holidays included); weekend counts one per weekend
 	-- off, which runs Saturday to Sunday, or Friday to Sunday for someone on
 	-- long weekends.
 	unit            TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar', 'weekend')),
-	-- What this type may do with the restricted day (RESTRICTED_DAY, e.g.
+	-- What this type may do with the restricted day (the restricted day in Settings, e.g.
 	-- Sunday): any -- no rule; min -- only inside a request of at least
-	-- RESTRICTED_MIN_DAYS working days; never -- not at all.
+	-- the settings minimum of working days; never -- not at all.
 	restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
 	-- Sick leave is applied for after the fact; nothing else may start in the past.
 	backdate        INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
@@ -105,6 +105,24 @@ CREATE TABLE IF NOT EXISTS coverage_rules (
 	department   TEXT PRIMARY KEY,
 	max_percent  INTEGER NOT NULL CHECK (max_percent BETWEEN 1 AND 100)
 ) STRICT;
+
+-- Policy an admin changes without a deploy: one typed row (id is always 1), not
+-- key/value, so STRICT and the CHECKs guard every field. work_days is a
+-- comma-separated list of day codes; the Go side validates the list, since
+-- SQLite cannot CHECK a set. No final approver means the chain's last step is
+-- skipped and the admins take whoever has no manager.
+CREATE TABLE IF NOT EXISTS settings (
+	id                    INTEGER PRIMARY KEY CHECK (id = 1),
+	work_days             TEXT NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
+	restricted_day        TEXT NOT NULL DEFAULT '' CHECK (restricted_day IN ('', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat')),
+	restricted_min_days   INTEGER NOT NULL DEFAULT 3 CHECK (restricted_min_days BETWEEN 1 AND 31),
+	final_approver_id     INTEGER REFERENCES users(id),
+	sick_backdate_days    INTEGER NOT NULL DEFAULT 14 CHECK (sick_backdate_days BETWEEN 0 AND 365),
+	sick_cycle_start_year INTEGER NOT NULL DEFAULT 2025 CHECK (sick_cycle_start_year BETWEEN 2000 AND 2100),
+	updated_by_id         INTEGER REFERENCES users(id),
+	updated_at            TEXT NOT NULL DEFAULT ''
+) STRICT;
+INSERT INTO settings (id) VALUES (1) ON CONFLICT(id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS balance_adjustments (
 	id           INTEGER PRIMARY KEY,
@@ -320,7 +338,7 @@ func checkCurrent(d *sql.DB) error {
 	}
 	// A new table is invisible to the column check above: with requests
 	// already there, a missing one means an older build made the database.
-	for _, table := range []string{"coverage_rules", "request_steps"} {
+	for _, table := range []string{"coverage_rules", "request_steps", "settings"} {
 		var n int
 		if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
 			return err

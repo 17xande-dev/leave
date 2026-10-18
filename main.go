@@ -51,9 +51,7 @@ func run() error {
 	userStore := users.NewStore(database)
 	sessions := auth.NewSessions(database, cfg.SessionTTL)
 	leaveSvc := leave.New(database, userStore, leave.Config{
-		Location: cfg.Location, FinalApprover: cfg.FinalApprover,
-		SickCycleAnchor: cfg.SickCycleStartYear, SickBackdateDays: cfg.SickBackdateDays,
-		Week: leave.WeekOf(cfg.WorkDays...), RestrictedDay: cfg.RestrictedDay, RestrictedMinDays: cfg.RestrictedMinDays,
+		Location: cfg.Location,
 	})
 	if err := leaveSvc.SeedTypes(context.Background()); err != nil {
 		return err

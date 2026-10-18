@@ -9,7 +9,7 @@ PLATFORM ?= linux/amd64
 # Local development: the fake directory (any password), plain http, and mail
 # captured by mailpit. None of this is valid for a deployment -- config refuses
 # DIRECTORY=fake with secure cookies.
-DEV_ENV = DIRECTORY=fake COOKIE_SECURE=false FINAL_APPROVER=pastor \
+DEV_ENV = DIRECTORY=fake COOKIE_SECURE=false \
 	LISTEN_ADDR=:8082 BASE_URL=http://localhost:8082 DB_PATH=data/leave.db
 
 .PHONY: run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit

@@ -1,0 +1,66 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Settings</h1>
+<p class="muted">Rules that apply the moment they are saved, to every quote and approval from then on. Leave already requested keeps the days it was costed at.</p>
+{{with .Data}}
+<form method="post" action="/admin/settings">
+  {{template "csrf" $.CSRF}}
+  <fieldset class="field">
+    <legend>Working days</legend>
+    <div class="checks">
+    {{range $.Data.Days}}
+      <label><input type="checkbox" name="day" value="{{.Code}}"{{if index $.Data.Form.Days .Code}} checked{{end}}> {{.Name}}</label>
+    {{end}}
+    </div>
+    <span class="hint">Leave costs only these days, and not public holidays. A day that is not ticked is free, so a Monday off with Tuesday to Sunday ticked costs nothing.</span>
+    {{template "err" index .Errors "days"}}
+  </fieldset>
+  <div class="field-row">
+    <div class="field">
+      <label for="restricted_day">Restricted day</label>
+      <select id="restricted_day" name="restricted_day">
+        <option value="">None</option>
+      {{range .Days}}
+        <option value="{{.Code}}"{{if eq .Code $.Data.Form.RestrictedDay}} selected{{end}}>{{.Name}}</option>
+      {{end}}
+      </select>
+      <span class="hint">A working day nobody can take off by itself. It must be one of the working days.</span>
+      {{template "err" index .Errors "restricted_day"}}
+    </div>
+    <div class="field narrow">
+      <label for="restricted_min">Minimum days</label>
+      <input id="restricted_min" name="restricted_min" inputmode="numeric" size="4" value="{{.Form.RestrictedMin}}" required>
+      <span class="hint">Leave that includes the restricted day must cover at least this many working days. 1 to 31.</span>
+      {{template "err" index .Errors "restricted_min"}}
+    </div>
+  </div>
+  <div class="field">
+    <label for="final_approver">Final approver</label>
+    <select id="final_approver" name="final_approver">
+      <option value="">None (admins' queue)</option>
+    {{range .Candidates}}
+      <option value="{{.ID}}"{{if eq .ID $.Data.Form.FinalApprover}} selected{{end}}>{{.Name}} ({{.Username}}){{if .Disabled}} - disabled{{end}}</option>
+    {{end}}
+    </select>
+    <span class="hint">Approves for anyone with no usable manager in the directory, and gives the last approval on a request needing special permission. Their own leave goes to the admins. With none, everyone with no manager goes to the admins.</span>
+    {{template "err" index .Errors "final_approver"}}
+  </div>
+  <div class="field-row">
+    <div class="field narrow">
+      <label for="sick_backdate">Sick leave backdating (days)</label>
+      <input id="sick_backdate" name="sick_backdate" inputmode="numeric" size="4" value="{{.Form.SickBackdate}}" required>
+      <span class="hint">How far back sick leave may start. 0 to 365.</span>
+      {{template "err" index .Errors "sick_backdate"}}
+    </div>
+    <div class="field narrow">
+      <label for="sick_cycle">Sick-cycle start year</label>
+      <input id="sick_cycle" name="sick_cycle" inputmode="numeric" size="6" value="{{.Form.SickCycle}}" required>
+      <span class="hint">The year the 36-month sick-leave cycle counts from. 2000 to 2100.</span>
+      {{template "err" index .Errors "sick_cycle"}}
+    </div>
+  </div>
+  <div class="actions"><button type="submit">Save</button></div>
+</form>
+{{if .UpdatedAt}}<p class="muted">Last changed by {{.UpdatedBy}} at {{.UpdatedAt}} (UTC).</p>{{else}}<p class="muted">Not changed since the defaults were created.</p>{{end}}
+{{end}}
+{{end}}

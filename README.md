@@ -17,8 +17,9 @@ Microsoft 365 calendar.
 
 1. an admin's override for that person;
 2. their `manager` in AD (a department head's manager is the senior person above them);
-3. `FINAL_APPROVER`, for anyone with no usable manager;
-4. the admins, where `FINAL_APPROVER`'s own leave goes.
+3. the **final approver** (set on **Admin → Settings**), for anyone with no usable manager;
+4. the admins, where the final approver's own leave goes, and everyone's who has no
+   manager while no final approver is set (or theirs is disabled).
 
 A disabled account or yourself is always skipped. The approver is frozen on the
 request, so a directory change afterwards cannot strand it. An admin can reassign it.
@@ -38,14 +39,16 @@ request, so a directory change afterwards cannot strand it. An admin can reassig
 | Company closure | no limit; used only by shutdowns |
 
 Pending days are reserved, so the same days can't be requested twice. Leave costs only
-**working days** (`WORK_DAYS`, Mon–Fri by default) that aren't SA public holidays. With
-`WORK_DAYS=tue,wed,thu,fri,sun`, for example, a Monday is free and a Sunday costs a day. The holidays are computed from the Public Holidays Act,
+**working days** (Mon–Fri by default, set on **Admin → Settings**) that aren't SA public
+holidays. With Tuesday to Friday and Sunday ticked, for example, a Monday is free and a
+Sunday costs a day. The holidays are computed from the Public Holidays Act,
 including the Sunday-to-Monday rule. Admins add proclaimed days, such as election days,
 by hand. Days count against the cycle the leave starts in.
 
-**The restricted day.** `RESTRICTED_DAY` (e.g. `sun`) is a working day nobody can
-take off by itself. Leave that includes it must cover at least `RESTRICTED_MIN_DAYS`
-working days (3 by default), counting that day. Each leave type sets its own rule on
+**The restricted day.** The restricted day (e.g. Sunday, chosen on **Admin → Settings**,
+none by default) is a working day nobody can take off by itself. Leave that includes it
+must cover at least the minimum number of working days (3 by default), counting that day.
+Each leave type sets its own rule on
 **Admin → Leave types**:
 - annual and unpaid leave: only within longer leave;
 - sick, family, maternity and parental leave: no rule, since none of them can be planned;
@@ -65,9 +68,34 @@ straight away if the shutdown says so. The days are mandatory, so they may take 
 below zero, and they can't be withdrawn or cancelled. "Create requests for anyone
 missing" covers new starters, and a shutdown can be deleted until someone submits.
 
+**Coverage limits** (**Admin → Coverage limits**) cap how many people of one department
+may be away on a single day, as a percentage of the department, with a default for
+departments that have no limit of their own. The first person away is always allowed.
+A request over the limit is refused unless the person asks for **special permission**.
+It is then approved level by level, each approver passing it to their own approver, up
+to the final approver, and the request page shows the trail. Approvers see the warning as
+the department stands now. Only leave types marked as blockable are refused; the others
+still count as being away.
+
+**Negative leave.** Someone whose request would take a balance below zero can ask HR
+for permission instead of being refused, and must say why. The request waits on
+**Admin → Permissions** and reserves nothing. An admin grants or refuses it with a
+note, and the person is emailed. A granted request comes back as a draft for them to
+submit, and the usual rules (including the coverage limit) apply again then.
+
 **Cancelling approved leave** is itself a request, approved by the same chain. The
 leave stays booked until the cancellation is approved. Pending requests can simply be
 withdrawn.
+
+**Settings** (**Admin → Settings**) hold the policy an admin may change without a
+deploy, and each change applies to the next request: the working days, the restricted
+day and its minimum, the final approver, how far back sick leave may start, and the year
+the 36-month sick cycle counts from. They live in the database; the environment keeps
+only wiring and secrets.
+
+**The admin area** has: All requests (with a CSV export), People (approver overrides,
+balance adjustments, long weekends), Leave types, Public holidays, Shutdowns, Coverage
+limits, Permissions, Settings and Outbox.
 
 **Email and calendar** go through an outbox. Each is a database row written in the
 same transaction as the change that causes it. A background worker then sends it,
@@ -85,7 +113,7 @@ make check               # gofmt + vet + every test, uncached
 make recreate-db         # drop the local database (after a schema change)
 ```
 
-The fake directory is `testdata/directory.json`: `pastor` (the final approver),
+The fake directory is `testdata/directory.json`: `pastor` (set as the final approver on **Admin → Settings**, which starts with none),
 `headops` and `headkids` (department heads), `staff1`, `staff2`, and `hr` (an admin). Any
 non-empty password works. The config refuses `DIRECTORY=fake` unless
 `COOKIE_SECURE=false`, so it cannot reach a real deployment. Without Graph configured,
@@ -166,9 +194,10 @@ The container listens on 8080, published on 127.0.0.1:8082 (HOST_PORT) behind th
 | Open question | Current behaviour | What would decide it |
 |---|---|---|
 | **Entra ID sign-in (OIDC)** | LDAP only | Confirm AD syncs to Entra (Entra Connect). `directory.Directory` is the seam, and `objectGUID` = `onPremisesImmutableId` keeps everyone's history |
-| Leave cycles per employee start date | Calendar year (sick: 36 months from `SICK_CYCLE_START_YEAR`) | HR needing BCEA cycles from each start date; AD would need a start-date attribute |
+| Leave cycles per employee start date | Calendar year (sick: 36 months from the start year in Settings) | HR needing BCEA cycles from each start date; AD would need a start-date attribute |
 | Accrual (1.25 days/month) vs. full allowance up front | Up front | HR policy |
 | Cancelling leave that has already started | Not possible in-app; an admin adjusts the balance | How often it happens |
+| Work patterns per person | One working week for everyone; a part-timer's non-working days are charged | Part-time staff or a second pattern, which would need a per-person week |
 | Delegating approvals while an approver is on leave | An admin reassigns | Heads asking for it |
 | Half days | Not supported (by decision) | Revisit on request |
 | Sign-in timing | An unknown username answers slightly faster than a wrong password (no DC bind), which reveals whether a username exists | Usernames are not secret inside the organisation; revisit if that changes |

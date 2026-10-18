@@ -106,7 +106,7 @@ func (c Coverage) Sentence() string {
 // type is never refused, though it still counts for everyone else's checks).
 // excludeID is a request of u's own to leave out, so a draft or pending
 // request being re-evaluated does not collide with itself.
-func (s *Service) coverage(ctx context.Context, q querier, u users.User, t Type, start, end time.Time,
+func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.User, t Type, start, end time.Time,
 	holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
 	if t.CoverageRule != CoverageLimit || u.Department == "" {
 		return nil, nil
@@ -161,7 +161,7 @@ func (s *Service) coverage(ctx context.Context, q querier, u users.User, t Type,
 	// every day counts; otherwise only days someone would actually be missed.
 	worst, worstDay := -1, ""
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if t.Unit != UnitWeekend && !s.cfg.Week.Working(d, holidays) {
+		if t.Unit != UnitWeekend && !week.Working(d, holidays) {
 			continue
 		}
 		ds := fmtDate(d)
@@ -213,5 +213,9 @@ func (s *Service) coverageFor(ctx context.Context, q querier, r Request) (*Cover
 	if err != nil {
 		return nil, err
 	}
-	return s.coverage(ctx, q, u, t, start, end, holidays, r.ID)
+	st, err := s.settings(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return s.coverage(ctx, q, st.Week, u, t, start, end, holidays, r.ID)
 }

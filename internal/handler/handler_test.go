@@ -40,12 +40,24 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	us := users.NewStore(d)
-	svc := leave.New(d, us, leave.Config{Location: time.UTC, FinalApprover: "pastor", SickCycleAnchor: 2025, SickBackdateDays: 14})
+	svc := leave.New(d, us, leave.Config{Location: time.UTC})
 	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
 	if err := svc.SeedTypes(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := us.Sync(context.Background(), mustAll(t, dir)); err != nil {
+		t.Fatal(err)
+	}
+	// The pastor is the final approver, as in the directory fixture's chain;
+	// hr is the admin who saves it.
+	pastor, _ := us.ByUsername(context.Background(), "pastor")
+	hr, _ := us.ByUsername(context.Background(), "hr")
+	st, err := svc.Settings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.FinalApproverID = pastor.ID
+	if err := svc.SaveSettings(context.Background(), hr, st); err != nil {
 		t.Fatal(err)
 	}
 	h, err := New(Config{SessionTTL: time.Hour}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir, Leave: svc, Outbox: outbox.NewStore(d)})

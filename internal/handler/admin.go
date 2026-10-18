@@ -46,6 +46,8 @@ func (h *Handler) adminRoutes() []route {
 		a("POST /admin/permissions/{id}/refuse", h.AdminRefuseNegative),
 		a("GET /admin/coverage", h.AdminCoverage),
 		a("POST /admin/coverage", h.AdminSaveCoverage),
+		a("GET /admin/settings", h.AdminSettings),
+		a("POST /admin/settings", h.AdminSaveSettings),
 		a("GET /admin/outbox", h.AdminOutbox),
 		a("POST /admin/outbox/{id}/retry", h.AdminRetry),
 	}

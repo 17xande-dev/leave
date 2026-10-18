@@ -9,18 +9,10 @@ import (
 	"github.com/17xande-dev/leave/internal/users"
 )
 
+// Config is what is fixed at deployment. Everything an admin may change as
+// policy lives in Settings, in the database.
 type Config struct {
 	Location *time.Location
-	// FinalApprover is the username that approves for anyone with no usable
-	// manager in the directory.
-	FinalApprover    string
-	SickCycleAnchor  int
-	SickBackdateDays int
-	// Week is the working week; zero means Monday to Friday.
-	Week Week
-	// RestrictedDay, when set, cannot be taken off on its own: see quote.
-	RestrictedDay     *time.Weekday
-	RestrictedMinDays int
 }
 
 // Service is the leave domain. Every state change runs in one transaction that
@@ -42,9 +34,6 @@ type Service struct {
 func New(db *sql.DB, us *users.Store, cfg Config) *Service {
 	if cfg.Location == nil {
 		cfg.Location = time.UTC
-	}
-	if cfg.Week == (Week{}) {
-		cfg.Week = MonFri
 	}
 	return &Service{db: db, users: us, cfg: cfg, Now: time.Now,
 		hook:      func(context.Context, *sql.Tx, Event) error { return nil },

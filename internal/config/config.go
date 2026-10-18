@@ -6,12 +6,14 @@ package config
 import (
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// Config is deployment wiring and secrets only. Policy an admin would change
+// (the working week, the final approver, sick-leave rules) lives in the
+// database and is edited on Admin -> Settings.
 type Config struct {
 	ListenAddr string
 	DBPath     string
@@ -41,28 +43,6 @@ type Config struct {
 	// configured. It is a development convenience, not a production transport:
 	// no authentication, and TLS off by default.
 	DevSMTP DevSMTP
-
-	// FinalApprover is the username whose approval ends the chain: whoever has
-	// no manager in the directory (or manages themselves) is routed here.
-	FinalApprover string
-
-	// SickBackdateDays is how far into the past a sick-leave request may start.
-	// Sick leave is usually applied for after the fact; every other type must
-	// start today or later.
-	SickBackdateDays int
-
-	// SickCycleStartYear anchors the BCEA 36-month sick-leave cycle.
-	SickCycleStartYear int
-
-	// WorkDays are the days of the week people normally work. Leave costs
-	// only these; the others (and public holidays) are free.
-	WorkDays []time.Weekday
-	// RestrictedDay, when set, is a working day that cannot be taken off on
-	// its own: leave including it must cover at least RestrictedMinDays
-	// working days, unless the leave type says otherwise (a weekend off
-	// always may; floating holidays never may).
-	RestrictedDay     *time.Weekday
-	RestrictedMinDays int
 }
 
 // Directory selects and configures where users come from.
@@ -121,7 +101,6 @@ func Load() (Config, error) {
 		BaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/"),
 		CookieSecure:   getenv("COOKIE_SECURE", "true") == "true",
 		TrustedProxies: parseList(os.Getenv("TRUSTED_PROXIES")),
-		FinalApprover:  strings.TrimSpace(os.Getenv("FINAL_APPROVER")),
 		Directory: Directory{
 			Kind:               getenv("DIRECTORY", "ldap"),
 			FakeFile:           getenv("FAKE_DIRECTORY_FILE", "testdata/directory.json"),
@@ -149,28 +128,6 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	if c.Directory.SyncInterval, err = duration("DIRECTORY_SYNC_INTERVAL", time.Hour); err != nil {
-		return Config{}, err
-	}
-	if c.SickBackdateDays, err = integer("SICK_BACKDATE_DAYS", 14); err != nil {
-		return Config{}, err
-	}
-	if c.SickCycleStartYear, err = integer("SICK_CYCLE_START_YEAR", 2025); err != nil {
-		return Config{}, err
-	}
-	if c.WorkDays, err = weekdays(getenv("WORK_DAYS", "mon,tue,wed,thu,fri")); err != nil || len(c.WorkDays) == 0 {
-		return Config{}, fmt.Errorf("config: WORK_DAYS must list days like mon,tue,wed: %v", err)
-	}
-	if v := strings.TrimSpace(os.Getenv("RESTRICTED_DAY")); v != "" {
-		ds, err := weekdays(v)
-		if err != nil || len(ds) != 1 {
-			return Config{}, fmt.Errorf("config: RESTRICTED_DAY must be one day, like sun")
-		}
-		if !slices.Contains(c.WorkDays, ds[0]) {
-			return Config{}, fmt.Errorf("config: RESTRICTED_DAY %s is not in WORK_DAYS, so it is never taken off anyway", ds[0])
-		}
-		c.RestrictedDay = &ds[0]
-	}
-	if c.RestrictedMinDays, err = integer("RESTRICTED_MIN_DAYS", 3); err != nil {
 		return Config{}, err
 	}
 	if c.Location, err = time.LoadLocation(getenv("TZ_NAME", "Africa/Johannesburg")); err != nil {
@@ -215,28 +172,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	if c.FinalApprover == "" {
-		return Config{}, fmt.Errorf("config: FINAL_APPROVER is required: it is the username " +
-			"that approves leave for anyone with no manager in the directory")
-	}
 	return c, nil
-}
-
-var dayNames = map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday,
-	"wed": time.Wednesday, "thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday}
-
-func weekdays(list string) ([]time.Weekday, error) {
-	var out []time.Weekday
-	for _, p := range parseList(strings.ToLower(list)) {
-		d, ok := dayNames[p[:min(3, len(p))]]
-		if !ok {
-			return nil, fmt.Errorf("unknown day %q", p)
-		}
-		if !slices.Contains(out, d) {
-			out = append(out, d)
-		}
-	}
-	return out, nil
 }
 
 func getenv(key, fallback string) string {

@@ -15,9 +15,10 @@ import (
 //  1. an admin's override for u;
 //  2. u's manager in the directory (a department head's manager is the senior
 //     person above them, so heads need nothing special);
-//  3. FINAL_APPROVER, for anyone with no usable manager;
-//  4. the admins -- where FINAL_APPROVER's own leave goes, since nobody is
-//     above them.
+//  3. the final approver (Admin -> Settings), for anyone with no usable
+//     manager;
+//  4. the admins -- where the final approver's own leave goes, since nobody
+//     is above them, and everyone's when none is set or they are disabled.
 //
 // A candidate is skipped if disabled or if it is u: nobody approves their own
 // leave, whatever the directory says.
@@ -32,8 +33,12 @@ func (s *Service) ResolveApprover(ctx context.Context, u users.User) (int64, err
 		return !c.Disabled && c.ID != u.ID, nil
 	}
 
+	st, err := s.settings(ctx, s.db)
+	if err != nil {
+		return 0, err
+	}
 	var overrideID int64
-	err := s.db.QueryRowContext(ctx, `SELECT approver_id FROM approver_overrides WHERE user_id = ?`, u.ID).Scan(&overrideID)
+	err = s.db.QueryRowContext(ctx, `SELECT approver_id FROM approver_overrides WHERE user_id = ?`, u.ID).Scan(&overrideID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
@@ -49,8 +54,8 @@ func (s *Service) ResolveApprover(ctx context.Context, u users.User) (int64, err
 			return c.ID, err
 		}
 	}
-	if s.cfg.FinalApprover != "" {
-		c, err := s.users.ByUsername(ctx, s.cfg.FinalApprover)
+	if st.FinalApproverID != 0 {
+		c, err := s.users.ByID(ctx, st.FinalApproverID)
 		if ok, err := usable(c, err); err != nil || ok {
 			return c.ID, err
 		}
@@ -267,7 +272,11 @@ func (s *Service) Decide(ctx context.Context, actor users.User, id int64, approv
 // when nobody sits above actor, when that person is the requester, and when
 // they have already been through this request -- so it cannot loop.
 func (s *Service) escalationNext(ctx context.Context, q querier, r Request, actor users.User) (int64, error) {
-	if r.ApproverID == 0 || (s.cfg.FinalApprover != "" && strings.EqualFold(actor.Username, s.cfg.FinalApprover)) {
+	st, err := s.settings(ctx, q)
+	if err != nil {
+		return 0, err
+	}
+	if r.ApproverID == 0 || (st.FinalApproverID != 0 && actor.ID == st.FinalApproverID) {
 		return 0, nil
 	}
 	next, err := s.ResolveApprover(ctx, actor)

@@ -116,6 +116,10 @@ func (s *Service) CreateShutdown(ctx context.Context, admin users.User, in Shutd
 	if len(errs) > 0 {
 		return 0, errs
 	}
+	st, err := s.settings(ctx, s.db)
+	if err != nil {
+		return 0, err
+	}
 	for _, p := range parts {
 		for y := p.start.Year(); y <= p.end.Year(); y++ {
 			if err := s.EnsureHolidays(ctx, y); err != nil {
@@ -126,14 +130,14 @@ func (s *Service) CreateShutdown(ctx context.Context, admin users.User, in Shutd
 		if err != nil {
 			return 0, err
 		}
-		if CountDays(p.start, p.end, p.t.Unit, hol, s.cfg.Week) == 0 {
+		if CountDays(p.start, p.end, p.t.Unit, hol, st.Week) == 0 {
 			return 0, FieldErrors{"part0": fmt.Sprintf("%s – %s is all days off or public holidays.",
 				fmtDate(p.start), fmtDate(p.end))}
 		}
 	}
 
 	var id int64
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO shutdowns (name, auto_approve, created_by_id, created_at)
 			VALUES (?, ?, ?, ?)`, in.Name, in.AutoApprove, admin.ID, stampNow(s.Now()))
 		if err != nil {
@@ -170,6 +174,10 @@ func (s *Service) GenerateDrafts(ctx context.Context, shutdownID int64) (int, er
 	}
 	created := 0
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
+		st, err := s.settings(ctx, tx)
+		if err != nil {
+			return err
+		}
 		for _, u := range people {
 			var first *Request
 			for _, p := range sd.Parts {
@@ -187,7 +195,7 @@ func (s *Service) GenerateDrafts(ctx context.Context, shutdownID int64) (int, er
 					WHERE NOT EXISTS (SELECT 1 FROM requests WHERE shutdown_part_id = ? AND user_id = ?
 						AND status IN ('draft', 'pending', 'approved'))`,
 					u.ID, p.TypeID, p.Start, p.End, p.Days,
-					fmtDate(CycleStart(start, t.CycleMonths, s.cfg.SickCycleAnchor)), p.ID, stampNow(s.Now()),
+					fmtDate(CycleStart(start, t.CycleMonths, st.SickCycleAnchor)), p.ID, stampNow(s.Now()),
 					p.ID, u.ID)
 				if err != nil {
 					return err
@@ -266,6 +274,10 @@ func (s *Service) shutdowns(ctx context.Context, where string, args ...any) ([]S
 	}
 	// Day counts are computed rather than stored, so a holiday added after
 	// the shutdown was made is reflected everywhere, the submit included.
+	st, err := s.settings(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	i := 0
 	for si := range out {
 		for pi := range out[si].Parts {
@@ -276,7 +288,7 @@ func (s *Service) shutdowns(ctx context.Context, where string, args ...any) ([]S
 			if err != nil {
 				return nil, err
 			}
-			p.Days = CountDays(start, end, units[i], hol, s.cfg.Week)
+			p.Days = CountDays(start, end, units[i], hol, st.Week)
 			i++
 		}
 	}

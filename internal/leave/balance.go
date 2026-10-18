@@ -45,10 +45,14 @@ func (s *Service) Balances(ctx context.Context, userID int64) ([]Balance, error)
 	if err != nil {
 		return nil, err
 	}
+	st, err := s.settings(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
 	today := s.today()
 	out := make([]Balance, 0, len(types))
 	for _, t := range types {
-		b, err := s.balance(ctx, s.db, userID, t, CycleStart(today, t.CycleMonths, s.cfg.SickCycleAnchor))
+		b, err := s.balance(ctx, s.db, userID, t, CycleStart(today, t.CycleMonths, st.SickCycleAnchor))
 		if err != nil {
 			return nil, err
 		}
@@ -77,10 +81,14 @@ func (s *Service) AddAdjustment(ctx context.Context, by int64, a Adjustment) err
 	if err != nil {
 		errs["type"] = "Choose a leave type."
 	}
+	st, serr := s.settings(ctx, s.db)
+	if serr != nil {
+		return serr
+	}
 	cycle, derr := ParseDate(a.CycleStart)
 	if derr != nil {
 		errs["cycle"] = "Choose a cycle."
-	} else if err == nil && !CycleStart(cycle, t.CycleMonths, s.cfg.SickCycleAnchor).Equal(cycle) {
+	} else if err == nil && !CycleStart(cycle, t.CycleMonths, st.SickCycleAnchor).Equal(cycle) {
 		errs["cycle"] = "That is not the start of a cycle for this leave type."
 	}
 	if a.Days == 0 {

@@ -26,7 +26,7 @@ type fixture struct {
 
 // The org chart the tests run against:
 //
-//	pastor (FINAL_APPROVER)
+//	pastor (the final approver, set in newFixture)
 //	├── head (department head)
 //	│   ├── staff
 //	│   └── hr (admin)
@@ -37,7 +37,7 @@ func newFixture(t *testing.T) *fixture {
 	d := dbtest.New(t)
 	us := users.NewStore(d)
 	jhb, _ := time.LoadLocation("Africa/Johannesburg")
-	svc := New(d, us, Config{Location: jhb, FinalApprover: "pastor", SickCycleAnchor: 2025, SickBackdateDays: 14})
+	svc := New(d, us, Config{Location: jhb})
 	// Pinned to Monday 5 October 2026, 10:00 in Johannesburg.
 	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
 	f := &fixture{t: t, ctx: ctx, db: d, svc: svc, us: us, people: map[string]users.User{}, types: map[string]Type{}}
@@ -66,6 +66,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 		f.people[p.name] = u
 	}
+	f.setSettings(func(st *Settings) { st.FinalApproverID = f.people["pastor"].ID })
 	if err := svc.SeedTypes(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +75,21 @@ func newFixture(t *testing.T) *fixture {
 		f.types[ty.Code] = ty
 	}
 	return f
+}
+
+// setSettings changes the settings the way an admin would, through
+// SaveSettings, so the tests exercise the same validation and the same row the
+// pages do.
+func (f *fixture) setSettings(change func(*Settings)) {
+	f.t.Helper()
+	st, err := f.svc.Settings(f.ctx)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	change(&st)
+	if err := f.svc.SaveSettings(f.ctx, f.people["hr"], st); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func (f *fixture) submit(who, code, start, end string) (Request, error) {

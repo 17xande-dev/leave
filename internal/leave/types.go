@@ -17,10 +17,10 @@ const (
 	UnitWeekend = "weekend"
 )
 
-// What a type may do with the restricted day (RESTRICTED_DAY, e.g. Sunday).
+// What a type may do with the restricted day (the restricted day in Settings, e.g. Sunday).
 const (
 	RestrictAny   = "any"   // no rule: sick leave cannot be planned around it
-	RestrictMin   = "min"   // only inside a request of at least RESTRICTED_MIN_DAYS working days
+	RestrictMin   = "min"   // only inside a request of at least the settings minimum of working days
 	RestrictNever = "never" // not at all: floating holidays are not for the restricted day
 )
 

@@ -192,12 +192,12 @@ func TestCoverageSkipsDaysOffAndHolidays(t *testing.T) {
 	// A weekend off is taken on days the working week skips, so there every day counts.
 	f.insertAway("hr", "weekend", "2026-10-17", "2026-10-18", "pending")
 	staff := f.people["staff"]
-	c, err := f.svc.coverage(f.ctx, f.db, staff, f.types["weekend"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
+	c, err := f.svc.coverage(f.ctx, f.db, MonFri, staff, f.types["weekend"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
 	if err != nil || c == nil || c.Day != "2026-10-17" {
 		t.Fatalf("weekend coverage = %+v, %v", c, err)
 	}
 	// The same days under a working-day type check nothing.
-	c, err = f.svc.coverage(f.ctx, f.db, staff, f.types["annual"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
+	c, err = f.svc.coverage(f.ctx, f.db, MonFri, staff, f.types["annual"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
 	if err != nil || c != nil {
 		t.Fatalf("workday coverage over a weekend = %+v, %v", c, err)
 	}
@@ -218,7 +218,7 @@ func TestCoverageShutdownExempt(t *testing.T) {
 	// Both are away on those days now, and that counts for anyone else's cover.
 	f.dept("Pair", "head")
 	f.rule("Pair", 60)
-	c, err := f.svc.coverage(f.ctx, f.db, f.people["head"], f.types["annual"], civil(2026, 12, 8), civil(2026, 12, 8), nil, 0)
+	c, err := f.svc.coverage(f.ctx, f.db, MonFri, f.people["head"], f.types["annual"], civil(2026, 12, 8), civil(2026, 12, 8), nil, 0)
 	if err != nil || c == nil || c.Away != 3 {
 		t.Fatalf("shutdown leave did not count as away: %+v %v", c, err)
 	}

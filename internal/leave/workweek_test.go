@@ -11,9 +11,11 @@ import (
 func newChurchWeek(t *testing.T) *fixture {
 	f := newFixture(t)
 	sun := time.Sunday
-	f.svc.cfg.Week = WeekOf(time.Tuesday, time.Wednesday, time.Thursday, time.Friday, time.Sunday)
-	f.svc.cfg.RestrictedDay = &sun
-	f.svc.cfg.RestrictedMinDays = 3
+	f.setSettings(func(st *Settings) {
+		st.Week = WeekOf(time.Tuesday, time.Wednesday, time.Thursday, time.Friday, time.Sunday)
+		st.RestrictedDay = &sun
+		st.RestrictedMinDays = 3
+	})
 	for _, code := range []string{"floating", "weekend"} {
 		ty := f.types[code]
 		ty.Active, ty.Allowance = true, intp(4)

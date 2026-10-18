@@ -24,10 +24,18 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	d := dbtest.New(t)
 	us := users.NewStore(d)
-	svc := leave.New(d, us, leave.Config{Location: time.UTC, FinalApprover: "boss", SickCycleAnchor: 2025, SickBackdateDays: 14})
+	svc := leave.New(d, us, leave.Config{Location: time.UTC})
 	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
 	svc.SeedTypes(ctx)
 	boss, _ := us.Upsert(ctx, directory.User{ID: "CN=boss", DN: "CN=boss", Username: "boss", Name: "Big Boss", Email: "boss@x.test"})
+	// Settings are saved by an admin, so one exists; they have no manager, so
+	// they take no part in the chain under test.
+	root, _ := us.Upsert(ctx, directory.User{ID: "CN=root", DN: "CN=root", Username: "root", Name: "Root", Admin: true})
+	st, _ := svc.Settings(ctx)
+	st.FinalApproverID = boss.ID
+	if err := svc.SaveSettings(ctx, root, st); err != nil {
+		t.Fatal(err)
+	}
 	staff, _ := us.Upsert(ctx, directory.User{ID: "CN=s", DN: "CN=s", Username: "s", Name: "Sam Staff", Email: "s@x.test", ManagerDN: "CN=boss"})
 	types, _ := svc.Types(ctx, true)
 

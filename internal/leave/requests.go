@@ -287,6 +287,10 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	errs := FieldErrors{}
 	var qt Quote
 
+	st, err := s.settings(ctx, q)
+	if err != nil {
+		return Quote{}, err
+	}
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, in.TypeID))
 	switch {
 	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory):
@@ -316,8 +320,8 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
 	case opt.mandatory:
-	case t.Backdate && start.Before(today.AddDate(0, 0, -s.cfg.SickBackdateDays)):
-		errs["start"] = fmt.Sprintf("%s can be applied for up to %d days after the fact.", t.Name, s.cfg.SickBackdateDays)
+	case t.Backdate && start.Before(today.AddDate(0, 0, -st.SickBackdateDays)):
+		errs["start"] = fmt.Sprintf("%s can be applied for up to %d days after the fact.", t.Name, st.SickBackdateDays)
 	case !t.Backdate && start.Before(today):
 		errs["start"] = "Leave cannot start in the past."
 	}
@@ -339,12 +343,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		}
 		qt.Days = 1
 	} else {
-		qt.Days = CountDays(start, end, t.Unit, holidays, s.cfg.Week)
+		qt.Days = CountDays(start, end, t.Unit, holidays, st.Week)
 		if qt.Days == 0 {
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs
 		}
-		if msg := s.restrictedDayRule(t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory {
+		if msg := restrictedDayRule(st, t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory {
 			errs["start"] = msg
 			return qt, errs
 		}
@@ -363,7 +367,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 
 	if !opt.mandatory {
-		if qt.Coverage, err = s.coverage(ctx, q, u, t, start, end, holidays, opt.excludeID); err != nil {
+		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, start, end, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
 		if qt.Coverage != nil && !opt.override {
@@ -374,7 +378,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// Days count against the cycle the leave starts in. A request crossing
 	// the year end is charged to the old year in full -- simpler to explain
 	// than a split, and the admin can adjust if it matters.
-	qt.CycleStart = CycleStart(start, t.CycleMonths, s.cfg.SickCycleAnchor)
+	qt.CycleStart = CycleStart(start, t.CycleMonths, st.SickCycleAnchor)
 	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart); err != nil {
 		return Quote{}, err
 	}
@@ -409,19 +413,19 @@ func weekendShape(start, end time.Time, long bool) string {
 	return "A weekend off runs from a Saturday to the Sunday straight after it."
 }
 
-// restrictedDayRule enforces the restricted day (RESTRICTED_DAY): a working
+// restrictedDayRule enforces the restricted day (Admin -> Settings): a working
 // day that may not be taken off by itself. Leave including it must cover at
 // least RestrictedMinDays working days, counting it; a type marked "never"
 // may not include it at all; a weekend off always may. It only bites when the
 // day is actually worked -- a public holiday on that day is free anyway.
-func (s *Service) restrictedDayRule(t Type, start, end time.Time, days int, holidays map[time.Time]bool) string {
-	rd := s.cfg.RestrictedDay
+func restrictedDayRule(st Settings, t Type, start, end time.Time, days int, holidays map[time.Time]bool) string {
+	rd := st.RestrictedDay
 	if rd == nil || t.Restricted == RestrictAny {
 		return ""
 	}
 	includes := false
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if d.Weekday() == *rd && s.cfg.Week.Working(d, holidays) {
+		if d.Weekday() == *rd && st.Week.Working(d, holidays) {
 			includes = true
 			break
 		}
@@ -433,9 +437,9 @@ func (s *Service) restrictedDayRule(t Type, start, end time.Time, days int, holi
 	if t.Restricted == RestrictNever {
 		return fmt.Sprintf("%s cannot include a %s. To have a %s off, use a weekend off.", t.Name, day, day)
 	}
-	if days < s.cfg.RestrictedMinDays {
+	if days < st.RestrictedMinDays {
 		return fmt.Sprintf("Leave that includes a %s must cover at least %d working days (this is %d). "+
-			"To have a %s off on its own, use a weekend off.", day, s.cfg.RestrictedMinDays, days, day)
+			"To have a %s off on its own, use a weekend off.", day, st.RestrictedMinDays, days, day)
 	}
 	return ""
 }

@@ -28,7 +28,7 @@ func setup(t *testing.T) *env {
 	ctx := context.Background()
 	d := dbtest.New(t)
 	us := users.NewStore(d)
-	svc := leave.New(d, us, leave.Config{Location: time.UTC, FinalApprover: "pastor", SickCycleAnchor: 2025, SickBackdateDays: 14})
+	svc := leave.New(d, us, leave.Config{Location: time.UTC})
 	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
 	svc.OnEvent(New("https://leave.test").Hook)
 	e := &env{ctx: ctx, db: d, svc: svc, people: map[string]users.User{}}
@@ -51,6 +51,11 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 		e.people[p.name] = u
+	}
+	st, _ := svc.Settings(ctx)
+	st.FinalApproverID = e.people["pastor"].ID
+	if err := svc.SaveSettings(ctx, e.people["hr"], st); err != nil {
+		t.Fatal(err)
 	}
 	svc.SeedTypes(ctx)
 	ts, _ := svc.Types(ctx, true)

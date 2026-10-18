@@ -100,3 +100,22 @@ func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
+
+// A database that has everything but the settings table was made by a build
+// that still read policy from the environment; starting it would silently
+// apply the defaults instead of what the operator had configured.
+func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+		allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
+	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "settings") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}
