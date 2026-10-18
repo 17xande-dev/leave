@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS users (
 	-- Set when the account disappears from the directory or is disabled there.
 	-- Rows are never deleted: requests reference them for ever.
 	disabled    INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+	-- Set by an admin, never by the sync: this person's weekend off runs
+	-- Friday to Sunday instead of Saturday to Sunday.
+	long_weekend INTEGER NOT NULL DEFAULT 0 CHECK (long_weekend IN (0, 1)),
 	synced_at   TEXT NOT NULL
 ) STRICT;
 
@@ -74,9 +77,16 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	-- NULL means unlimited (unpaid leave): there is no balance to exhaust.
 	allowance_days  INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
 	cycle_months    INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
-	-- workdays skips weekends and public holidays; calendar counts every day
-	-- (maternity leave is four consecutive months, holidays included).
-	unit            TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar')),
+	-- workdays counts the organisation's working days (WORK_DAYS) that are
+	-- not public holidays; calendar counts every day (maternity leave is four
+	-- consecutive months, holidays included); weekend counts one per weekend
+	-- off, which runs Saturday to Sunday, or Friday to Sunday for someone on
+	-- long weekends.
+	unit            TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar', 'weekend')),
+	-- What this type may do with the restricted day (RESTRICTED_DAY, e.g.
+	-- Sunday): any -- no rule; min -- only inside a request of at least
+	-- RESTRICTED_MIN_DAYS working days; never -- not at all.
+	restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
 	-- Sick leave is applied for after the fact; nothing else may start in the past.
 	backdate        INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
 	requires_note   INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
@@ -229,8 +239,9 @@ func Open(path string) (*sql.DB, error) {
 // While the app is greenfield the fix is a fresh database, not an ALTER.
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
-		"users":    {"ext_id"},
-		"requests": {"shutdown_part_id"},
+		"users":       {"ext_id", "long_weekend"},
+		"requests":    {"shutdown_part_id"},
+		"leave_types": {"restricted_rule"},
 	}
 	for table, cols := range want {
 		have := map[string]bool{}
@@ -268,6 +279,12 @@ func checkCurrent(d *sql.DB) error {
 	}
 	if !strings.Contains(ddl, "'draft'") {
 		return fmt.Errorf("the database predates draft requests; start from a fresh one")
+	}
+	if err := d.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'leave_types'`).Scan(&ddl); err != nil {
+		return err
+	}
+	if !strings.Contains(ddl, "'weekend'") {
+		return fmt.Errorf("the database predates weekend-off leave types; start from a fresh one")
 	}
 	return nil
 }

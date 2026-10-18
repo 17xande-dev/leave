@@ -12,6 +12,16 @@ import (
 const (
 	UnitWorkdays = "workdays"
 	UnitCalendar = "calendar"
+	// UnitWeekend counts weekends off: one per Saturday-to-Sunday (or, for
+	// someone on long weekends, Friday-to-Sunday) request.
+	UnitWeekend = "weekend"
+)
+
+// What a type may do with the restricted day (RESTRICTED_DAY, e.g. Sunday).
+const (
+	RestrictAny   = "any"   // no rule: sick leave cannot be planned around it
+	RestrictMin   = "min"   // only inside a request of at least RESTRICTED_MIN_DAYS working days
+	RestrictNever = "never" // not at all: floating holidays are not for the restricted day
 )
 
 // Type is a kind of leave and its allowance.
@@ -27,6 +37,8 @@ type Type struct {
 	RequiresNote bool
 	Active       bool
 	Sort         int
+	// Restricted is the rule for the restricted day; see the Restrict* constants.
+	Restricted string
 
 	inactive bool // seed only: the default's Active is the inverse
 }
@@ -37,32 +49,37 @@ func intp(n int) *int { return &n }
 // five-day week, seeded into an empty database. An admin edits them from there;
 // the seed never overwrites.
 var bceaDefaults = []Type{
-	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays},
-	// 30 days per 36-month cycle, usable in arrears.
-	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true},
-	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true},
+	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictMin},
+	// 30 days per 36-month cycle, usable in arrears. Nobody plans being ill
+	// around the restricted day, and neither do the other statutory types.
+	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true, Restricted: RestrictAny},
+	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, Restricted: RestrictAny},
 	// Four consecutive months, stored as 120 calendar days.
-	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar},
-	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar},
-	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true},
+	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar, Restricted: RestrictAny},
+	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar, Restricted: RestrictAny},
+	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, Restricted: RestrictMin},
 	// Not BCEA: days off the employer grants that do not touch annual leave.
 	// Seeded inactive with no days, because how many is a policy decision;
-	// an admin sets the allowance and switches it on.
-	{Code: "floating", Name: "Floating holidays", Allowance: intp(0), CycleMonths: 12, Unit: UnitWorkdays, inactive: true},
+	// an admin sets the allowance and switches it on. Never on the
+	// restricted day: that is what weekends off are for.
+	{Code: "floating", Name: "Floating holidays", Allowance: intp(0), CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictNever, inactive: true},
+	// Weekends off: a yearly allowance of whole weekends, the one way to have
+	// the restricted day off without taking a run of leave around it.
+	{Code: "weekend", Name: "Weekends off", Allowance: intp(0), CycleMonths: 12, Unit: UnitWeekend, Restricted: RestrictAny, inactive: true},
 	// The free part of a company shutdown: unlimited, and inactive so nobody
 	// can apply for it themselves -- only shutdown requests use it.
-	{Code: "closure", Name: "Company closure", CycleMonths: 12, Unit: UnitWorkdays, inactive: true},
+	{Code: "closure", Name: "Company closure", CycleMonths: 12, Unit: UnitWorkdays, Restricted: RestrictAny, inactive: true},
 }
 
 // ErrNotFound is returned for a missing type or request.
 var ErrNotFound = errors.New("leave: not found")
 
-const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort`
+const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule`
 
 func scanType(row interface{ Scan(...any) error }) (Type, error) {
 	var t Type
 	var allowance sql.NullInt64
-	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort)
+	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Type{}, ErrNotFound
 	}
@@ -128,8 +145,14 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	if t.Name == "" {
 		errs["name"] = "Enter a name."
 	}
-	if t.Unit != UnitWorkdays && t.Unit != UnitCalendar {
+	if t.Unit != UnitWorkdays && t.Unit != UnitCalendar && t.Unit != UnitWeekend {
 		errs["unit"] = "Choose how days are counted."
+	}
+	if t.Restricted == "" {
+		t.Restricted = RestrictMin
+	}
+	if t.Restricted != RestrictAny && t.Restricted != RestrictMin && t.Restricted != RestrictNever {
+		errs["restricted"] = "Choose a rule for the restricted day."
 	}
 	if t.CycleMonths != 12 && t.CycleMonths != 36 {
 		errs["cycle_months"] = "The cycle is 12 or 36 months."
@@ -146,9 +169,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	}
 	if t.ID == 0 {
 		res, err := s.db.ExecContext(ctx, `INSERT INTO leave_types
-			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
-			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort)
+			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
+			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted)
 		if err != nil {
 			return 0, err
 		}
@@ -158,8 +181,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 		return res.LastInsertId()
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET code = ?, name = ?, allowance_days = ?,
-		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ? WHERE id = ?`,
-		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.ID)
+		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?
+		WHERE id = ?`,
+		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return 0, FieldErrors{"code": "Another leave type already uses that code."}

@@ -26,6 +26,7 @@ func (h *Handler) adminRoutes() []route {
 		a("GET /admin/users/{id}", h.AdminUser),
 		a("POST /admin/users/{id}/approver", h.AdminSetApprover),
 		a("POST /admin/users/{id}/adjustments", h.AdminAddAdjustment),
+		a("POST /admin/users/{id}/long-weekend", h.AdminSetLongWeekend),
 		a("GET /admin/types", h.AdminTypes),
 		a("GET /admin/types/new", h.AdminTypeForm),
 		a("GET /admin/types/{id}", h.AdminTypeForm),
@@ -323,6 +324,35 @@ func (h *Handler) AdminSetApprover(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=saved", id), http.StatusSeeOther)
 }
 
+// AdminSetLongWeekend switches whether someone's weekend off includes the
+// Friday. The value must be an explicit "0" or "1": an empty post switching
+// it either way would be a silent change nobody asked for.
+func (h *Handler) AdminSetLongWeekend(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	var on bool
+	switch r.PostFormValue("long_weekend") {
+	case "1":
+		on = true
+	case "0":
+	default:
+		http.Error(w, "Choose on or off.", http.StatusBadRequest)
+		return
+	}
+	if err := h.users.SetLongWeekend(r.Context(), id, on); err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.serverError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=saved", id), http.StatusSeeOther)
+}
+
 func (h *Handler) AdminAddAdjustment(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -373,7 +403,7 @@ type typeFormData struct {
 }
 
 func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
-	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays}}
+	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays, Restricted: leave.RestrictMin}}
 	if r.PathValue("id") != "" {
 		id, ok := pathID(r)
 		if !ok {
@@ -403,7 +433,8 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	cycle, _ := strconv.Atoi(f("cycle_months"))
 	sort, _ := strconv.Atoi(f("sort"))
 	t := leave.Type{ID: id, Code: f("code"), Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
-		Backdate: f("backdate") == "1", RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort}
+		Backdate: f("backdate") == "1", RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
+		Restricted: f("restricted")}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance"))}
 	if d.Allowance != "" {
 		n, err := strconv.Atoi(d.Allowance)

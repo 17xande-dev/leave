@@ -97,3 +97,18 @@ func TestUsernameReuse(t *testing.T) {
 		t.Fatalf("ByUsername(sam) = %d, want the new starter %d", got.ID, n.ID)
 	}
 }
+
+// The long-weekend flag is an admin's decision; a directory sync must not
+// reset it.
+func TestLongWeekendSurvivesSync(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(dbtest.New(t))
+	u, _ := s.Upsert(ctx, dirUser("sam"))
+	if err := s.SetLongWeekend(ctx, u.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	s.Sync(ctx, []directory.User{dirUser("sam")})
+	if got, _ := s.ByID(ctx, u.ID); !got.LongWeekend {
+		t.Fatal("sync reset long_weekend")
+	}
+}

@@ -104,7 +104,7 @@ func TestApplyValidationRerendersForm(t *testing.T) {
 	hs := newHarness(t)
 	c := hs.signIn("staff1")
 	res, body := hs.post(c, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-10"}, "end": {"2026-10-11"}})
-	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all weekends or public holidays") {
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all days off or public holidays") {
 		t.Fatalf("weekend-only request: %d\n%s", res.StatusCode, body)
 	}
 	if !strings.Contains(body, `value="2026-10-10"`) {

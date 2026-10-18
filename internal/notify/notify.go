@@ -217,12 +217,20 @@ func Dates(start, end string) string {
 }
 
 func days(r leave.Request) string {
-	kind := "working "
-	if r.TypeUnit == leave.UnitCalendar {
-		kind = ""
+	switch r.TypeUnit {
+	case leave.UnitWeekend:
+		if r.Days == 1 {
+			return "1 weekend"
+		}
+		return fmt.Sprintf("%d weekends", r.Days)
+	case leave.UnitCalendar:
+		if r.Days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", r.Days)
 	}
 	if r.Days == 1 {
-		return "1 " + kind + "day"
+		return "1 working day"
 	}
-	return fmt.Sprintf("%d %sdays", r.Days, kind)
+	return fmt.Sprintf("%d working days", r.Days)
 }

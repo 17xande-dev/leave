@@ -33,11 +33,37 @@ request, so a directory change afterwards cannot strand it. An admin can reassig
 | Maternity | 120 calendar days |
 | Parental | 10 days |
 | Unpaid | no limit |
+| Floating holidays | set by an admin (seeded off, 0 days); never on the restricted day |
+| Weekends off | set by an admin (seeded off, 0 weekends) |
+| Company closure | no limit; used only by shutdowns |
 
-Pending days are reserved, so the same days can't be requested twice. Working days skip
-weekends and SA public holidays. The holidays are computed from the Public Holidays Act,
+Pending days are reserved, so the same days can't be requested twice. Leave costs only
+**working days** (`WORK_DAYS`, Mon–Fri by default) that aren't SA public holidays. With
+`WORK_DAYS=tue,wed,thu,fri,sun`, for example, a Monday is free and a Sunday costs a day. The holidays are computed from the Public Holidays Act,
 including the Sunday-to-Monday rule. Admins add proclaimed days, such as election days,
 by hand. Days count against the cycle the leave starts in.
+
+**The restricted day.** `RESTRICTED_DAY` (e.g. `sun`) is a working day nobody can
+take off by itself. Leave that includes it must cover at least `RESTRICTED_MIN_DAYS`
+working days (3 by default), counting that day. Each leave type sets its own rule on
+**Admin → Leave types**:
+- annual and unpaid leave: only within longer leave;
+- sick, family, maternity and parental leave: no rule, since none of them can be planned;
+- floating holidays: never.
+
+**Weekends off** are the way to have the restricted day off by itself. A weekend off
+runs Saturday to Sunday and costs one weekend from the yearly allowance. An admin can
+give someone **long weekends** (on their page under **Admin → People**), which run
+Friday to Sunday for the same cost.
+
+**Company shutdowns** (**Admin → Shutdowns**) cover a period the whole organisation
+closes. A shutdown is made of parts, each charged to one leave type: for example a week
+to annual leave and the rest to *Company closure*, which deducts nothing. Everyone gets
+a pre-filled draft per part and an email asking them to submit it. The dates and types
+are fixed. A submitted request goes through the normal approval chain, or is approved
+straight away if the shutdown says so. The days are mandatory, so they may take a balance
+below zero, and they can't be withdrawn or cancelled. "Create requests for anyone
+missing" covers new starters, and a shutdown can be deleted until someone submits.
 
 **Cancelling approved leave** is itself a request, approved by the same chain. The
 leave stays booked until the cancellation is approved. Pending requests can simply be

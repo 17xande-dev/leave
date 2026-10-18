@@ -27,6 +27,9 @@ type User struct {
 	ManagerDN  string
 	Admin      bool
 	Disabled   bool
+	// LongWeekend: this person's weekend off runs Friday to Sunday. Set by an
+	// admin; the directory sync never touches it.
+	LongWeekend bool
 }
 
 var ErrNotFound = errors.New("users: not found")
@@ -35,11 +38,11 @@ type Store struct{ db *sql.DB }
 
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
-const cols = `id, dn, username, name, email, department, manager_dn, is_admin, disabled`
+const cols = `id, dn, username, name, email, department, manager_dn, is_admin, disabled, long_weekend`
 
 func scan(row interface{ Scan(...any) error }) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.DN, &u.Username, &u.Name, &u.Email, &u.Department, &u.ManagerDN, &u.Admin, &u.Disabled)
+	err := row.Scan(&u.ID, &u.DN, &u.Username, &u.Name, &u.Email, &u.Department, &u.ManagerDN, &u.Admin, &u.Disabled, &u.LongWeekend)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -138,6 +141,18 @@ func (s *Store) ByUsername(ctx context.Context, username string) (User, error) {
 func (s *Store) ByDN(ctx context.Context, dn string) (User, error) {
 	return scan(s.db.QueryRowContext(ctx, `SELECT `+cols+` FROM users WHERE dn = ?
 		ORDER BY disabled, id DESC LIMIT 1`, strings.TrimSpace(dn)))
+}
+
+// SetLongWeekend sets whether someone's weekend off includes the Friday.
+func (s *Store) SetLongWeekend(ctx context.Context, id int64, on bool) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET long_weekend = ? WHERE id = ?`, on, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Admins lists every enabled admin, for routing requests nobody else can approve.

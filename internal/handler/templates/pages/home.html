@@ -20,7 +20,7 @@
   <tbody>
   {{range .Balances}}
     <tr>
-      <td>{{.Type.Name}}</td>
+      <td>{{.Type.Name}}{{if eq .Type.Unit "weekend"}} <small>(weekends)</small>{{end}}</td>
       <td class="num">{{with .Available}}{{.}}{{else}}No limit{{end}}</td>
       <td class="num">{{.Taken}}</td>
       <td class="num">{{.Pending}}</td>

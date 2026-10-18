@@ -36,8 +36,18 @@
       <select id="unit" name="unit">
         <option value="workdays"{{if eq .Type.Unit "workdays"}} selected{{end}}>Working days</option>
         <option value="calendar"{{if eq .Type.Unit "calendar"}} selected{{end}}>Calendar days</option>
+        <option value="weekend"{{if eq .Type.Unit "weekend"}} selected{{end}}>Weekends off (Sat–Sun, or Fri–Sun on long weekends)</option>
       </select>
       {{template "err" index .Errors "unit"}}
+    </div>
+    <div class="field">
+      <label for="restricted">Restricted day (e.g. Sunday)</label>
+      <select id="restricted" name="restricted">
+        <option value="min"{{if eq .Type.Restricted "min"}} selected{{end}}>Only within longer leave</option>
+        <option value="any"{{if eq .Type.Restricted "any"}} selected{{end}}>Always allowed</option>
+        <option value="never"{{if eq .Type.Restricted "never"}} selected{{end}}>Never</option>
+      </select>
+      {{template "err" index .Errors "restricted"}}
     </div>
     <div class="field narrow">
       <label for="sort">Order</label>

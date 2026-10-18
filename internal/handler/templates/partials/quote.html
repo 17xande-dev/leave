@@ -9,7 +9,7 @@
 {{else}}
   {{with .Errors}}{{range .}}<p class="error">{{.}}</p>{{end}}{{end}}
   {{with .Quote}}{{if .Days}}
-    <p><strong>{{.Days}} {{if eq .Type.Unit "calendar"}}calendar {{else}}working {{end}}{{plural .Days "day" "days"}}</strong>
+    <p><strong>{{.Days}} {{units .Days .Type.Unit}}</strong>
     {{with .After}} — {{.}} left in this cycle afterwards{{end}}</p>
   {{end}}{{end}}
 {{end}}

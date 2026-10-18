@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func setenv(t *testing.T, kv map[string]string) {
@@ -41,5 +42,28 @@ func TestPartialConfigRefused(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
+	}
+}
+
+func TestWorkWeekConfig(t *testing.T) {
+	setenv(t, map[string]string{"DIRECTORY": "fake", "FINAL_APPROVER": "p", "COOKIE_SECURE": "false",
+		"WORK_DAYS": "tue,wed,thu,fri,sun", "RESTRICTED_DAY": "sunday"})
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.WorkDays) != 5 || c.RestrictedDay == nil || *c.RestrictedDay != time.Sunday || c.RestrictedMinDays != 3 {
+		t.Fatalf("work week config = %v %v %d", c.WorkDays, c.RestrictedDay, c.RestrictedMinDays)
+	}
+	// A restricted day nobody works would be a rule that never applies:
+	// almost certainly a typo, so refuse it.
+	t.Setenv("RESTRICTED_DAY", "mon")
+	if _, err := Load(); err == nil {
+		t.Fatal("restricted day outside the working week accepted")
+	}
+	t.Setenv("RESTRICTED_DAY", "")
+	t.Setenv("WORK_DAYS", "tue,funday")
+	if _, err := Load(); err == nil {
+		t.Fatal("unknown day accepted")
 	}
 }

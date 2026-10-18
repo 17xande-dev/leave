@@ -92,6 +92,8 @@ func (s *Service) CreateShutdown(ctx context.Context, admin users.User, in Shutd
 		switch {
 		case err != nil:
 			errs[key] = "Choose a leave type."
+		case t.Unit == UnitWeekend:
+			errs[key] = "Weekends off are taken one weekend at a time; choose another type for a shutdown."
 		case err1 != nil || err2 != nil:
 			errs[key] = "Enter both dates."
 		case end.Before(start):
@@ -124,8 +126,8 @@ func (s *Service) CreateShutdown(ctx context.Context, admin users.User, in Shutd
 		if err != nil {
 			return 0, err
 		}
-		if CountDays(p.start, p.end, p.t.Unit, hol) == 0 {
-			return 0, FieldErrors{"part0": fmt.Sprintf("%s – %s is all weekends or public holidays.",
+		if CountDays(p.start, p.end, p.t.Unit, hol, s.cfg.Week) == 0 {
+			return 0, FieldErrors{"part0": fmt.Sprintf("%s – %s is all days off or public holidays.",
 				fmtDate(p.start), fmtDate(p.end))}
 		}
 	}
@@ -274,7 +276,7 @@ func (s *Service) shutdowns(ctx context.Context, where string, args ...any) ([]S
 			if err != nil {
 				return nil, err
 			}
-			p.Days = CountDays(start, end, units[i], hol)
+			p.Days = CountDays(start, end, units[i], hol, s.cfg.Week)
 			i++
 		}
 	}

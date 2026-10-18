@@ -293,10 +293,22 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	if err != nil {
 		return Quote{}, err
 	}
-	qt.Days = CountDays(start, end, t.Unit, holidays)
-	if qt.Days == 0 {
-		errs["end"] = "Those dates are all weekends or public holidays, so there is nothing to take."
-		return qt, errs
+	if t.Unit == UnitWeekend {
+		if msg := weekendShape(start, end, u.LongWeekend); msg != "" {
+			errs["start"] = msg
+			return qt, errs
+		}
+		qt.Days = 1
+	} else {
+		qt.Days = CountDays(start, end, t.Unit, holidays, s.cfg.Week)
+		if qt.Days == 0 {
+			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
+			return qt, errs
+		}
+		if msg := s.restrictedDayRule(t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory {
+			errs["start"] = msg
+			return qt, errs
+		}
 	}
 
 	// Drafts count here although they reserve no balance: booking annual leave
@@ -330,6 +342,51 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return qt, errs
 	}
 	return qt, nil
+}
+
+// weekendShape checks a weekend-off request covers exactly one weekend:
+// Saturday to Sunday, or for someone on long weekends Friday to Sunday.
+func weekendShape(start, end time.Time, long bool) string {
+	sat := start.Weekday() == time.Saturday && end.Equal(start.AddDate(0, 0, 1))
+	fri := start.Weekday() == time.Friday && end.Equal(start.AddDate(0, 0, 2))
+	switch {
+	case sat || (long && fri):
+		return ""
+	case long:
+		return "A weekend off runs from a Friday (or Saturday) to the Sunday straight after it."
+	}
+	return "A weekend off runs from a Saturday to the Sunday straight after it."
+}
+
+// restrictedDayRule enforces the restricted day (RESTRICTED_DAY): a working
+// day that may not be taken off by itself. Leave including it must cover at
+// least RestrictedMinDays working days, counting it; a type marked "never"
+// may not include it at all; a weekend off always may. It only bites when the
+// day is actually worked -- a public holiday on that day is free anyway.
+func (s *Service) restrictedDayRule(t Type, start, end time.Time, days int, holidays map[time.Time]bool) string {
+	rd := s.cfg.RestrictedDay
+	if rd == nil || t.Restricted == RestrictAny {
+		return ""
+	}
+	includes := false
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		if d.Weekday() == *rd && s.cfg.Week.Working(d, holidays) {
+			includes = true
+			break
+		}
+	}
+	if !includes {
+		return ""
+	}
+	day := rd.String()
+	if t.Restricted == RestrictNever {
+		return fmt.Sprintf("%s cannot include a %s. To have a %s off, use a weekend off.", t.Name, day, day)
+	}
+	if days < s.cfg.RestrictedMinDays {
+		return fmt.Sprintf("Leave that includes a %s must cover at least %d working days (this is %d). "+
+			"To have a %s off on its own, use a weekend off.", day, s.cfg.RestrictedMinDays, days, day)
+	}
+	return ""
 }
 
 func plural(n int, one, many string) string {

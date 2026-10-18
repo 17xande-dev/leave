@@ -97,21 +97,38 @@ func easterSunday(y int) time.Time {
 	return civil(y, time.Month(month), day)
 }
 
+// Week marks the days of the week people normally work, indexed by
+// time.Weekday.
+type Week [7]bool
+
+// MonFri is the default working week.
+var MonFri = WeekOf(time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday)
+
+func WeekOf(days ...time.Weekday) Week {
+	var w Week
+	for _, d := range days {
+		w[d] = true
+	}
+	return w
+}
+
+// Working reports whether d is a working day: in the week, and not a holiday.
+func (w Week) Working(d time.Time, holidays map[time.Time]bool) bool {
+	return w[d.Weekday()] && !holidays[d]
+}
+
 // CountDays is how many days a request from start to end (inclusive) costs.
-// Working-day types skip weekends and public holidays; calendar types count
-// every day, because four months of maternity leave is four months whatever
-// falls inside it.
-func CountDays(start, end time.Time, unit string, holidays map[time.Time]bool) int {
+// Working-day types count only the days in the working week that are not
+// public holidays -- with a Tuesday-to-Sunday week a Monday is free and a
+// Sunday costs a day. Calendar types count every day, because four months of
+// maternity leave is four months whatever falls inside it. (Weekend-off types
+// are counted by the caller: one per weekend, whatever its days.)
+func CountDays(start, end time.Time, unit string, holidays map[time.Time]bool, week Week) int {
 	n := 0
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if unit == UnitCalendar {
+		if unit == UnitCalendar || week.Working(d, holidays) {
 			n++
-			continue
 		}
-		if wd := d.Weekday(); wd == time.Saturday || wd == time.Sunday || holidays[d] {
-			continue
-		}
-		n++
 	}
 	return n
 }

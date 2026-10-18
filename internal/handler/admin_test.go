@@ -121,7 +121,7 @@ func TestTypeAndHolidayAdmin(t *testing.T) {
 	if _, body := hs.get(hr, "/admin/holidays?year=2026"); !strings.Contains(body, "Election day") {
 		t.Fatal("manual holiday missing")
 	}
-	if _, body := hs.get(hs.signIn("staff1"), "/leave/quote?type="+hs.typeID("annual")+"&start=2026-11-04&end=2026-11-04"); !strings.Contains(body, "all weekends or public holidays") {
+	if _, body := hs.get(hs.signIn("staff1"), "/leave/quote?type="+hs.typeID("annual")+"&start=2026-11-04&end=2026-11-04"); !strings.Contains(body, "all days off or public holidays") {
 		t.Fatalf("manual holiday not excluded from working days:\n%s", body)
 	}
 }
@@ -186,7 +186,7 @@ func TestShutdownFormValidation(t *testing.T) {
 	hs := newHarness(t)
 	res, body := hs.post(hs.signIn("hr"), "/admin/shutdowns", url.Values{"name": {"X"},
 		"type0": {hs.anyTypeID("annual")}, "start0": {"2026-12-12"}, "end0": {"2026-12-13"}})
-	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all weekends or public holidays") {
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all days off or public holidays") {
 		t.Fatalf("weekend-only part: %d\n%s", res.StatusCode, body)
 	}
 	if !strings.Contains(body, `value="2026-12-12"`) {

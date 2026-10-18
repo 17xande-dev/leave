@@ -25,6 +25,16 @@
   <div class="actions"><button type="submit">Save</button></div>
 </form>
 
+<form method="post" action="/admin/users/{{.User.ID}}/long-weekend" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Weekends off</h2>
+  <p class="hint">{{if .User.LongWeekend}}On long weekends: a weekend off runs Friday to Sunday.{{else}}A weekend off runs Saturday to Sunday.{{end}} Either way it costs one weekend from the allowance.</p>
+  <div class="actions">
+    {{if .User.LongWeekend}}<button type="submit" name="long_weekend" value="0" class="quiet">Switch to Saturday–Sunday</button>
+    {{else}}<button type="submit" name="long_weekend" value="1" class="quiet">Give long weekends (Friday–Sunday)</button>{{end}}
+  </div>
+</form>
+
 <h2>Balances</h2>
 <div class="scroll-x">
 <table>

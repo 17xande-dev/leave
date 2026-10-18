@@ -8,7 +8,7 @@
 <table class="facts">
   <tr><th>Who</th><td>{{.UserName}}{{with .Department}} <small>{{.}}</small>{{end}}</td></tr>
   <tr><th>Dates</th><td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td></tr>
-  <tr><th>Days</th><td>{{.Days}} {{if eq .TypeUnit "calendar"}}calendar{{else}}working{{end}} {{plural .Days "day" "days"}}</td></tr>
+  <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}</td></tr>
   {{with .Note}}<tr><th>Note</th><td>{{.}}</td></tr>{{end}}
   <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
   {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}

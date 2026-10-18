@@ -72,7 +72,7 @@ func TestCountDays(t *testing.T) {
 		{"2026-12-21", "2027-01-08", UnitWorkdays, 13}, // across the year end: 25 Dec and 1 Jan skipped
 	}
 	for _, c := range cases {
-		if got := CountDays(d(c.start), d(c.end), c.unit, hol); got != c.want {
+		if got := CountDays(d(c.start), d(c.end), c.unit, hol, MonFri); got != c.want {
 			t.Errorf("CountDays(%s..%s, %s) = %d, want %d", c.start, c.end, c.unit, got, c.want)
 		}
 	}

@@ -87,7 +87,10 @@ var funcs = template.FuncMap{
 	"lower":  strings.ToLower,
 	"status": statusClass,
 	"add":    func(a, b int) int { return a + b },
-	"list":   func(xs ...string) []string { return xs },
+	// units names what a count of a type's unit is: "3 working days",
+	// "1 weekend".
+	"units": unitLabel,
+	"list":  func(xs ...string) []string { return xs },
 }
 
 // view is what every page renders from. Page-specific data goes in Data, so the
@@ -175,4 +178,23 @@ var notices = map[string]string{
 	"shutdown-deleted":   "Shutdown deleted, with its unsubmitted requests.",
 	"not-deletable":      "Someone has already submitted leave for this shutdown, so it can no longer be deleted.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
+}
+
+func unitLabel(n int, unit string) string {
+	switch unit {
+	case "weekend":
+		if n == 1 || n == -1 {
+			return "weekend"
+		}
+		return "weekends"
+	case "calendar":
+		if n == 1 || n == -1 {
+			return "day"
+		}
+		return "days"
+	}
+	if n == 1 || n == -1 {
+		return "working day"
+	}
+	return "working days"
 }
