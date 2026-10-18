@@ -16,6 +16,22 @@
 </table>
 {{end}}
 
+{{if .Request.IsShutdown}}
+<p class="notice">Part of <strong>{{.Request.ShutdownName}}</strong>, a company shutdown. The dates and type are fixed, and the days are mandatory: they are taken even if your balance goes below zero.</p>
+{{end}}
+{{if .CanSubmit}}
+<form method="post" action="/leave/{{.Request.ID}}/submit" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Submit this leave</h2>
+  {{template "err" index .Errors "start"}}{{template "err" index .Errors "end"}}
+  <div class="field">
+    <label for="note">Note <small>(optional)</small></label>
+    <textarea id="note" name="note" rows="2">{{.Note}}</textarea>
+  </div>
+  <div class="actions"><button type="submit">Submit</button></div>
+</form>
+{{end}}
+
 {{with .Original}}
 <p class="notice">This asks to cancel <a href="/leave/{{.ID}}">{{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a>, which is currently {{.Status}}. If it is approved, the days go back to the balance.</p>
 {{end}}

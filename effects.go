@@ -75,7 +75,11 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 		if r.Status != leave.StatusApproved || r.CalendarEventID != "" {
 			return nil
 		}
-		body := fmt.Sprintf("%s, %s.\nApproved by %s.", r.TypeName, notify.Dates(r.Start, r.End), r.DecidedBy)
+		approved := "Approved automatically."
+		if r.DecidedBy != "" {
+			approved = "Approved by " + r.DecidedBy + "."
+		}
+		body := fmt.Sprintf("%s, %s.\n%s", r.TypeName, notify.Dates(r.Start, r.End), approved)
 		if r.Department != "" {
 			body += "\nDepartment: " + r.Department
 		}

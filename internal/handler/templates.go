@@ -170,5 +170,9 @@ var notices = map[string]string{
 	"reassigned":         "Request reassigned.",
 	"holidays-generated": "Public holidays generated.",
 	"retried":            "Queued for another attempt.",
+	"shutdown-created":   "Shutdown created, and everyone has been sent their pre-filled requests.",
+	"drafts-generated":   "Requests created for anyone who did not have them yet.",
+	"shutdown-deleted":   "Shutdown deleted, with its unsubmitted requests.",
+	"not-deletable":      "Someone has already submitted leave for this shutdown, so it can no longer be deleted.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }

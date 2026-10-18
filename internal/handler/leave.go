@@ -14,6 +14,8 @@ import (
 type homeData struct {
 	Balances []leave.Balance
 	Requests []leave.Request
+	// Drafts are shutdown requests waiting for the person to submit them.
+	Drafts []leave.Request
 }
 
 func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +30,13 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "home.html", view{Title: "My leave", Data: homeData{Balances: bs, Requests: rs}})
+	drafts, err := h.leave.Drafts(r.Context(), u.ID)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	h.render(w, r, http.StatusOK, "home.html", view{Title: "My leave",
+		Data: homeData{Balances: bs, Requests: rs, Drafts: drafts}})
 }
 
 type applyData struct {
@@ -142,6 +150,7 @@ type requestData struct {
 	CanWithdraw         bool
 	CanCancel           bool
 	CanDecide           bool
+	CanSubmit           bool
 	// Candidates is who an admin may reassign a pending request to.
 	Candidates []users.User
 	Errors     leave.FieldErrors
@@ -175,6 +184,7 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		CanWithdraw: req.UserID == u.ID && req.Status == leave.StatusPending,
 		CanCancel:   h.leave.CanRequestCancellation(u, req),
 		CanDecide:   leave.CanDecide(u, req),
+		CanSubmit:   req.UserID == u.ID && req.Status == leave.StatusDraft,
 	}
 	if u.Admin && req.Status == leave.StatusPending {
 		all, err := h.users.Enabled(r.Context())
@@ -264,6 +274,41 @@ func (h *Handler) RequestCancellation(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=cancel-requested", c.ID), http.StatusSeeOther)
 }
 
+// SubmitDraft submits a shutdown request someone was given pre-filled.
+func (h *Handler) SubmitDraft(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.loadRequest(w, r)
+	if !ok {
+		return
+	}
+	note := r.PostFormValue("note")
+	out, err := h.leave.SubmitDraft(r.Context(), currentUser(r), req.ID, note)
+	var fe leave.FieldErrors
+	switch {
+	case errors.As(err, &fe):
+		// Overlap with leave booked separately: the person needs to sort that
+		// out (withdraw it, or ask an admin) before this can go in.
+		d, derr := h.requestData(r, req)
+		if derr != nil {
+			h.serverError(w, r, derr)
+			return
+		}
+		d.Errors, d.Note = fe, note
+		h.render(w, r, http.StatusUnprocessableEntity, "request.html", view{Title: requestTitle(req), Data: d})
+		return
+	case errors.Is(err, leave.ErrNotAllowed):
+		notPossible(w, r, req.ID)
+		return
+	case err != nil:
+		h.serverError(w, r, err)
+		return
+	}
+	notice := "submitted"
+	if out.Status == leave.StatusApproved {
+		notice = "approved"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", out.ID, notice), http.StatusSeeOther)
+}
+
 // Decide approves or declines. The decision is an explicit "approve" or
 // "decline"; anything else -- including an empty body -- is a 400 rather than
 // quietly meaning one of them.
@@ -338,7 +383,7 @@ func (h *Handler) Team(w http.ResponseWriter, r *http.Request) {
 // statusClass maps a status to its badge style.
 func statusClass(s string) string {
 	switch s {
-	case leave.StatusPending:
+	case leave.StatusPending, leave.StatusDraft:
 		return "pending"
 	case leave.StatusApproved:
 		return "done"

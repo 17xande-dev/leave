@@ -4,6 +4,15 @@
   <a class="button" href="/leave/new">Apply for leave</a>
 </div>
 {{with .Data}}
+{{with .Drafts}}
+<section class="panel attention">
+  <h2>Waiting for you to submit</h2>
+  <p class="hint">These were filled in for you for a company shutdown. Open each one, check it and submit it.</p>
+  <ul>
+  {{range .}}<li><a href="/leave/{{.ID}}">{{.ShutdownName}}: {{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a> ({{.Days}} {{plural .Days "day" "days"}})</li>{{end}}
+  </ul>
+</section>
+{{end}}
 <h2>Balances</h2>
 <div class="scroll-x">
 <table>

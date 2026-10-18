@@ -1,7 +1,7 @@
 {{define "subject"}}{{if .Request.IsCancellation}}Cancellation {{.Request.Status}}{{else}}Leave {{.Request.Status}}{{end}}: {{.Dates}}{{end}}
 {{define "body"}}Hi {{.To}},
 
-{{if .Request.IsCancellation}}{{if eq .Request.Status "approved"}}Your request to cancel {{lower .Request.TypeName}} for {{.Dates}} was approved by {{.Request.DecidedBy}}. The {{.Days}} are back in your balance.{{else}}Your request to cancel {{lower .Request.TypeName}} for {{.Dates}} was declined by {{.Request.DecidedBy}}. The leave stays booked.{{end}}{{else}}Your {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}) was {{.Request.Status}} by {{.Request.DecidedBy}}.{{end}}
-{{with .Request.DecisionNote}}
+{{if .Request.IsCancellation}}{{if eq .Request.Status "approved"}}Your request to cancel {{lower .Request.TypeName}} for {{.Dates}} was approved by {{.Request.DecidedBy}}. The {{.Days}} are back in your balance.{{else}}Your request to cancel {{lower .Request.TypeName}} for {{.Dates}} was declined by {{.Request.DecidedBy}}. The leave stays booked.{{end}}{{else}}Your {{if .Request.IsShutdown}}{{.Request.ShutdownName}} request ({{lower .Request.TypeName}}){{else}}{{lower .Request.TypeName}}{{end}} for {{.Dates}} ({{.Days}}) was {{.Request.Status}}{{with .Request.DecidedBy}} by {{.}}{{else}} automatically{{end}}.{{end}}
+{{if .Request.DecidedBy}}{{with .Request.DecisionNote}}
 Their note: {{.}}
-{{end}}{{end}}
+{{end}}{{end}}{{end}}

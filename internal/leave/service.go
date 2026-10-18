@@ -51,6 +51,9 @@ const (
 	EventDecided    EventKind = "decided"    // approved or declined
 	EventWithdrawn  EventKind = "withdrawn"  // the requester withdrew it while pending
 	EventReassigned EventKind = "reassigned" // an admin moved it to another approver
+	// EventDraftsCreated: a shutdown created drafts for someone to submit.
+	// Request is their first draft; one event per person, not per draft.
+	EventDraftsCreated EventKind = "drafts"
 )
 
 type Event struct {

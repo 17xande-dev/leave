@@ -611,6 +611,17 @@ table {
   margin-block-end: var(--gap-md);
 }
 
+/* Something the person has to do, above everything else on the page. */
+.panel.attention {
+  border-color: var(--pending);
+  background: color-mix(in oklab, var(--pending) 6%, var(--paper));
+
+  ul {
+    margin: 0;
+    padding-inline-start: var(--gap-md);
+  }
+}
+
 .actions + .panel {
   margin-block-start: var(--gap-md);
 }

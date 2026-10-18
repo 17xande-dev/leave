@@ -3,9 +3,11 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -102,6 +104,29 @@ CREATE TABLE IF NOT EXISTS holidays (
 	source  TEXT NOT NULL CHECK (source IN ('computed', 'manual'))
 ) STRICT;
 
+-- A company shutdown: a period everyone is off, defined as parts that each
+-- charge one leave type (e.g. the first week to annual leave, the rest to an
+-- unlimited "company closure" type). Each part becomes a pre-filled draft
+-- request per person, which they review and submit.
+CREATE TABLE IF NOT EXISTS shutdowns (
+	id            INTEGER PRIMARY KEY,
+	name          TEXT NOT NULL,
+	-- On: a submitted shutdown request is approved at once. Off: it goes
+	-- through the person's normal approval chain.
+	auto_approve  INTEGER NOT NULL DEFAULT 0 CHECK (auto_approve IN (0, 1)),
+	created_by_id INTEGER NOT NULL REFERENCES users(id),
+	created_at    TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS shutdown_parts (
+	id           INTEGER PRIMARY KEY,
+	shutdown_id  INTEGER NOT NULL REFERENCES shutdowns(id) ON DELETE CASCADE,
+	type_id      INTEGER NOT NULL REFERENCES leave_types(id),
+	start_date   TEXT NOT NULL,
+	end_date     TEXT NOT NULL,
+	CHECK (end_date >= start_date)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS requests (
 	id                  INTEGER PRIMARY KEY,
 	user_id             INTEGER NOT NULL REFERENCES users(id),
@@ -116,8 +141,14 @@ CREATE TABLE IF NOT EXISTS requests (
 	-- The cycle the days count against: the cycle containing start_date.
 	cycle_start         TEXT NOT NULL,
 	note                TEXT NOT NULL DEFAULT '',
+	-- draft: a shutdown request created for the person, not yet submitted.
+	-- Drafts reserve nothing and block nothing; submitting runs the checks.
 	status              TEXT NOT NULL CHECK (status IN
-	                      ('pending', 'approved', 'declined', 'withdrawn', 'cancelled')),
+	                      ('draft', 'pending', 'approved', 'declined', 'withdrawn', 'cancelled')),
+	-- Set on a request generated for a company shutdown. Its type and dates
+	-- are fixed, it may take the balance below zero (the days are mandatory),
+	-- and it cannot be withdrawn or cancelled.
+	shutdown_part_id    INTEGER REFERENCES shutdown_parts(id),
 	-- Resolved and frozen at submit, so a directory change afterwards cannot
 	-- leave a pending request with nobody able to act on it. NULL routes the
 	-- request to the admins (any admin but the requester): that is where the
@@ -136,6 +167,11 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_user ON requests(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_requests_approver ON requests(approver_id, status);
 CREATE INDEX IF NOT EXISTS idx_requests_dates ON requests(start_date, end_date);
+-- One live request per person per shutdown part. A declined one does not
+-- count, so an admin can create the draft again.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_one_per_shutdown_part
+	ON requests(shutdown_part_id, user_id)
+	WHERE shutdown_part_id IS NOT NULL AND status IN ('draft', 'pending', 'approved');
 -- At most one live cancellation per leave request.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_one_cancellation
 	ON requests(cancels_request_id) WHERE status = 'pending';
@@ -174,9 +210,64 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Checked before the schema runs: on an old database the new indexes
+	// would fail first, with a "no such column" that explains nothing.
+	if err := checkCurrent(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	if _, err := d.Exec(schema); err != nil {
 		d.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 	return d, nil
+}
+
+// checkCurrent refuses a database created by an older build. CREATE TABLE IF
+// NOT EXISTS leaves an old table as it was and reports success, so without this
+// the first query touching a new column fails mid-request instead of at boot.
+// While the app is greenfield the fix is a fresh database, not an ALTER.
+func checkCurrent(d *sql.DB) error {
+	want := map[string][]string{
+		"users":    {"ext_id"},
+		"requests": {"shutdown_part_id"},
+	}
+	for table, cols := range want {
+		have := map[string]bool{}
+		rows, err := d.Query(`SELECT name FROM pragma_table_info(?)`, table)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var n string
+			if err := rows.Scan(&n); err != nil {
+				rows.Close()
+				return err
+			}
+			have[n] = true
+		}
+		rows.Close()
+		if len(have) == 0 {
+			continue // a fresh database: the schema is about to create it
+		}
+		for _, c := range cols {
+			if !have[c] {
+				return fmt.Errorf("the database predates %s.%s: it was created by an older build; "+
+					"back it up and start from a fresh one (make recreate-db locally)", table, c)
+			}
+		}
+	}
+	// The draft status lives in a CHECK, which pragma_table_info cannot see.
+	var ddl string
+	err := d.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'requests'`).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(ddl, "'draft'") {
+		return fmt.Errorf("the database predates draft requests; start from a fresh one")
+	}
+	return nil
 }

@@ -17,6 +17,7 @@ const (
 
 	StatusPending   = "pending"
 	StatusApproved  = "approved"
+	StatusDraft     = "draft"
 	StatusDeclined  = "declined"
 	StatusWithdrawn = "withdrawn"
 	StatusCancelled = "cancelled"
@@ -40,6 +41,8 @@ type Request struct {
 	DecisionNote    string
 	CalendarEventID string
 	CreatedAt       string
+	// ShutdownPartID is set on a request generated for a company shutdown.
+	ShutdownPartID int64
 
 	UserName     string
 	UserEmail    string
@@ -48,25 +51,35 @@ type Request struct {
 	TypeUnit     string
 	ApproverName string
 	DecidedBy    string
+	ShutdownName string
 }
 
 func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 
+// IsShutdown reports whether r was generated for a company shutdown: its type
+// and dates are fixed and it cannot be withdrawn or cancelled.
+func (r Request) IsShutdown() bool { return r.ShutdownPartID != 0 }
+
 const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.cancels_request_id, 0),
 	r.start_date, r.end_date, r.days, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
 	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
-	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, '')
+	COALESCE(r.shutdown_part_id, 0),
+	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
+	COALESCE(sd.name, '')
 	FROM requests r
 	JOIN users u ON u.id = r.user_id
 	JOIN leave_types t ON t.id = r.type_id
 	LEFT JOIN users a ON a.id = r.approver_id
-	LEFT JOIN users dby ON dby.id = r.decided_by_id`
+	LEFT JOIN users dby ON dby.id = r.decided_by_id
+	LEFT JOIN shutdown_parts sp ON sp.id = r.shutdown_part_id
+	LEFT JOIN shutdowns sd ON sd.id = sp.shutdown_id`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
 	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.CycleStart,
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
-		&r.CreatedAt, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit, &r.ApproverName, &r.DecidedBy)
+		&r.CreatedAt, &r.ShutdownPartID, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
+		&r.ApproverName, &r.DecidedBy, &r.ShutdownName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
 	}
@@ -204,7 +217,17 @@ func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, e
 	if err := s.ensureYears(ctx, in); err != nil {
 		return Quote{}, err
 	}
-	return s.quote(ctx, s.db, u, in)
+	return s.quote(ctx, s.db, u, in, quoteOpts{})
+}
+
+// quoteOpts relaxes quote for a shutdown request. The days are mandatory, so
+// the type may be one not offered on the apply form (an unlimited "company
+// closure"), the dates may already have passed by the time someone submits,
+// and the balance may go below zero. The overlap check still applies --
+// against everything except the draft being submitted.
+type quoteOpts struct {
+	mandatory bool
+	excludeID int64
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -221,13 +244,13 @@ func (s *Service) ensureYears(ctx context.Context, in Input) error {
 	return nil
 }
 
-func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input) (Quote, error) {
+func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, opt quoteOpts) (Quote, error) {
 	errs := FieldErrors{}
 	var qt Quote
 
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, in.TypeID))
 	switch {
-	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active):
+	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory):
 		errs["type"] = "Choose a type of leave."
 	case err != nil:
 		return Quote{}, err
@@ -253,6 +276,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input) 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
+	case opt.mandatory:
 	case t.Backdate && start.Before(today.AddDate(0, 0, -s.cfg.SickBackdateDays)):
 		errs["start"] = fmt.Sprintf("%s can be applied for up to %d days after the fact.", t.Name, s.cfg.SickBackdateDays)
 	case !t.Backdate && start.Before(today):
@@ -275,14 +299,16 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input) 
 		return qt, errs
 	}
 
+	// Drafts count here although they reserve no balance: booking annual leave
+	// over days a shutdown already covers would charge the same days twice.
 	var overlap int
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND kind = 'leave'
-		AND status IN ('pending', 'approved') AND start_date <= ? AND end_date >= ?`,
-		u.ID, fmtDate(end), fmtDate(start)).Scan(&overlap); err != nil {
+		AND status IN ('draft', 'pending', 'approved') AND start_date <= ? AND end_date >= ? AND id <> ?`,
+		u.ID, fmtDate(end), fmtDate(start), opt.excludeID).Scan(&overlap); err != nil {
 		return Quote{}, err
 	}
 	if overlap > 0 {
-		errs["start"] = "You already have leave booked or waiting for approval on some of these days."
+		errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
 	}
 
 	// Days count against the cycle the leave starts in. A request crossing
@@ -295,7 +321,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input) 
 	if avail := qt.Balance.Available(); avail != nil {
 		after := *avail - qt.Days
 		qt.After = &after
-		if after < 0 {
+		if after < 0 && !opt.mandatory {
 			errs["end"] = fmt.Sprintf("This is %d %s, but you have %d left for this cycle.",
 				qt.Days, plural(qt.Days, "day", "days"), *avail)
 		}
@@ -326,7 +352,7 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		// Re-quoted inside the transaction: the overlap and balance checks
 		// must see the same state the insert commits against.
-		qt, err := s.quote(ctx, tx, u, in)
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{})
 		if err != nil {
 			return err
 		}

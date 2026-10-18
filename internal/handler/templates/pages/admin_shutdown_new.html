@@ -1,0 +1,43 @@
+{{define "content"}}
+{{template "adminnav"}}
+<a class="back" href="/admin/shutdowns">← Shutdowns</a>
+<h1>New shutdown</h1>
+{{with .Data}}
+<form method="post" action="/admin/shutdowns">
+  {{template "csrf" $.CSRF}}
+  <div class="field">
+    <label for="name">Name</label>
+    <input id="name" name="name" value="{{.Input.Name}}" placeholder="December shutdown 2026" required>
+    {{template "err" index .Errors "name"}}
+  </div>
+
+  <fieldset class="panel">
+    <legend>Parts</legend>
+    <p class="hint">Each part charges one leave type. For example: the first week to <em>Annual leave</em>, the rest to <em>Company closure</em>, which deducts nothing. Leave unused rows empty.</p>
+    {{range $i, $p := .Input.Parts}}
+    <div class="field-row">
+      <div class="field">
+        <label for="type{{$i}}">Leave type</label>
+        <select id="type{{$i}}" name="type{{$i}}">
+          <option value="">—</option>
+          {{range $.Data.Types}}<option value="{{.ID}}"{{if eq .ID $p.TypeID}} selected{{end}}>{{.Name}}{{if not .Active}} (not on the apply form){{end}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field"><label for="start{{$i}}">First day</label><input type="date" id="start{{$i}}" name="start{{$i}}" value="{{$p.Start}}"></div>
+      <div class="field"><label for="end{{$i}}">Last day</label><input type="date" id="end{{$i}}" name="end{{$i}}" value="{{$p.End}}"></div>
+    </div>
+    {{template "err" index $.Data.Errors (printf "part%d" $i)}}
+    {{end}}
+  </fieldset>
+
+  <div class="checks">
+    <label><input type="checkbox" name="auto_approve" value="1"{{if .Input.AutoApprove}} checked{{end}}> Approve automatically when submitted</label>
+  </div>
+  <p class="hint">Off: submitted requests go to each person's approver like any leave. Either way the days are mandatory and may take a balance below zero.</p>
+  <div class="actions">
+    <button type="submit">Create and send to everyone</button>
+    <a href="/admin/shutdowns">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}

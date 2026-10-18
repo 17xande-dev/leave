@@ -127,3 +127,69 @@ func TestTypeAndHolidayAdmin(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func (hs *harness) anyTypeID(code string) string {
+	hs.t.Helper()
+	ts, _ := hs.svc.Types(hs.t.Context(), false)
+	for _, t := range ts {
+		if t.Code == code {
+			return itoa(t.ID)
+		}
+	}
+	hs.t.Fatalf("no type %s", code)
+	return ""
+}
+
+// The shutdown path through the pages: an admin creates it, a staff member
+// sees the drafts on their home page and submits one, the admin sees progress.
+func TestShutdownThroughPages(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	res, body := hs.post(hr, "/admin/shutdowns", url.Values{"name": {"December shutdown"},
+		"type0": {hs.anyTypeID("annual")}, "start0": {"2026-12-07"}, "end0": {"2026-12-11"},
+		"type1": {hs.anyTypeID("closure")}, "start1": {"2026-12-21"}, "end1": {"2026-12-31"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("create shutdown: %d\n%s", res.StatusCode, body)
+	}
+	sdPath, _, _ := strings.Cut(res.Header.Get("Location"), "?")
+
+	staff := hs.signIn("staff1")
+	_, home := hs.get(staff, "/")
+	if !strings.Contains(home, "Waiting for you to submit") || !strings.Contains(home, "Company closure") {
+		t.Fatalf("home lacks the drafts:\n%s", home)
+	}
+	draft := regexp.MustCompile(`href="(/leave/\d+)">December shutdown: Annual leave`).FindStringSubmatch(home)
+	if draft == nil {
+		t.Fatal("no link to the annual-leave draft")
+	}
+	if _, page := hs.get(staff, draft[1]); !strings.Contains(page, "Submit this leave") || strings.Contains(page, "Withdraw") {
+		t.Fatal("draft page offers no submit, or offers a withdraw")
+	}
+	res, _ = hs.post(staff, draft[1]+"/submit", url.Values{"note": {"ok"}})
+	if !strings.Contains(res.Header.Get("Location"), "notice=submitted") {
+		t.Fatalf("submit draft: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	// Someone else cannot submit it.
+	if res, _ := hs.post(hs.signIn("staff2"), draft[1]+"/submit", nil); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("another person submitting: %d", res.StatusCode)
+	}
+
+	if _, page := hs.get(hr, sdPath); !strings.Contains(page, "1 awaiting approval") || strings.Contains(page, "Delete this shutdown") {
+		t.Fatalf("shutdown page progress, or delete still offered:\n%s", page)
+	}
+	if res, _ := hs.post(hr, sdPath+"/delete", nil); !strings.Contains(res.Header.Get("Location"), "not-deletable") {
+		t.Fatalf("deleting a shutdown with a submitted request: %s", res.Header.Get("Location"))
+	}
+}
+
+func TestShutdownFormValidation(t *testing.T) {
+	hs := newHarness(t)
+	res, body := hs.post(hs.signIn("hr"), "/admin/shutdowns", url.Values{"name": {"X"},
+		"type0": {hs.anyTypeID("annual")}, "start0": {"2026-12-12"}, "end0": {"2026-12-13"}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all weekends or public holidays") {
+		t.Fatalf("weekend-only part: %d\n%s", res.StatusCode, body)
+	}
+	if !strings.Contains(body, `value="2026-12-12"`) {
+		t.Fatal("the form lost what was entered")
+	}
+}

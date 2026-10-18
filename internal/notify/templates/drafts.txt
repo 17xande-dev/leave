@@ -1,0 +1,6 @@
+{{define "subject"}}Please submit your {{.Request.ShutdownName}} leave{{end}}
+{{define "body"}}Hi {{.To}},
+
+We close for {{.Request.ShutdownName}}, and your leave for it has been filled in for you. Please check it and submit it: the dates and types are fixed, so it only needs your confirmation.
+
+Some of the days may count against annual leave and others not at all; your requests show which.{{end}}

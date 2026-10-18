@@ -109,6 +109,7 @@ func (h *Handler) protectedRoutes() []route {
 		u("POST /leave", h.Apply),
 		u("GET /leave/{id}", h.RequestPage),
 		u("POST /leave/{id}/withdraw", h.Withdraw),
+		u("POST /leave/{id}/submit", h.SubmitDraft),
 		u("POST /leave/{id}/cancel", h.RequestCancellation),
 		u("POST /leave/{id}/decide", h.Decide),
 		u("GET /approvals", h.Approvals),

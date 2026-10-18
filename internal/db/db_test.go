@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,5 +52,20 @@ func TestForeignKeysEnforced(t *testing.T) {
 	                 VALUES ('x', 999, '', '')`)
 	if err == nil {
 		t.Fatal("insert referencing a missing user succeeded; foreign keys are off")
+	}
+}
+
+// A database from an older build must be refused at boot with a clear
+// message, not fail on the first query that touches a new column.
+func TestOldDatabaseRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "older build") {
+		t.Fatalf("old database: err = %v", err)
 	}
 }

@@ -84,11 +84,13 @@ func (s *Service) Override(ctx context.Context, userID int64) (int64, error) {
 	return id, err
 }
 
-// Withdraw takes back a request that has not been decided yet.
+// Withdraw takes back a request that has not been decided yet. A shutdown
+// request cannot be withdrawn: the days are mandatory.
 func (s *Service) Withdraw(ctx context.Context, u users.User, id int64) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = 'withdrawn', decided_at = ?
-			WHERE id = ? AND user_id = ? AND status = 'pending'`, stampNow(s.Now()), id, u.ID)
+			WHERE id = ? AND user_id = ? AND status = 'pending' AND shutdown_part_id IS NULL`,
+			stampNow(s.Now()), id, u.ID)
 		if err != nil {
 			return err
 		}
@@ -108,7 +110,8 @@ func (s *Service) Withdraw(ctx context.Context, u users.User, id int64) error {
 // decision (what does it mean for the days already taken?); for now an admin
 // handles it with a balance adjustment.
 func (s *Service) CanRequestCancellation(u users.User, r Request) bool {
-	return r.UserID == u.ID && r.Kind == KindLeave && r.Status == StatusApproved && r.Start > fmtDate(s.today())
+	return r.UserID == u.ID && r.Kind == KindLeave && r.Status == StatusApproved && !r.IsShutdown() &&
+		r.Start > fmtDate(s.today())
 }
 
 // RequestCancellation asks for approved leave to be cancelled. The request

@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -68,7 +68,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err != nil {
 			return err
 		}
-		if err := n.send(ctx, tx, "submitted", to, r, e.Kind == leave.EventReassigned, "Review the request"); err != nil {
+		if err := n.send(ctx, tx, "submitted", to, r, e.Kind == leave.EventReassigned, "Review the request", ""); err != nil {
 			return err
 		}
 	case leave.EventWithdrawn:
@@ -76,11 +76,16 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err != nil {
 			return err
 		}
-		if err := n.send(ctx, tx, "withdrawn", to, r, false, "View the request"); err != nil {
+		if err := n.send(ctx, tx, "withdrawn", to, r, false, "View the request", ""); err != nil {
+			return err
+		}
+	case leave.EventDraftsCreated:
+		// To the home page, which lists every draft, rather than the first.
+		if err := n.send(ctx, tx, "drafts", []recipient{{r.UserName, r.UserEmail}}, r, false, "Submit your leave", "/"); err != nil {
 			return err
 		}
 	case leave.EventDecided:
-		if err := n.send(ctx, tx, "decided", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the request"); err != nil {
+		if err := n.send(ctx, tx, "decided", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the request", ""); err != nil {
 			return err
 		}
 		if r.Status == leave.StatusApproved {
@@ -135,7 +140,11 @@ type msgData struct {
 // enqueues it. Someone with no email address in the directory is skipped with
 // a warning: failing the approval because of a missing mail attribute would
 // punish the wrong person.
-func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recipient, r leave.Request, reassigned bool, linkText string) error {
+// path is where the button goes; empty means the request's own page.
+func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recipient, r leave.Request, reassigned bool, linkText, path string) error {
+	if path == "" {
+		path = fmt.Sprintf("/leave/%d", r.ID)
+	}
 	if len(to) == 0 {
 		slog.Warn("notify: nobody to tell", "template", tmpl, "request", r.ID)
 	}
@@ -145,7 +154,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			continue
 		}
 		m, err := n.render(tmpl, msgData{To: firstName(p.Name), Request: r, Dates: Dates(r.Start, r.End),
-			Days: days(r), Reassigned: reassigned}, fmt.Sprintf("%s/leave/%d", n.baseURL, r.ID), linkText)
+			Days: days(r), Reassigned: reassigned}, n.baseURL+path, linkText)
 		if err != nil {
 			return err
 		}

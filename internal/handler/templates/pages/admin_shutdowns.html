@@ -1,0 +1,25 @@
+{{define "content"}}
+{{template "adminnav"}}
+<div class="page-head">
+  <h1>Shutdowns</h1>
+  <a class="button" href="/admin/shutdowns/new">New shutdown</a>
+</div>
+<p class="muted">A period the whole organisation closes. Everyone gets pre-filled requests to submit; some days can count against annual leave and others against nothing.</p>
+{{with .Data}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Name</th><th>Dates</th><th>Parts</th><th>Approval</th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td><a href="/admin/shutdowns/{{.ID}}">{{.Name}}</a></td>
+      <td>{{date .Start}} – {{date .End}}</td>
+      <td>{{range $i, $p := .Parts}}{{if $i}}<br>{{end}}{{$p.TypeName}}: {{$p.Days}} {{plural $p.Days "day" "days"}}{{end}}</td>
+      <td>{{if .AutoApprove}}Automatic{{else}}Normal chain{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="muted">No shutdowns yet.</p>{{end}}
+{{end}}

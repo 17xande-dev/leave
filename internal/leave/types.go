@@ -27,6 +27,8 @@ type Type struct {
 	RequiresNote bool
 	Active       bool
 	Sort         int
+
+	inactive bool // seed only: the default's Active is the inverse
 }
 
 func intp(n int) *int { return &n }
@@ -43,6 +45,13 @@ var bceaDefaults = []Type{
 	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar},
 	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar},
 	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true},
+	// Not BCEA: days off the employer grants that do not touch annual leave.
+	// Seeded inactive with no days, because how many is a policy decision;
+	// an admin sets the allowance and switches it on.
+	{Code: "floating", Name: "Floating holidays", Allowance: intp(0), CycleMonths: 12, Unit: UnitWorkdays, inactive: true},
+	// The free part of a company shutdown: unlimited, and inactive so nobody
+	// can apply for it themselves -- only shutdown requests use it.
+	{Code: "closure", Name: "Company closure", CycleMonths: 12, Unit: UnitWorkdays, inactive: true},
 }
 
 // ErrNotFound is returned for a missing type or request.
@@ -63,17 +72,19 @@ func scanType(row interface{ Scan(...any) error }) (Type, error) {
 	return t, err
 }
 
-// SeedTypes inserts the BCEA defaults into an empty leave_types table. A
-// table with any row in it is left alone, so an admin's edits survive every
-// restart.
+// SeedTypes inserts any default type whose code is not in the table yet.
+// An existing row is never touched, so an admin's edits survive every
+// restart; and types cannot be deleted (only deactivated), so a missing code
+// means a default added since the database was created.
 func (s *Service) SeedTypes(ctx context.Context) error {
-	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM leave_types`).Scan(&n); err != nil || n > 0 {
-		return err
-	}
 	for i, t := range bceaDefaults {
-		t.Active, t.Sort = true, i
-		if _, err := s.SaveType(ctx, t); err != nil {
+		t.Active, t.Sort = !t.inactive, i
+		_, err := s.SaveType(ctx, t)
+		var fe FieldErrors
+		if errors.As(err, &fe) && fe["code"] != "" {
+			continue // already there
+		}
+		if err != nil {
 			return err
 		}
 	}

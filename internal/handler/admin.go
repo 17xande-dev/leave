@@ -34,6 +34,12 @@ func (h *Handler) adminRoutes() []route {
 		a("POST /admin/holidays", h.AdminAddHoliday),
 		a("POST /admin/holidays/generate", h.AdminGenerateHolidays),
 		a("POST /admin/holidays/delete", h.AdminDeleteHoliday),
+		a("GET /admin/shutdowns", h.AdminShutdowns),
+		a("GET /admin/shutdowns/new", h.AdminShutdownForm),
+		a("POST /admin/shutdowns", h.AdminCreateShutdown),
+		a("GET /admin/shutdowns/{id}", h.AdminShutdown),
+		a("POST /admin/shutdowns/{id}/generate", h.AdminGenerateDrafts),
+		a("POST /admin/shutdowns/{id}/delete", h.AdminDeleteShutdown),
 		a("GET /admin/outbox", h.AdminOutbox),
 		a("POST /admin/outbox/{id}/retry", h.AdminRetry),
 	}

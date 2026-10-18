@@ -170,3 +170,41 @@ func TestDates(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+func TestShutdownNotifications(t *testing.T) {
+	e := setup(t)
+	types, _ := e.svc.Types(e.ctx, false)
+	var closure int64
+	for _, ty := range types {
+		if ty.Code == "closure" {
+			closure = ty.ID
+		}
+	}
+	_, err := e.svc.CreateShutdown(e.ctx, e.people["hr"], leave.ShutdownInput{Name: "December shutdown", AutoApprove: true,
+		Parts: []leave.PartInput{{TypeID: e.annual, Start: "2026-12-07", End: "2026-12-11"},
+			{TypeID: closure, Start: "2026-12-21", End: "2026-12-31"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	// One email per person with an address (hr2 has none), not one per draft.
+	if len(jobs) != 4 {
+		t.Fatalf("%d jobs after creating a shutdown, want 4", len(jobs))
+	}
+	m := email(t, jobs[0])
+	if !strings.Contains(m.Subject, "Please submit your December shutdown leave") || !strings.Contains(m.Text, "https://leave.test/\n") {
+		t.Fatalf("drafts email:\n%s\n%s", m.Subject, m.Text)
+	}
+
+	ds, _ := e.svc.Drafts(e.ctx, e.people["staff"].ID)
+	if _, err := e.svc.SubmitDraft(e.ctx, e.people["staff"], ds[0].ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	if len(jobs) != 2 || jobs[1].kind != "calendar_create" {
+		t.Fatalf("auto-approved submit jobs = %+v", jobs)
+	}
+	if m := email(t, jobs[0]); !strings.Contains(m.Text, "was approved automatically.") || strings.Contains(m.Text, "Their note") {
+		t.Fatalf("auto-approval email:\n%s", m.Text)
+	}
+}
