@@ -8,7 +8,7 @@ import (
 // A Tuesday-to-Sunday week with Monday off, and Sunday restricted: it cannot
 // be taken off alone, only inside a run of at least 3 working days or as a
 // weekend off. "Today" in the fixture is Monday 5 October 2026.
-func newChurchWeek(t *testing.T) *fixture {
+func newSundayWeek(t *testing.T) *fixture {
 	f := newFixture(t)
 	sun := time.Sunday
 	f.setSettings(func(st *Settings) {
@@ -28,7 +28,7 @@ func newChurchWeek(t *testing.T) *fixture {
 }
 
 func TestWorkWeekCounting(t *testing.T) {
-	f := newChurchWeek(t)
+	f := newSundayWeek(t)
 	cases := []struct {
 		name, code, start, end string
 		days                   int    // when allowed
@@ -58,7 +58,7 @@ func TestWorkWeekCounting(t *testing.T) {
 }
 
 func TestWeekendsOff(t *testing.T) {
-	f := newChurchWeek(t)
+	f := newSundayWeek(t)
 	r := f.mustSubmit("staff", "weekend", "2026-10-10", "2026-10-11")
 	if r.Days != 1 {
 		t.Fatalf("a weekend off costs %d, want 1", r.Days)
@@ -82,7 +82,7 @@ func TestWeekendsOff(t *testing.T) {
 
 // A shutdown is mandatory: its parts may cover a Sunday whatever the rule.
 func TestShutdownIgnoresRestrictedDay(t *testing.T) {
-	f := newChurchWeek(t)
+	f := newSundayWeek(t)
 	if _, err := f.svc.CreateShutdown(f.ctx, f.people["hr"], ShutdownInput{Name: "x",
 		Parts: []PartInput{{TypeID: f.types["annual"].ID, Start: "2026-12-12", End: "2026-12-13"}}}); err != nil {
 		t.Fatal(err)

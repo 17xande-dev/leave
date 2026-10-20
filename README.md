@@ -194,7 +194,7 @@ make recreate-db         # drop the local database (after a schema change)
 The fake directory is `testdata/directory.json`: `pastor` (set as the final approver on **Admin → Settings**, which starts with none),
 `headops` and `headkids` (department heads), `staff1`, `staff2`, and `hr` (an admin).
 Each has a `"teams"` list: `staff1`, `hr` and `headops` are in the Band, `staff2` and
-`headkids` in Kids church, so **Admin → Teams** has two working teams. Any
+`headkids` in Kids team, so **Admin → Teams** has two working teams. Any
 non-empty password works. The config refuses `DIRECTORY=fake` unless
 `COOKIE_SECURE=false`, so it cannot reach a real deployment. Without Graph configured,
 calendar events are logged instead of created.

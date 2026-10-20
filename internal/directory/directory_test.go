@@ -74,7 +74,7 @@ func TestFakeTeamsFromTheFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	teams, err := f.Teams(context.Background())
-	if err != nil || len(teams) != 2 || teams[0].Name != "Band" || teams[1].Name != "Kids church" {
+	if err != nil || len(teams) != 2 || teams[0].Name != "Band" || teams[1].Name != "Kids team" {
 		t.Fatalf("teams = %+v, %v", teams, err)
 	}
 	if len(teams[0].MemberIDs) != 3 || len(teams[1].MemberIDs) != 2 {

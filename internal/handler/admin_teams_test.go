@@ -11,7 +11,7 @@ func TestTeamsAdminPage(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 	_, body := hs.get(hr, "/admin/teams")
-	for _, want := range []string{"Teams", "Band", "Kids church", "Default limit"} {
+	for _, want := range []string{"Teams", "Band", "Kids team", "Default limit"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("teams page lacks %q:\n%s", want, body)
 		}
@@ -116,7 +116,7 @@ func TestTeamsPageSaysWhenOff(t *testing.T) {
 	hs := newHarness(t)
 	hs.h.teamsOn = false
 	_, body := hs.get(hs.signIn("hr"), "/admin/teams")
-	if !strings.Contains(body, "Teams are not set up") || !strings.Contains(body, "LDAP_TEAMS_BASE_DN") || strings.Contains(body, "Kids church") {
+	if !strings.Contains(body, "Teams are not set up") || !strings.Contains(body, "LDAP_TEAMS_BASE_DN") || strings.Contains(body, "Kids team") {
 		t.Fatalf("off page:\n%s", body)
 	}
 }
@@ -128,11 +128,11 @@ func TestInactiveTeamsHiddenUntilAsked(t *testing.T) {
 	}
 	hr := hs.signIn("hr")
 	_, body := hs.get(hr, "/admin/teams")
-	if strings.Contains(body, "Kids church") || !strings.Contains(body, "Show inactive teams") {
+	if strings.Contains(body, "Kids team") || !strings.Contains(body, "Show inactive teams") {
 		t.Fatalf("default view:\n%s", body)
 	}
 	_, body = hs.get(hr, "/admin/teams?inactive=1")
-	if !strings.Contains(body, "Kids church") || !strings.Contains(body, "gone from the directory") {
+	if !strings.Contains(body, "Kids team") || !strings.Contains(body, "gone from the directory") {
 		t.Fatalf("inactive view:\n%s", body)
 	}
 }
@@ -141,7 +141,7 @@ func TestPersonPageListsTheirTeams(t *testing.T) {
 	hs := newHarness(t)
 	staff, _ := hs.us.ByUsername(t.Context(), "staff2")
 	_, body := hs.get(hs.signIn("hr"), "/admin/users/"+itoa(staff.ID))
-	if !strings.Contains(body, "Kids church") {
+	if !strings.Contains(body, "Kids team") {
 		t.Fatalf("person page lacks the team:\n%s", body)
 	}
 	if strings.Contains(body, "Band") {
