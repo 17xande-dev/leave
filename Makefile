@@ -14,12 +14,15 @@ DEV_ENV = DIRECTORY=fake COOKIE_SECURE=false \
 
 # Deployment target. The address, user and key live in ~/.ssh/config under
 # this alias, never in the repo:
-#   Host leave-server
+#   Host docker-server
 #     HostName <the server's address>
 #     User <you>
 DEPLOY_HOST ?= docker-server
 DEPLOY_DIR ?= ~/leave
-REPO ?= git@github.com:17xande-dev/leave.git
+# HTTPS, not SSH: the repo is public, so the server needs no key to read it,
+# and an ssh:// clone fails with "Host key verification failed" on a server
+# that has never connected to github.com (nobody is there to accept the key).
+REPO ?= https://github.com/17xande-dev/leave.git
 
 .PHONY: run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit deploy check-pushed
 
@@ -86,9 +89,8 @@ check-pushed:
 	  echo "refusing to deploy: HEAD is not what origin has; push (or pull) first" >&2; exit 1; fi
 
 ## deploy: clone or update the repo on the server, then rebuild and restart
-# The server needs read access to the (private) repo: a read-only deploy key
-# on GitHub. .env lives only on the server; the first deploy stops and asks for
-# it rather than starting a container with no configuration.
+# .env lives only on the server; the first deploy stops and asks for it rather
+# than starting a container with no configuration.
 deploy: check-pushed
 	ssh $(DEPLOY_HOST) 'set -e; \
 	  if [ -d $(DEPLOY_DIR)/.git ]; then git -C $(DEPLOY_DIR) pull --ff-only; \

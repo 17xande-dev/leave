@@ -257,22 +257,23 @@ refuses to run with uncommitted or unpushed changes, because the server pulls fr
 One-time setup:
 
 1. **Name the server in `~/.ssh/config`** on your workstation. The address stays out of the
-   repo, and the Makefile uses only the alias (`DEPLOY_HOST`, default `leave-server`):
+   repo, and the Makefile uses only the alias (`DEPLOY_HOST`, default `docker-server`):
    ```
-   Host leave-server
+   Host docker-server
      HostName <the server's address>
      User <your user on the server>
    ```
-2. **Let the server read the private repo.** On the server, create a key with
-   `ssh-keygen -t ed25519 -f ~/.ssh/leave_deploy`. Add the public half on GitHub under the
-   repo's **Settings → Deploy keys** (read-only). Then tell the server's ssh to use it for
-   GitHub in its own `~/.ssh/config` (`Host github.com`, `IdentityFile ~/.ssh/leave_deploy`).
+2. **Nothing to set up for GitHub.** The repo is public, so the server clones it over
+   HTTPS (`REPO`) with no key. If the repo ever goes private again, switch `REPO` back to
+   the `git@github.com:` form and give the server a read-only deploy key. Also run
+   `ssh -T git@github.com` on the server once to accept GitHub's host key, or the clone
+   fails with "Host key verification failed".
 3. **Run `make deploy` once.** It clones into `~/leave` (`DEPLOY_DIR`) and stops, because
    there's no `.env` yet. On the server, run `cp ~/leave/.env.example ~/leave/.env` and fill
    it in, then deploy again.
 
 After that, every deploy is: commit, push, `make deploy`. Logs are at
-`ssh leave-server 'cd ~/leave && docker compose logs -f'`.
+`ssh docker-server 'cd ~/leave && docker compose logs -f'`.
 
 The schema has no migrations yet. If a change refuses to start against the old database,
 the logs say so. Back up the database first (below), then recreate it with
