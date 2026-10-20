@@ -327,3 +327,46 @@ func TestNegativeBalanceNotifications(t *testing.T) {
 		t.Fatalf("refusal email:\n%s", m.Text)
 	}
 }
+
+func TestSpecialPermissionEmailListsEveryWarning(t *testing.T) {
+	e := setup(t)
+	e.dept(t, "Pair", "staff", "hr")
+	if err := e.svc.SetCoverageRule(e.ctx, "Pair", 50); err != nil {
+		t.Fatal(err)
+	}
+	us := users.NewStore(e.db)
+	// A team of the same two people, with its own limit.
+	if _, _, err := us.SyncTeams(e.ctx, "fake", []directory.Team{{ID: "t1", Name: "Band",
+		MemberIDs: []string{"CN=staff", "CN=hr"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var bandID int64
+	e.db.QueryRow(`SELECT id FROM teams`).Scan(&bandID)
+	if err := e.svc.SetTeamRule(e.ctx, bandID, 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Submit(e.ctx, e.people["hr"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14"}); err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Override: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	m := email(t, jobs[0])
+	for _, want := range []string{"100% of Pair (2 of 2)", "100% of the Band team (2 of 2)"} {
+		if !strings.Contains(m.Text, want) {
+			t.Fatalf("submitted email lacks %q:\n%s", want, m.Text)
+		}
+	}
+	// Escalated: a "Why:" list with a line for each.
+	if _, err := e.svc.Decide(e.ctx, e.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	m = email(t, jobs[0])
+	if !strings.Contains(m.Text, "Why:\n- 100% of Pair (2 of 2)") || !strings.Contains(m.Text, "\n- 100% of the Band team (2 of 2)") {
+		t.Fatalf("escalated email:\n%s", m.Text)
+	}
+}

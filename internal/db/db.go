@@ -106,6 +106,34 @@ CREATE TABLE IF NOT EXISTS coverage_rules (
 	max_percent  INTEGER NOT NULL CHECK (max_percent BETWEEN 1 AND 100)
 ) STRICT;
 
+-- Volunteer teams, as the directory (or later Planning Center) lists them.
+-- Rows are never deleted: a team that vanishes from the source is disabled, so
+-- its rule survives a brief outage. ext_id is the source's permanent id.
+CREATE TABLE IF NOT EXISTS teams (
+	id         INTEGER PRIMARY KEY,
+	ext_id     TEXT NOT NULL UNIQUE,
+	name       TEXT NOT NULL,
+	source     TEXT NOT NULL CHECK (source IN ('ldap', 'pco', 'fake')),
+	disabled   INTEGER NOT NULL DEFAULT 0 CHECK (disabled IN (0, 1)),
+	synced_at  TEXT NOT NULL
+) STRICT;
+
+-- Replaced wholesale for a team on each sync. Only people with a row in users
+-- are members, so non-staff volunteers are never counted.
+CREATE TABLE IF NOT EXISTS team_members (
+	team_id  INTEGER NOT NULL REFERENCES teams(id),
+	user_id  INTEGER NOT NULL REFERENCES users(id),
+	PRIMARY KEY (team_id, user_id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+
+-- The most of one team that may be away on a single day, as a percentage. No
+-- row means the settings default applies, and with no default, no limit.
+CREATE TABLE IF NOT EXISTS team_rules (
+	team_id      INTEGER PRIMARY KEY REFERENCES teams(id),
+	max_percent  INTEGER NOT NULL CHECK (max_percent BETWEEN 1 AND 100)
+) STRICT;
+
 -- Policy an admin changes without a deploy: one typed row (id is always 1), not
 -- key/value, so STRICT and the CHECKs guard every field. work_days is a
 -- comma-separated list of day codes; the Go side validates the list, since
@@ -119,6 +147,9 @@ CREATE TABLE IF NOT EXISTS settings (
 	final_approver_id     INTEGER REFERENCES users(id),
 	sick_backdate_days    INTEGER NOT NULL DEFAULT 14 CHECK (sick_backdate_days BETWEEN 0 AND 365),
 	sick_cycle_start_year INTEGER NOT NULL DEFAULT 2025 CHECK (sick_cycle_start_year BETWEEN 2000 AND 2100),
+	-- The default team limit, a percentage; 0 means a team with no rule of its
+	-- own has no limit.
+	team_default_percent  INTEGER NOT NULL DEFAULT 0 CHECK (team_default_percent BETWEEN 0 AND 100),
 	updated_by_id         INTEGER REFERENCES users(id),
 	updated_at            TEXT NOT NULL DEFAULT ''
 ) STRICT;
@@ -351,6 +382,7 @@ func checkCurrent(d *sql.DB) error {
 		"users":       {"ext_id", "long_weekend"},
 		"requests":    {"shutdown_part_id", "escalate", "allow_negative"},
 		"leave_types": {"restricted_rule", "coverage_rule"},
+		"settings":    {"team_default_percent"},
 	}
 	for table, cols := range want {
 		have := map[string]bool{}
@@ -395,7 +427,7 @@ func checkCurrent(d *sql.DB) error {
 	// A new table is invisible to the column check above: with requests
 	// already there, a missing one means an older build made the database.
 	for _, table := range []string{"coverage_rules", "request_steps", "settings",
-		"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens"} {
+		"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "teams", "team_members", "team_rules"} {
 		var n int
 		if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
 			return err

@@ -45,6 +45,11 @@ func newFixture(t *testing.T) *fixture {
 	if _, _, err := us.Sync(ctx, all); err != nil {
 		t.Fatal(err)
 	}
+	if ts, err := dir.Teams(ctx); err != nil {
+		t.Fatal(err)
+	} else if _, _, err := us.SyncTeams(ctx, "fake", ts); err != nil {
+		t.Fatal(err)
+	}
 	pastor, _ := us.ByUsername(ctx, "pastor")
 	hr, _ := us.ByUsername(ctx, "hr")
 	st, _ := svc.Settings(ctx)
@@ -451,5 +456,40 @@ func TestDisabledUserGetsNothing(t *testing.T) {
 	// The old session's next call is refused too.
 	if _, err := staff.CallTool(context.Background(), &mcp.CallToolParams{Name: "my_balances"}); err == nil {
 		t.Error("a disabled user's open session still works")
+	}
+}
+
+// A team limit shows in the preview and the request detail as its own
+// warning, next to any department one.
+func TestTeamCoverageWarningsAreAList(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	teams, _ := f.svc.Teams(ctx, false)
+	for _, tm := range teams {
+		if tm.Name == "Band" {
+			if err := f.svc.SetTeamRule(ctx, tm.ID, 34); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	args := map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-14", "note": "n"}
+	f.ok(f.as("headops"), "apply_for_leave", args)
+
+	staff := f.as("staff1")
+	p := f.ok(staff, "preview_request", args)
+	warns, _ := p.Data["coverage_warnings"].([]any)
+	if len(warns) != 1 || !strings.Contains(warns[0].(string), "the Band team (2 of 3)") || p.Data["can_ask_special_permission"] != true {
+		t.Fatalf("preview = %v", p.Data)
+	}
+	args["override"] = true
+	r := f.ok(staff, "apply_for_leave", args)
+	d := f.ok(f.as("headops"), "get_request", map[string]any{"id": id(r)})
+	if w, _ := d.Data["coverage_warnings"].([]any); len(w) != 1 {
+		t.Fatalf("get_request = %v", d.Data)
+	}
+	q := f.ok(f.as("headops"), "approval_queue", nil)
+	item := q.Data["queue"].([]any)[0].(map[string]any)
+	if w, _ := item["coverage_warnings"].([]any); len(w) != 1 {
+		t.Fatalf("queue = %v", q.Data)
 	}
 }

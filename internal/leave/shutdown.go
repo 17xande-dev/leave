@@ -394,7 +394,7 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 		if err != nil {
 			return err
 		}
-		escalate := !d.IsShutdown() && override && qt.Coverage != nil
+		escalate := !d.IsShutdown() && override && len(qt.Coverage) > 0
 		status, decidedAt, decisionNote := StatusPending, any(nil), ""
 		if auto {
 			status, decidedAt, decisionNote = StatusApproved, stampNow(s.Now()), "Approved automatically: company shutdown."

@@ -62,6 +62,9 @@ type Directory struct {
 	UserFilter string
 	// AdminGroup is the DN of the AD group whose members administer the app.
 	AdminGroup string
+	// TeamsBaseDN is the OU holding the AD groups that are volunteer teams.
+	// Empty turns the team feature off.
+	TeamsBaseDN string
 	// CAFile is a PEM bundle for an internal CA; empty uses the system roots.
 	CAFile string
 	// InsecureSkipVerify is for a lab DC with a self-signed certificate only.
@@ -110,6 +113,7 @@ func Load() (Config, error) {
 			BaseDN:             strings.TrimSpace(os.Getenv("LDAP_BASE_DN")),
 			UserFilter:         getenv("LDAP_USER_FILTER", "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"),
 			AdminGroup:         strings.TrimSpace(os.Getenv("LDAP_ADMIN_GROUP")),
+			TeamsBaseDN:        strings.TrimSpace(os.Getenv("LDAP_TEAMS_BASE_DN")),
 			CAFile:             strings.TrimSpace(os.Getenv("LDAP_CA_FILE")),
 			InsecureSkipVerify: os.Getenv("LDAP_INSECURE_SKIP_VERIFY") == "true",
 		},

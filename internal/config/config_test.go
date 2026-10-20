@@ -24,6 +24,19 @@ func TestFakeDirectoryRefusedWithSecureCookies(t *testing.T) {
 	}
 }
 
+// The team feature is off unless its base DN is given, and the DN is trimmed.
+func TestTeamsBaseDN(t *testing.T) {
+	setenv(t, map[string]string{"DIRECTORY": "fake", "COOKIE_SECURE": "false"})
+	c, err := Load()
+	if err != nil || c.Directory.TeamsBaseDN != "" {
+		t.Fatalf("unset: %q, %v", c.Directory.TeamsBaseDN, err)
+	}
+	t.Setenv("LDAP_TEAMS_BASE_DN", " OU=Teams,DC=x ")
+	if c, err = Load(); err != nil || c.Directory.TeamsBaseDN != "OU=Teams,DC=x" {
+		t.Fatalf("set: %q, %v", c.Directory.TeamsBaseDN, err)
+	}
+}
+
 func TestPartialConfigRefused(t *testing.T) {
 	base := map[string]string{"DIRECTORY": "fake", "COOKIE_SECURE": "false"}
 	cases := map[string]map[string]string{

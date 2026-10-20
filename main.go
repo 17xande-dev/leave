@@ -89,7 +89,7 @@ func run() error {
 	}
 	oauthSrv, mcpHandler := assistant(cfg, database, userStore, leaveSvc, jobs)
 	app, err := newApp(cfg, handler.Deps{Users: userStore, Sessions: sessions, Directory: dir, Leave: leaveSvc,
-		Outbox: jobs, Kick: worker.Kick, OAuth: oauthSrv, MCP: mcpHandler})
+		Outbox: jobs, Kick: worker.Kick, TeamsEnabled: teamsSource(cfg.Directory) != "", OAuth: oauthSrv, MCP: mcpHandler})
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func run() error {
 	defer stop()
 
 	go worker.Run(ctx, 30*time.Second)
-	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore) })
+	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
 	go every(ctx, time.Hour, func() {
 		if n, err := sessions.DeleteExpired(ctx); err != nil {
 			slog.Error("sweep sessions", "err", err)
@@ -173,15 +173,28 @@ func newDirectory(c config.Directory) (directory.Directory, error) {
 	}
 	return directory.NewLDAP(directory.LDAPConfig{
 		URL: c.URL, BindDN: c.BindDN, BindPassword: c.BindPassword, BaseDN: c.BaseDN,
-		UserFilter: c.UserFilter, AdminGroup: c.AdminGroup, CAFile: c.CAFile,
+		UserFilter: c.UserFilter, AdminGroup: c.AdminGroup, TeamsBaseDN: c.TeamsBaseDN, CAFile: c.CAFile,
 		InsecureSkipVerify: c.InsecureSkipVerify,
 	})
 }
 
-// syncDirectory refreshes the local users copy. A failure is logged and the
-// old copy kept: the app keeps working on slightly stale data rather than
-// going down with the DC.
-func syncDirectory(ctx context.Context, dir directory.Directory, us *users.Store) {
+// teamsSource names where teams come from ("ldap", "fake"), or is empty when
+// the feature is off: an LDAP directory with no LDAP_TEAMS_BASE_DN.
+func teamsSource(c config.Directory) string {
+	switch {
+	case c.Kind == "fake":
+		return "fake"
+	case c.TeamsBaseDN != "":
+		return "ldap"
+	}
+	return ""
+}
+
+// syncDirectory refreshes the local users copy, then the teams (which refer
+// to users). A failure is logged and the old copy kept: the app keeps working
+// on slightly stale data rather than going down with the DC. teams is the
+// teams source's name, empty when teams are off.
+func syncDirectory(ctx context.Context, dir directory.Directory, us *users.Store, teams string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	all, err := dir.AllUsers(ctx)
@@ -195,6 +208,24 @@ func syncDirectory(ctx context.Context, dir directory.Directory, us *users.Store
 		return
 	}
 	slog.Info("directory sync", "users", n, "disabled", disabled)
+
+	ts, ok := dir.(directory.TeamSource)
+	if teams == "" || !ok {
+		return
+	}
+	list, err := ts.Teams(ctx)
+	if err != nil {
+		// Not applied: a failed search must not look like "no teams", which
+		// would empty every team.
+		slog.Error("team sync", "err", err)
+		return
+	}
+	n, gone, err := us.SyncTeams(ctx, teams, list)
+	if err != nil {
+		slog.Error("team sync", "err", err)
+		return
+	}
+	slog.Info("team sync", "teams", n, "disabled", gone)
 }
 
 // every runs f now and then on each tick until ctx ends.

@@ -26,6 +26,8 @@ func TestSaveSettingsRejectsBadInput(t *testing.T) {
 		{"backdate 366", func(s *Settings) { s.SickBackdateDays = 366 }, "sick_backdate"},
 		{"cycle year 1999", func(s *Settings) { s.SickCycleAnchor = 1999 }, "sick_cycle"},
 		{"cycle year 2101", func(s *Settings) { s.SickCycleAnchor = 2101 }, "sick_cycle"},
+		{"team default 101", func(s *Settings) { s.TeamDefaultPercent = 101 }, "team_default"},
+		{"team default negative", func(s *Settings) { s.TeamDefaultPercent = -1 }, "team_default"},
 		{"final approver unknown", func(s *Settings) { s.FinalApproverID = 9999 }, "final_approver"},
 		{"final approver disabled", func(s *Settings) { s.FinalApproverID = f.people["orphan"].ID }, "final_approver"},
 	}

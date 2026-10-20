@@ -68,6 +68,38 @@ func TestLoadFakeResolvesManagers(t *testing.T) {
 	}
 }
 
+func TestFakeTeamsFromTheFixture(t *testing.T) {
+	f, err := LoadFake("../../testdata/directory.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	teams, err := f.Teams(context.Background())
+	if err != nil || len(teams) != 2 || teams[0].Name != "Band" || teams[1].Name != "Kids church" {
+		t.Fatalf("teams = %+v, %v", teams, err)
+	}
+	if len(teams[0].MemberIDs) != 3 || len(teams[1].MemberIDs) != 2 {
+		t.Fatalf("members = %+v", teams)
+	}
+	// A user removed from the directory leaves their teams, as a disabled AD account does.
+	f.Remove("staff2")
+	teams, _ = f.Teams(context.Background())
+	if len(teams[1].MemberIDs) != 1 {
+		t.Fatalf("after remove: %+v", teams[1])
+	}
+}
+
+// With no base DN the LDAP source says teams are off rather than listing none,
+// so the sync does not wipe every team.
+func TestLDAPTeamsOffWithoutBaseDN(t *testing.T) {
+	l, err := NewLDAP(LDAPConfig{URL: "ldaps://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Teams(context.Background()); !errors.Is(err, ErrTeamsOff) {
+		t.Fatalf("Teams() = %v, want ErrTeamsOff", err)
+	}
+}
+
 // TestLiveLDAP runs against a real DC. Opt in with LDAP_LIVE=1 plus the usual
 // LDAP_* variables and LDAP_LIVE_USER / LDAP_LIVE_PASSWORD, e.g.
 //
@@ -81,7 +113,7 @@ func TestLiveLDAP(t *testing.T) {
 		URL: os.Getenv("LDAP_URL"), BindDN: os.Getenv("LDAP_BIND_DN"),
 		BindPassword: os.Getenv("LDAP_BIND_PASSWORD"), BaseDN: os.Getenv("LDAP_BASE_DN"),
 		UserFilter: "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
-		AdminGroup: os.Getenv("LDAP_ADMIN_GROUP"), CAFile: os.Getenv("LDAP_CA_FILE"),
+		AdminGroup: os.Getenv("LDAP_ADMIN_GROUP"), TeamsBaseDN: os.Getenv("LDAP_TEAMS_BASE_DN"), CAFile: os.Getenv("LDAP_CA_FILE"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +138,33 @@ func TestLiveLDAP(t *testing.T) {
 		}
 	}
 	t.Logf("%d users, %d with a manager", len(users), withManager)
+
+	// Teams are searched only when LDAP_TEAMS_BASE_DN is set.
+	if os.Getenv("LDAP_TEAMS_BASE_DN") == "" {
+		t.Log("LDAP_TEAMS_BASE_DN unset: skipping the team search")
+		return
+	}
+	teams, err := d.Teams(ctx)
+	if err != nil {
+		t.Fatalf("teams: %v", err)
+	}
+	known := map[string]bool{}
+	for _, u := range users {
+		known[u.ID] = true
+	}
+	for _, tm := range teams {
+		if tm.ID == "" || tm.Name == "" {
+			t.Errorf("team without an id or name: %+v", tm)
+		}
+		strangers := 0
+		for _, m := range tm.MemberIDs {
+			if !known[m] {
+				strangers++
+			}
+		}
+		t.Logf("team %q: %d members, %d not in the user listing", tm.Name, len(tm.MemberIDs), strangers)
+	}
+	t.Logf("%d teams", len(teams))
 }
 
 // AD tools show objectGUID with the first three groups byte-swapped from the

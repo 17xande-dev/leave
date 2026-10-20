@@ -59,6 +59,12 @@
       {{template "err" index .Errors "sick_cycle"}}
     </div>
   </div>
+  <div class="field narrow">
+    <label for="team_default">Default team limit (%)</label>
+    <input id="team_default" name="team_default" inputmode="numeric" size="4" value="{{.Form.TeamDefault}}">
+    <span class="hint">The most of a volunteer team that may be away on one day, for every team with no limit of its own (set those on Teams). 1 to 100, or empty for no default.</span>
+    {{template "err" index .Errors "team_default"}}
+  </div>
   <div class="actions"><button type="submit">Save</button></div>
 </form>
 {{if .UpdatedAt}}<p class="muted">Last changed by {{.UpdatedBy}} at {{.UpdatedAt}} (UTC).</p>{{else}}<p class="muted">Not changed since the defaults were created.</p>{{end}}

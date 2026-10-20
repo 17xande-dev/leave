@@ -186,3 +186,54 @@ func (s *Store) list(ctx context.Context, q string, args ...any) ([]User, error)
 	}
 	return out, rows.Err()
 }
+
+// SyncTeams makes the teams table match a source's full listing: each team is
+// upserted by its source id and its memberships replaced, and a team of this
+// source that is no longer listed is disabled, never deleted, so its rule
+// survives a brief outage in the source. Members who are not users here are
+// skipped: only staff in the app count towards a team's size.
+//
+// Unlike Sync, an empty listing is applied. Whether it is a result or a
+// misconfiguration is the source's call (it returns an error for a failed
+// search and directory.ErrTeamsOff when unset), and an empty list is how the
+// last team disappearing from AD looks.
+func (s *Store) SyncTeams(ctx context.Context, source string, teams []directory.Team) (upserted, disabled int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	at := stamp(time.Now())
+	for _, t := range teams {
+		if t.ID == "" {
+			return 0, 0, fmt.Errorf("users: team %q has no id", t.Name)
+		}
+		var id int64
+		if err := tx.QueryRowContext(ctx, `INSERT INTO teams (ext_id, name, source, disabled, synced_at)
+			VALUES (?, ?, ?, 0, ?)
+			ON CONFLICT(ext_id) DO UPDATE SET name = excluded.name, source = excluded.source,
+				disabled = 0, synced_at = excluded.synced_at
+			RETURNING id`, t.ID, t.Name, source, at).Scan(&id); err != nil {
+			return 0, 0, fmt.Errorf("users: sync team %s: %w", t.Name, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM team_members WHERE team_id = ?`, id); err != nil {
+			return 0, 0, err
+		}
+		for _, m := range t.MemberIDs {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO team_members (team_id, user_id)
+				SELECT ?, id FROM users WHERE ext_id = ? ON CONFLICT DO NOTHING`, id, m); err != nil {
+				return 0, 0, err
+			}
+		}
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE teams SET disabled = 1 WHERE disabled = 0 AND source = ? AND synced_at <> ?`, source, at)
+	if err != nil {
+		return 0, 0, err
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return len(teams), int(n), nil
+}

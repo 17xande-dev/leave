@@ -1,0 +1,46 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Teams</h1>
+<p class="muted">The most of a volunteer team that may be away on any single day, as a percentage of the team. Teams come from the directory and only staff with an account here are counted. A request over a team's limit is handled like one over a department's: refused unless the person asks for special permission. Leave a limit empty for no limit.</p>
+{{with .Data}}
+{{if not .Enabled}}
+<p class="notice">Teams are not set up. Set <code>LDAP_TEAMS_BASE_DN</code> to the OU holding the team groups in Active Directory, and restart the app.</p>
+{{else}}
+<form method="post" action="/admin/teams/default" class="panel row">
+  {{template "csrf" $.CSRF}}
+  <label for="pct-default">Default limit for teams with none of their own, percent</label>
+  <input id="pct-default" name="percent" inputmode="numeric" size="4" value="{{.Default.Percent}}"> %
+  <button type="submit">Save</button>
+  {{template "err" .Default.Error}}
+</form>
+{{if .Rows}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Team</th><th class="num">People</th><th>Most away on one day</th></tr></thead>
+  <tbody>
+  {{range $i, $t := .Rows}}
+    <tr>
+      <td>{{$t.Name}}{{if $t.Disabled}} <span class="badge">gone from the directory</span>{{end}}</td>
+      <td class="num">{{$t.Size}}</td>
+      <td>
+        <form method="post" action="/admin/teams" class="row">
+          {{template "csrf" $.CSRF}}
+          <input type="hidden" name="team" value="{{$t.ID}}">
+          <label class="visually-hidden" for="pct-{{$i}}">{{$t.Name}} limit, percent</label>
+          <input id="pct-{{$i}}" name="percent" inputmode="numeric" size="4" value="{{$t.Percent}}"> %
+          <button type="submit">Save</button>
+        </form>
+        {{template "err" $t.Error}}
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<p class="muted">The directory has listed no teams yet.</p>
+{{end}}
+{{if .Inactive}}<p><a href="/admin/teams">Hide inactive teams</a></p>{{else}}<p><a href="/admin/teams?inactive=1">Show inactive teams</a></p>{{end}}
+{{end}}
+{{end}}
+{{end}}

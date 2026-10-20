@@ -51,6 +51,11 @@ func newHarness(t *testing.T) *harness {
 	if _, _, err := us.Sync(context.Background(), mustAll(t, dir)); err != nil {
 		t.Fatal(err)
 	}
+	if ts, err := dir.Teams(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if _, _, err := us.SyncTeams(context.Background(), "fake", ts); err != nil {
+		t.Fatal(err)
+	}
 	// The pastor is the final approver, as in the directory fixture's chain;
 	// hr is the admin who saves it.
 	pastor, _ := us.ByUsername(context.Background(), "pastor")
@@ -66,7 +71,7 @@ func newHarness(t *testing.T) *harness {
 	jobs := outbox.NewStore(d)
 	oa := oauth.New(d, oauth.Config{BaseURL: "http://leave.test"})
 	h, err := New(Config{SessionTTL: time.Hour}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir,
-		Leave: svc, Outbox: jobs, OAuth: oa,
+		Leave: svc, Outbox: jobs, TeamsEnabled: true, OAuth: oa,
 		MCP: mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: oa.Verify,
 			ResourceMetadataURL: oa.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})})
 	if err != nil {

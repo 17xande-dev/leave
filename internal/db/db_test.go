@@ -132,9 +132,46 @@ func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 		allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
-	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
+	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY, team_default_percent INTEGER) STRICT`)
 	old.Close()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "oauth_clients") {
 		t.Fatalf("old database: err = %v", err)
+	}
+}
+
+// A database from before volunteer teams: the settings column and the team
+// tables are both caught, rather than failing at the first leave request.
+func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+		allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "team_default_percent") {
+		t.Fatalf("old database without the settings column: err = %v", err)
+	}
+
+	path = filepath.Join(t.TempDir(), "old2.db")
+	old, _ = sql.Open("sqlite3", "file:"+path)
+	for _, q := range []string{
+		`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+			allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`,
+		`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`,
+		`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`,
+		`CREATE TABLE settings (id INTEGER PRIMARY KEY, team_default_percent INTEGER) STRICT`,
+		`CREATE TABLE oauth_clients (id INTEGER PRIMARY KEY) STRICT`,
+		`CREATE TABLE oauth_grants (id INTEGER PRIMARY KEY) STRICT`,
+		`CREATE TABLE oauth_codes (id INTEGER PRIMARY KEY) STRICT`,
+		`CREATE TABLE oauth_tokens (id INTEGER PRIMARY KEY) STRICT`,
+	} {
+		old.Exec(q)
+	}
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "teams") {
+		t.Fatalf("old database without the team tables: err = %v", err)
 	}
 }

@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/17xande-dev/leave/internal/users"
 )
 
-// Department coverage: an admin caps how much of a department may be away on
-// any one day, as a percentage. A request that would take a day over the cap
+// Coverage limits: an admin caps how much of a department, or of a volunteer
+// team, may be away on any one day, as a percentage. A request that would take a day over the cap
 // is refused -- unless the person asks for special permission, which sends it
 // up the approval chain instead (see Decide).
 
@@ -75,10 +76,19 @@ func (s *Service) Departments(ctx context.Context) ([]Department, error) {
 	return out, rows.Err()
 }
 
-// Coverage describes the worst day of a request that is over its department's
-// limit.
+// What a Coverage is a limit on.
+const (
+	CoverageDepartment = "department"
+	CoverageTeam       = "team"
+)
+
+// Coverage describes the worst day of a request that is over one limit: its
+// department's, or one of its teams'. A request can be over several at once.
 type Coverage struct {
-	Department string
+	// Kind is CoverageDepartment or CoverageTeam, and Name the department or
+	// team it is about.
+	Kind       string
+	Name       string
 	MaxPercent int
 	Size       int
 	// Away counts the requester.
@@ -87,7 +97,7 @@ type Coverage struct {
 	Day string
 }
 
-// Percent is the share of the department away on the worst day, rounded.
+// Percent is the share of the group away on the worst day, rounded.
 func (c Coverage) Percent() int { return (c.Away*100 + c.Size/2) / c.Size }
 
 // Sentence is the warning shown on the apply page, the request page, the
@@ -97,33 +107,117 @@ func (c Coverage) Sentence() string {
 	if t, err := ParseDate(c.Day); err == nil {
 		day = t.Format("Mon 2 Jan")
 	}
+	who := c.Name
+	if c.Kind == CoverageTeam {
+		who = "the " + c.Name + " team"
+	}
 	return fmt.Sprintf("%d%% of %s (%d of %d) would be away on %s. The limit is %d%%.",
-		c.Percent(), c.Department, c.Away, c.Size, day, c.MaxPercent)
+		c.Percent(), who, c.Away, c.Size, day, c.MaxPercent)
 }
 
-// coverage checks a request against its department's limit. It returns nil
-// unless the request is over the limit and t can be blocked by it (a "count"
-// type is never refused, though it still counts for everyone else's checks).
-// excludeID is a request of u's own to leave out, so a draft or pending
-// request being re-evaluated does not collide with itself.
-func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.User, t Type, start, end time.Time,
-	holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
-	if t.CoverageRule != CoverageLimit || u.Department == "" {
-		return nil, nil
+// Sentences joins every warning into one message, for the places that carry a
+// single string (a field error).
+func Sentences(cs []Coverage) string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.Sentence()
 	}
-	// The department's own rule, else the default; none means no limit.
-	var limit int
-	err := q.QueryRowContext(ctx, `SELECT max_percent FROM coverage_rules WHERE department IN (?, '')
-		ORDER BY department = '' LIMIT 1`, u.Department).Scan(&limit)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+	return strings.Join(out, " ")
+}
+
+// group is one body of people a limit applies to: a department or a team.
+type group struct {
+	kind, name string
+	limit      int
+	// members selects the ids of its enabled members, taking one argument.
+	// A subquery so the size and the leave overlap are counted the same way
+	// for both kinds, and a disabled user is excluded from both.
+	members string
+	arg     any
+}
+
+const (
+	deptMembers = `SELECT id FROM users WHERE department = ? AND disabled = 0`
+	teamMembers = `SELECT m.user_id FROM team_members m JOIN users x ON x.id = m.user_id
+		WHERE m.team_id = ? AND x.disabled = 0`
+)
+
+// groupsFor lists the limits u is under for a coverage check: their
+// department's (its own rule, else the default), then each live team they are
+// in that has a limit (its own rule, else the settings default). A disabled
+// team applies nothing: it has gone from the source, so its membership is stale.
+func (s *Service) groupsFor(ctx context.Context, q querier, u users.User) ([]group, error) {
+	var out []group
+	if u.Department != "" {
+		var limit int
+		err := q.QueryRowContext(ctx, `SELECT max_percent FROM coverage_rules WHERE department IN (?, '')
+			ORDER BY department = '' LIMIT 1`, u.Department).Scan(&limit)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		if err == nil {
+			out = append(out, group{CoverageDepartment, u.Department, limit, deptMembers, u.Department})
+		}
 	}
+	rows, err := q.QueryContext(ctx, `SELECT t.id, t.name, COALESCE(r.max_percent, NULLIF(s.team_default_percent, 0))
+		FROM team_members m JOIN teams t ON t.id = m.team_id
+		LEFT JOIN team_rules r ON r.team_id = t.id
+		JOIN settings s ON s.id = 1
+		WHERE m.user_id = ? AND t.disabled = 0
+		ORDER BY t.name, t.id`, u.ID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id    int64
+			name  string
+			limit sql.NullInt64
+		)
+		if err := rows.Scan(&id, &name, &limit); err != nil {
+			return nil, err
+		}
+		if limit.Valid {
+			out = append(out, group{CoverageTeam, name, int(limit.Int64), teamMembers, id})
+		}
+	}
+	return out, rows.Err()
+}
+
+// coverage checks a request against its department's limit and each of its
+// teams' limits. It returns one Coverage per limit the request is over, and
+// nothing unless t can be blocked by them (a "count" type is never refused,
+// though it still counts for everyone else's checks). excludeID is a request
+// of u's own to leave out, so a draft or pending request being re-evaluated
+// does not collide with itself.
+func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.User, t Type, start, end time.Time,
+	holidays map[time.Time]bool, excludeID int64) ([]Coverage, error) {
+	if t.CoverageRule != CoverageLimit {
+		return nil, nil
+	}
+	groups, err := s.groupsFor(ctx, q, u)
+	if err != nil {
+		return nil, err
+	}
+	var out []Coverage
+	for _, g := range groups {
+		c, err := s.groupCoverage(ctx, q, week, g, u, t, start, end, holidays, excludeID)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			out = append(out, *c)
+		}
+	}
+	return out, nil
+}
+
+// groupCoverage is the check against one limit: nil unless over it.
+func (s *Service) groupCoverage(ctx context.Context, q querier, week Week, g group, u users.User, t Type,
+	start, end time.Time, holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
 	var size int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE department = ? AND disabled = 0`,
-		u.Department).Scan(&size); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM (`+g.members+`)`, g.arg).Scan(&size); err != nil {
 		return nil, err
 	}
 	if size == 0 {
@@ -132,10 +226,9 @@ func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.Us
 
 	// Others' leave touching the range. A drafted request is not away yet.
 	rows, err := q.QueryContext(ctx, `SELECT r.user_id, r.start_date, r.end_date FROM requests r
-		JOIN users x ON x.id = r.user_id
-		WHERE x.department = ? AND x.disabled = 0 AND r.user_id <> ? AND r.id <> ? AND r.kind = 'leave'
+		WHERE r.user_id IN (`+g.members+`) AND r.user_id <> ? AND r.id <> ? AND r.kind = 'leave'
 		AND r.status IN ('pending', 'approved', 'awaiting_hr') AND r.start_date <= ? AND r.end_date >= ?`,
-		u.Department, u.ID, excludeID, fmtDate(end), fmtDate(start))
+		g.arg, u.ID, excludeID, fmtDate(end), fmtDate(start))
 	if err != nil {
 		return nil, err
 	}
@@ -179,20 +272,20 @@ func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.Us
 	// the first person away is always allowed, whatever the maths: otherwise
 	// someone alone in their department (1 of 1 is 100%) could never take
 	// leave without escalating it to the top.
-	if worst <= 0 || (worst+1)*100 <= limit*size {
+	if worst <= 0 || (worst+1)*100 <= g.limit*size {
 		return nil, nil
 	}
-	return &Coverage{Department: u.Department, MaxPercent: limit, Size: size, Away: worst + 1, Day: worstDay}, nil
+	return &Coverage{Kind: g.kind, Name: g.name, MaxPercent: g.limit, Size: size, Away: worst + 1, Day: worstDay}, nil
 }
 
-// CoverageFor recomputes the coverage warning for a request as the department
-// stands now, leaving the request itself out. Approvers see this rather than
+// CoverageFor recomputes the coverage warnings for a request as its department
+// and teams stand now, leaving the request itself out. Approvers see this rather than
 // what was true at submission: others may have been approved since.
-func (s *Service) CoverageFor(ctx context.Context, r Request) (*Coverage, error) {
+func (s *Service) CoverageFor(ctx context.Context, r Request) ([]Coverage, error) {
 	return s.coverageFor(ctx, s.db, r)
 }
 
-func (s *Service) coverageFor(ctx context.Context, q querier, r Request) (*Coverage, error) {
+func (s *Service) coverageFor(ctx context.Context, q querier, r Request) ([]Coverage, error) {
 	if r.Kind != KindLeave {
 		return nil, nil
 	}

@@ -46,6 +46,9 @@ func (h *Handler) adminRoutes() []route {
 		a("POST /admin/permissions/{id}/refuse", h.AdminRefuseNegative),
 		a("GET /admin/coverage", h.AdminCoverage),
 		a("POST /admin/coverage", h.AdminSaveCoverage),
+		a("GET /admin/teams", h.AdminTeams),
+		a("POST /admin/teams", h.AdminSaveTeam),
+		a("POST /admin/teams/default", h.AdminSaveTeamDefault),
 		a("GET /admin/settings", h.AdminSettings),
 		a("POST /admin/settings", h.AdminSaveSettings),
 		a("GET /admin/outbox", h.AdminOutbox),
@@ -258,6 +261,8 @@ type adminUserData struct {
 	Requests    []leave.Request
 	Errors      leave.FieldErrors
 	Adj         leave.Adjustment
+	// Teams are read-only here: the directory is the source of truth.
+	Teams []leave.Team
 }
 
 func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error) {
@@ -291,6 +296,9 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 		return d, err
 	}
 	if d.Adjustments, err = h.leave.Adjustments(ctx, u.ID); err != nil {
+		return d, err
+	}
+	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {
 		return d, err
 	}
 	d.Requests, err = h.leave.ForUser(ctx, u.ID)

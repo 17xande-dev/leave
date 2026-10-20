@@ -40,7 +40,7 @@ type RequestInfo struct {
 	CreatedAt         string `json:"created_at"`
 	CancelsRequestID  int64  `json:"cancels_request_id,omitempty"`
 	Shutdown          string `json:"shutdown,omitempty" jsonschema:"set when the request was made for a company shutdown"`
-	SpecialPermission bool   `json:"special_permission,omitempty" jsonschema:"over a department coverage limit, so every approval level must approve"`
+	SpecialPermission bool   `json:"special_permission,omitempty" jsonschema:"over a department or team coverage limit, so every approval level must approve"`
 }
 
 func requestInfo(r leave.Request) RequestInfo {
@@ -170,8 +170,9 @@ type IDIn struct {
 type RequestDetail struct {
 	Request RequestInfo `json:"request"`
 	Steps   []StepInfo  `json:"steps" jsonschema:"decisions so far, in order"`
-	// CoverageWarning is set for a pending request needing special permission.
-	CoverageWarning string `json:"coverage_warning,omitempty"`
+	// CoverageWarnings is set for a pending request needing special permission:
+	// one sentence for each department or team limit it is over.
+	CoverageWarnings []string `json:"coverage_warnings,omitempty"`
 	// NextApprover is who it goes to if you approve; empty when yours is the last approval.
 	NextApprover        string       `json:"next_approver,omitempty"`
 	ShortfallDays       int          `json:"shortfall_days,omitempty" jsonschema:"for a request awaiting HR: how far below zero it would take the balance"`
@@ -204,9 +205,7 @@ func (d *deps) getRequest(ctx context.Context, u users.User, in IDIn) (RequestDe
 		if err != nil {
 			return out, "", err
 		}
-		if cov != nil {
-			out.CoverageWarning = cov.Sentence()
-		}
+		out.CoverageWarnings = sentences(cov)
 		if out.CanDecide {
 			next, ok, err := d.leave.NextApprover(ctx, u, req)
 			if err != nil {
@@ -338,20 +337,30 @@ type Problem struct {
 
 type PreviewOut struct {
 	// OK: the request would be accepted as it is.
-	OK              bool      `json:"ok"`
-	Type            string    `json:"type,omitempty"`
-	Start           string    `json:"start,omitempty"`
-	End             string    `json:"end,omitempty"`
-	Days            int       `json:"days,omitempty"`
-	Unit            string    `json:"unit,omitempty"`
-	AvailableBefore *int      `json:"available_before,omitempty"`
-	AvailableAfter  *int      `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
-	ShortfallDays   int       `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
-	CoverageWarning string    `json:"coverage_warning,omitempty"`
-	Problems        []Problem `json:"problems" jsonschema:"every rule the request breaks; empty when ok"`
-	CanOverride     bool      `json:"can_ask_special_permission" jsonschema:"apply_for_leave with override=true would be accepted"`
-	CanAskHR        bool      `json:"can_ask_hr" jsonschema:"apply_for_leave with ask_hr=true would be accepted"`
-	Approver        string    `json:"approver" jsonschema:"who would decide it"`
+	OK               bool      `json:"ok"`
+	Type             string    `json:"type,omitempty"`
+	Start            string    `json:"start,omitempty"`
+	End              string    `json:"end,omitempty"`
+	Days             int       `json:"days,omitempty"`
+	Unit             string    `json:"unit,omitempty"`
+	AvailableBefore  *int      `json:"available_before,omitempty"`
+	AvailableAfter   *int      `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
+	ShortfallDays    int       `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
+	CoverageWarnings []string  `json:"coverage_warnings,omitempty" jsonschema:"one for each department or team limit the request is over"`
+	Problems         []Problem `json:"problems" jsonschema:"every rule the request breaks; empty when ok"`
+	CanOverride      bool      `json:"can_ask_special_permission" jsonschema:"apply_for_leave with override=true would be accepted"`
+	CanAskHR         bool      `json:"can_ask_hr" jsonschema:"apply_for_leave with ask_hr=true would be accepted"`
+	Approver         string    `json:"approver" jsonschema:"who would decide it"`
+}
+
+// sentences turns coverage warnings into the text an assistant relays; nil
+// when there are none, so the field is omitted.
+func sentences(cs []leave.Coverage) []string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, c.Sentence())
+	}
+	return out
 }
 
 // approverName is who a request of u's would go to, as the apply page says it.
@@ -390,9 +399,7 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 		out.Start, out.End = qt.Start.Format(time.DateOnly), qt.End.Format(time.DateOnly)
 		out.AvailableBefore, out.AvailableAfter, out.ShortfallDays = qt.Balance.Available(), qt.After, qt.Shortfall
 	}
-	if qt.Coverage != nil {
-		out.CoverageWarning = qt.Coverage.Sentence()
-	}
+	out.CoverageWarnings = sentences(qt.Coverage)
 	if out.Approver, err = d.approverName(ctx, u); err != nil {
 		return out, "", err
 	}
@@ -408,7 +415,7 @@ type ApplyIn struct {
 	Start    string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
 	End      string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Note     string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department coverage limit"`
+	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
 	AskHR    bool   `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
 }
 
@@ -462,7 +469,7 @@ func (d *deps) after(ctx context.Context, id int64, msg string) (RequestOut, str
 type SubmitDraftIn struct {
 	ID       int64  `json:"id" jsonschema:"the draft request's id"`
 	Note     string `json:"note,omitempty" jsonschema:"leave blank to keep the draft's own note"`
-	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department coverage limit"`
+	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
 }
 
 func (d *deps) submitDraft(ctx context.Context, u users.User, in SubmitDraftIn) (RequestOut, string, error) {
@@ -502,10 +509,10 @@ func (d *deps) requestCancellation(ctx context.Context, u users.User, in CancelI
 // --- Approve ----------------------------------------------------------------
 
 type QueueItem struct {
-	Request         RequestInfo `json:"request"`
-	CoverageWarning string      `json:"coverage_warning,omitempty"`
-	NextApprover    string      `json:"next_approver,omitempty" jsonschema:"who it goes to if you approve; empty when yours is the last approval"`
-	Steps           []StepInfo  `json:"steps"`
+	Request          RequestInfo `json:"request"`
+	CoverageWarnings []string    `json:"coverage_warnings,omitempty"`
+	NextApprover     string      `json:"next_approver,omitempty" jsonschema:"who it goes to if you approve; empty when yours is the last approval"`
+	Steps            []StepInfo  `json:"steps"`
 }
 
 type QueueOut struct {
@@ -529,9 +536,7 @@ func (d *deps) approvalQueue(ctx context.Context, u users.User, _ none) (QueueOu
 			if err != nil {
 				return QueueOut{}, "", err
 			}
-			if cov != nil {
-				item.CoverageWarning = cov.Sentence()
-			}
+			item.CoverageWarnings = sentences(cov)
 			next, ok, err := d.leave.NextApprover(ctx, u, req)
 			if err != nil {
 				return QueueOut{}, "", err

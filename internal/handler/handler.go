@@ -33,6 +33,9 @@ type Deps struct {
 	Directory directory.Directory
 	Leave     *leave.Service
 	Outbox    *outbox.Store
+	// TeamsEnabled is whether a team source is configured; the Teams page
+	// says so when it is not.
+	TeamsEnabled bool
 	// OAuth and MCP are the AI-assistant endpoints: OAuth serves the token,
 	// registration, revocation and metadata routes and the pages' grants; MCP
 	// is the bearer-protected tool endpoint.
@@ -49,6 +52,7 @@ type Handler struct {
 	directory directory.Directory
 	leave     *leave.Service
 	outbox    *outbox.Store
+	teamsOn   bool
 	oauth     *oauth.Server
 	mcp       http.Handler
 	kick      func()
@@ -77,7 +81,7 @@ func New(cfg Config, d Deps) (*Handler, error) {
 	}
 	return &Handler{
 		cfg: cfg, users: d.Users, sessions: d.Sessions, directory: d.Directory, leave: d.Leave,
-		outbox: d.Outbox, oauth: d.OAuth, mcp: d.MCP, kick: d.Kick,
+		outbox: d.Outbox, teamsOn: d.TeamsEnabled, oauth: d.OAuth, mcp: d.MCP, kick: d.Kick,
 		pages: pages, partials: partials,
 		// Five tries per username per 15 minutes -- below AD's usual lockout
 		// threshold, so a guesser meets this wall before a colleague is locked

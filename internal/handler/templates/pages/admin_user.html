@@ -8,6 +8,7 @@
   <tr><th>Email</th><td>{{with .User.Email}}{{.}}{{else}}<span class="badge problem">none in the directory: no emails will reach them</span>{{end}}</td></tr>
   <tr><th>Department</th><td>{{.User.Department}}</td></tr>
   <tr><th>Manager in AD</th><td>{{with .Manager}}{{.}}{{else}}—{{end}}</td></tr>
+  <tr><th>Teams</th><td>{{range $i, $t := .Teams}}{{if $i}}, {{end}}{{$t.Name}}{{else}}—{{end}} <small class="muted">(from the directory)</small></td></tr>
   <tr><th>Approver</th><td>{{.Approver}}</td></tr>
 </table>
 

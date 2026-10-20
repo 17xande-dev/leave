@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -14,17 +16,20 @@ import (
 type Fake struct {
 	mu    sync.Mutex
 	users []User
+	// teams are the team names each username volunteers in.
+	teams map[string][]string
 }
 
 // fakeUser is the file format: managers by username rather than DN, because
 // that is what a person editing the file thinks in.
 type fakeUser struct {
-	Username   string `json:"username"`
-	Name       string `json:"name"`
-	Email      string `json:"email"`
-	Department string `json:"department"`
-	Manager    string `json:"manager"`
-	Admin      bool   `json:"admin"`
+	Username   string   `json:"username"`
+	Name       string   `json:"name"`
+	Email      string   `json:"email"`
+	Department string   `json:"department"`
+	Manager    string   `json:"manager"`
+	Admin      bool     `json:"admin"`
+	Teams      []string `json:"teams"`
 }
 
 func fakeDN(username string) string { return "CN=" + username + ",OU=Fake" }
@@ -50,6 +55,7 @@ func LoadFake(path string) (*Fake, error) {
 				return fakeDN(NormalizeUsername(u.Manager))
 			}(),
 		})
+		f.SetTeams(u.Username, u.Teams...)
 	}
 	return f, nil
 }
@@ -73,6 +79,16 @@ func (f *Fake) Add(u User) {
 	f.users = append(f.users, u)
 }
 
+// SetTeams sets the teams a user volunteers in, by name.
+func (f *Fake) SetTeams(username string, names ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.teams == nil {
+		f.teams = map[string][]string{}
+	}
+	f.teams[NormalizeUsername(username)] = names
+}
+
 // Remove drops a user, as disabling an account in AD would.
 func (f *Fake) Remove(username string) {
 	f.mu.Lock()
@@ -84,6 +100,33 @@ func (f *Fake) Remove(username string) {
 			return
 		}
 	}
+}
+
+// Teams builds the teams from each user's names. A team's id is derived from
+// its name, so renaming one in the file makes a new team, as it would for a
+// group recreated in AD.
+func (f *Fake) Teams(context.Context) ([]Team, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	byName := map[string]*Team{}
+	var order []string
+	for _, u := range f.users {
+		for _, n := range f.teams[u.Username] {
+			t := byName[n]
+			if t == nil {
+				t = &Team{ID: "fake-team-" + strings.ToLower(n), Name: n}
+				byName[n] = t
+				order = append(order, n)
+			}
+			t.MemberIDs = append(t.MemberIDs, u.ID)
+		}
+	}
+	sort.Strings(order)
+	out := make([]Team, 0, len(order))
+	for _, n := range order {
+		out = append(out, *byName[n])
+	}
+	return out, nil
 }
 
 // DN returns the DN the fake assigns a username, for building ManagerDN.

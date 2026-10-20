@@ -68,9 +68,9 @@ type Event struct {
 	// Cancelled is the leave a just-approved cancellation cancelled.
 	Cancelled *Request
 	Actor     users.User
-	// Coverage and Steps accompany an escalated request: the warning as the
-	// department stands, and who has approved so far.
-	Coverage *Coverage
+	// Coverage and Steps accompany an escalated request: the warnings as the
+	// department and teams stand, and who has approved so far.
+	Coverage []Coverage
 	Steps    []Step
 	// Shortfall is how many days below zero a negative-balance request asks for.
 	Shortfall int

@@ -71,7 +71,7 @@ func TestCoverageThreshold(t *testing.T) {
 	// carries the warning for the form.
 	f.mustSubmit("head", "annual", "2026-10-15", "2026-10-15")
 	qt, err := f.svc.Preview(f.ctx, f.people["head"], Input{TypeID: f.types["annual"].ID, Start: "2026-10-13", End: "2026-10-13"})
-	if !fieldErr(err, "coverage") || qt.Coverage == nil || qt.Coverage.Away != 3 || qt.Coverage.Size != 4 {
+	if !fieldErr(err, "coverage") || len(qt.Coverage) != 1 || qt.Coverage[0].Away != 3 || qt.Coverage[0].Size != 4 {
 		t.Fatalf("preview: %+v %v", qt.Coverage, err)
 	}
 }
@@ -193,12 +193,12 @@ func TestCoverageSkipsDaysOffAndHolidays(t *testing.T) {
 	f.insertAway("hr", "weekend", "2026-10-17", "2026-10-18", "pending")
 	staff := f.people["staff"]
 	c, err := f.svc.coverage(f.ctx, f.db, MonFri, staff, f.types["weekend"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
-	if err != nil || c == nil || c.Day != "2026-10-17" {
+	if err != nil || len(c) != 1 || c[0].Day != "2026-10-17" {
 		t.Fatalf("weekend coverage = %+v, %v", c, err)
 	}
 	// The same days under a working-day type check nothing.
 	c, err = f.svc.coverage(f.ctx, f.db, MonFri, staff, f.types["annual"], civil(2026, 10, 17), civil(2026, 10, 18), nil, 0)
-	if err != nil || c != nil {
+	if err != nil || len(c) != 0 {
 		t.Fatalf("workday coverage over a weekend = %+v, %v", c, err)
 	}
 }
@@ -219,7 +219,7 @@ func TestCoverageShutdownExempt(t *testing.T) {
 	f.dept("Pair", "head")
 	f.rule("Pair", 60)
 	c, err := f.svc.coverage(f.ctx, f.db, MonFri, f.people["head"], f.types["annual"], civil(2026, 12, 8), civil(2026, 12, 8), nil, 0)
-	if err != nil || c == nil || c.Away != 3 {
+	if err != nil || len(c) != 1 || c[0].Away != 3 {
 		t.Fatalf("shutdown leave did not count as away: %+v %v", c, err)
 	}
 }
@@ -242,7 +242,7 @@ func TestEscalationChain(t *testing.T) {
 	if !r.Escalate || r.Status != StatusPending || r.ApproverID != f.people["head"].ID {
 		t.Fatalf("escalated request = %+v", r)
 	}
-	if len(f.events) != 1 || f.events[0].Kind != EventSubmitted || f.events[0].Coverage == nil {
+	if len(f.events) != 1 || f.events[0].Kind != EventSubmitted || len(f.events[0].Coverage) == 0 {
 		t.Fatalf("submit events = %+v", f.events)
 	}
 	// Reserved as any pending request is.
@@ -260,7 +260,7 @@ func TestEscalationChain(t *testing.T) {
 		t.Fatalf("after the first approval = %+v", r)
 	}
 	if len(f.events) != 1 || f.events[0].Kind != EventEscalated || f.events[0].Request.ApproverID != f.people["pastor"].ID ||
-		f.events[0].Coverage == nil || len(f.events[0].Steps) != 1 {
+		len(f.events[0].Coverage) == 0 || len(f.events[0].Steps) != 1 {
 		t.Fatalf("escalation events = %+v", f.events)
 	}
 	// The head has no say any more; the pastor does.
@@ -401,15 +401,15 @@ func TestEscalatedRequestCoverageIsRecomputed(t *testing.T) {
 	hr := f.mustSubmit("hr", "annual", "2026-10-12", "2026-10-14")
 	r, _ := f.override("staff", "annual", "2026-10-12", "2026-10-14")
 	c, err := f.svc.CoverageFor(f.ctx, r)
-	if err != nil || c == nil || c.Away != 2 || c.Size != 2 || c.Percent() != 100 {
+	if err != nil || len(c) != 1 || c[0].Away != 2 || c[0].Size != 2 || c[0].Percent() != 100 {
 		t.Fatalf("coverage while hr is away: %+v %v", c, err)
 	}
-	if want := "100% of Pair (2 of 2) would be away on Mon 12 Oct. The limit is 50%."; c.Sentence() != want {
-		t.Fatalf("sentence = %q", c.Sentence())
+	if want := "100% of Pair (2 of 2) would be away on Mon 12 Oct. The limit is 50%."; c[0].Sentence() != want {
+		t.Fatalf("sentence = %q", c[0].Sentence())
 	}
 	// Once hr's request is declined the warning goes away.
 	f.svc.Decide(f.ctx, f.people["head"], hr.ID, false, "no")
-	if c, _ := f.svc.CoverageFor(f.ctx, r); c != nil {
+	if c, _ := f.svc.CoverageFor(f.ctx, r); len(c) != 0 {
 		t.Fatalf("stale warning: %+v", c)
 	}
 }

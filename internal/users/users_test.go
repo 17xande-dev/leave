@@ -112,3 +112,90 @@ func TestLongWeekendSurvivesSync(t *testing.T) {
 		t.Fatal("sync reset long_weekend")
 	}
 }
+
+func team(id, name string, members ...string) directory.Team {
+	t := directory.Team{ID: id, Name: name}
+	for _, m := range members {
+		t.MemberIDs = append(t.MemberIDs, "guid-"+m)
+	}
+	return t
+}
+
+func members(t *testing.T, s *Store, team string) []string {
+	t.Helper()
+	rows, err := s.db.Query(`SELECT u.username FROM team_members m JOIN teams x ON x.id = m.team_id
+		JOIN users u ON u.id = m.user_id WHERE x.ext_id = ? ORDER BY u.username`, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		rows.Scan(&n)
+		out = append(out, n)
+	}
+	return out
+}
+
+func TestSyncTeams(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(dbtest.New(t))
+	if _, _, err := s.Sync(ctx, []directory.User{dirUser("a"), dirUser("b"), dirUser("c")}); err != nil {
+		t.Fatal(err)
+	}
+	// "ghost" has no account here and is skipped.
+	n, gone, err := s.SyncTeams(ctx, "fake", []directory.Team{team("t1", "Band", "a", "b", "ghost"), team("t2", "Choir", "c")})
+	if err != nil || n != 2 || gone != 0 {
+		t.Fatalf("first sync: %d %d %v", n, gone, err)
+	}
+	if got := members(t, s, "t1"); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("members = %v", got)
+	}
+	var bandID int64
+	s.db.QueryRow(`SELECT id FROM teams WHERE ext_id = 't1'`).Scan(&bandID)
+	s.db.Exec(`INSERT INTO team_rules (team_id, max_percent) VALUES (?, 40)`, bandID)
+
+	// Memberships are replaced, a renamed team keeps its row, and the team
+	// missing from the listing is disabled, not deleted.
+	n, gone, err = s.SyncTeams(ctx, "fake", []directory.Team{team("t1", "House band", "c")})
+	if err != nil || n != 1 || gone != 1 {
+		t.Fatalf("second sync: %d %d %v", n, gone, err)
+	}
+	if got := members(t, s, "t1"); len(got) != 1 || got[0] != "c" {
+		t.Fatalf("members after = %v", got)
+	}
+	var name string
+	var id int64
+	var disabled bool
+	s.db.QueryRow(`SELECT id, name FROM teams WHERE ext_id = 't1'`).Scan(&id, &name)
+	if id != bandID || name != "House band" {
+		t.Fatalf("renamed team = %d %q", id, name)
+	}
+	s.db.QueryRow(`SELECT disabled FROM teams WHERE ext_id = 't2'`).Scan(&disabled)
+	if !disabled {
+		t.Fatal("t2 was not disabled")
+	}
+	// Another source's teams are left alone by this one's sync.
+	if _, _, err := s.SyncTeams(ctx, "pco", []directory.Team{team("p1", "Tech")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, gone, _ = s.SyncTeams(ctx, "fake", []directory.Team{team("t1", "House band", "c")}); gone != 0 {
+		t.Fatalf("fake sync disabled another source's team")
+	}
+	// A returning team is re-enabled with its rule; an empty listing is applied.
+	if _, _, err := s.SyncTeams(ctx, "fake", []directory.Team{team("t2", "Choir", "a")}); err != nil {
+		t.Fatal(err)
+	}
+	s.db.QueryRow(`SELECT disabled FROM teams WHERE ext_id = 't2'`).Scan(&disabled)
+	if disabled {
+		t.Fatal("t2 not re-enabled")
+	}
+	if _, gone, _ = s.SyncTeams(ctx, "fake", nil); gone != 1 {
+		t.Fatalf("empty listing disabled %d, want 1", gone)
+	}
+	var rule int
+	if s.db.QueryRow(`SELECT max_percent FROM team_rules WHERE team_id = ?`, bandID).Scan(&rule); rule != 40 {
+		t.Fatalf("rule lost: %d", rule)
+	}
+}

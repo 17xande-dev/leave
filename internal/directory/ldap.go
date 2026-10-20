@@ -24,7 +24,10 @@ type LDAPConfig struct {
 	BaseDN       string
 	UserFilter   string
 	AdminGroup   string
-	CAFile       string
+	// TeamsBaseDN is where the volunteer-team groups live. Empty turns teams
+	// off.
+	TeamsBaseDN string
+	CAFile      string
 	// InsecureSkipVerify is for a lab DC with a self-signed certificate.
 	InsecureSkipVerify bool
 	Timeout            time.Duration
@@ -217,6 +220,53 @@ func (d *LDAP) adminDNsOn(conn *ldap.Conn) (map[string]bool, error) {
 	return out, nil
 }
 
+// Teams lists the AD groups under TeamsBaseDN with their enabled members.
+// Each group is searched for its members with the chain rule, so a group
+// nested in a team counts, as it does for the admin group.
+func (d *LDAP) Teams(context.Context) ([]Team, error) {
+	if d.cfg.TeamsBaseDN == "" {
+		return nil, ErrTeamsOff
+	}
+	conn, err := d.serviceConn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	// Paged for the same reason as the user list.
+	groups, err := conn.SearchWithPaging(ldap.NewSearchRequest(d.cfg.TeamsBaseDN, ldap.ScopeWholeSubtree,
+		ldap.NeverDerefAliases, 0, 0, false, "(objectClass=group)",
+		[]string{"objectGUID", "cn", "description"}, nil), 500)
+	if err != nil {
+		return nil, fmt.Errorf("ldap: list teams: %w", err)
+	}
+	out := make([]Team, 0, len(groups.Entries))
+	for _, g := range groups.Entries {
+		id := guidString(g.GetRawAttributeValue("objectGUID"))
+		if id == "" {
+			continue
+		}
+		name := strings.TrimSpace(g.GetAttributeValue("description"))
+		if name == "" {
+			name = g.GetAttributeValue("cn")
+		}
+		filter := fmt.Sprintf("(&%s(memberOf:%s:=%s))", d.cfg.UserFilter, matchingRuleInChain, ldap.EscapeFilter(g.DN))
+		members, err := conn.SearchWithPaging(ldap.NewSearchRequest(d.cfg.BaseDN, ldap.ScopeWholeSubtree,
+			ldap.NeverDerefAliases, 0, 0, false, filter, []string{"objectGUID"}, nil), 500)
+		if err != nil {
+			return nil, fmt.Errorf("ldap: members of %s: %w", g.DN, err)
+		}
+		t := Team{ID: id, Name: name}
+		for _, m := range members.Entries {
+			if mid := guidString(m.GetRawAttributeValue("objectGUID")); mid != "" {
+				t.MemberIDs = append(t.MemberIDs, mid)
+			}
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
 func userFromEntry(e *ldap.Entry) User {
 	name := e.GetAttributeValue("displayName")
 	if name == "" {
@@ -247,4 +297,7 @@ func guidString(b []byte) string {
 var (
 	_ Directory = (*LDAP)(nil)
 	_ Directory = (*Fake)(nil)
+
+	_ TeamSource = (*LDAP)(nil)
+	_ TeamSource = (*Fake)(nil)
 )

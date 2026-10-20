@@ -22,6 +22,8 @@ type fixture struct {
 	events []Event
 	people map[string]users.User
 	types  map[string]Type
+	// teams is every team the fake source lists; see team.
+	teams []directory.Team
 }
 
 // The org chart the tests run against:

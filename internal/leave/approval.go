@@ -349,7 +349,7 @@ func (s *Service) steps(ctx context.Context, q querier, requestID int64) ([]Step
 }
 
 // emit is hook for events about a request that may need special permission:
-// it attaches the coverage warning and the trail so far, which the messages
+// it attaches the coverage warnings and the trail so far, which the messages
 // quote, as they stand inside this transaction.
 func (s *Service) emit(ctx context.Context, tx *sql.Tx, e Event) error {
 	if e.Request.Escalate && e.Request.Status == StatusPending {

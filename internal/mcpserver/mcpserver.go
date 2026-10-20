@@ -217,7 +217,7 @@ func (d *deps) register(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "my_requests", Annotations: readOnly("My leave requests"),
 		Description: "Your own leave requests and cancellations, newest first. Optionally only one status."}, d.myRequests)
 	add(d, s, &mcp.Tool{Name: "get_request", Annotations: readOnly("Look at a request"),
-		Description: "One request in full: its decision trail, any department coverage warning, and which actions are open to you. " +
+		Description: "One request in full: its decision trail, any department or team coverage warnings, and which actions are open to you. " +
 			"Works for your own requests, ones routed to you, ones you decided, and (for administrators) any."}, d.getRequest)
 	add(d, s, &mcp.Tool{Name: "team_leave", Annotations: readOnly("Team leave"),
 		Description: "Current and upcoming approved or pending leave of the people who report to you."}, d.teamLeave)
@@ -225,7 +225,7 @@ func (d *deps) register(s *mcp.Server) {
 		Description: "Public holidays for a year (default: this year). Leave does not cost these days."}, d.publicHolidays)
 	add(d, s, &mcp.Tool{Name: "preview_request", Annotations: readOnly("Preview a leave request"),
 		Description: "Check a leave request without making it: the number of days it costs, your balance afterwards, and every rule that would stop it " +
-			"(dates, restricted day, overlap, department coverage, balance). Also says whether you may ask for special permission or HR's " +
+			"(dates, restricted day, overlap, department and team coverage, balance). Also says whether you may ask for special permission or HR's " +
 			"permission to go below zero. Call this before apply_for_leave."}, d.previewRequest)
 
 	// Act
@@ -243,7 +243,7 @@ func (d *deps) register(s *mcp.Server) {
 
 	// Approve
 	add(d, s, &mcp.Tool{Name: "approval_queue", Annotations: readOnly("Approval queue"),
-		Description: "Requests waiting for your decision, oldest first, each with any department coverage warning, who it goes to next if you approve, and its trail so far."}, d.approvalQueue)
+		Description: "Requests waiting for your decision, oldest first, each with any department or team coverage warnings, who it goes to next if you approve, and its trail so far."}, d.approvalQueue)
 	add(d, s, &mcp.Tool{Name: "decide_request", Annotations: destructive("Approve or decline a request"),
 		Description: "Approve or decline a request waiting for your decision. A decline needs a note saying why. " +
 			"Only call this when the person has told you the decision; never decide on your own judgement."}, d.decide)

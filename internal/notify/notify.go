@@ -157,9 +157,9 @@ type msgData struct {
 	Dates      string
 	Days       string
 	Reassigned bool
-	// Coverage is the department warning sentence and ApprovedBy who has
-	// approved so far, for a request needing special permission.
-	Coverage   string
+	// Coverage is each warning sentence and ApprovedBy who has approved so
+	// far, for a request needing special permission.
+	Coverage   []string
 	ApprovedBy string
 	// Shortfall is the days below zero asked for ("3 working days").
 	Shortfall string
@@ -170,8 +170,8 @@ type msgData struct {
 // already approved.
 func special(e leave.Event) func(*msgData) {
 	return func(d *msgData) {
-		if e.Coverage != nil {
-			d.Coverage = e.Coverage.Sentence()
+		for _, c := range e.Coverage {
+			d.Coverage = append(d.Coverage, c.Sentence())
 		}
 		var names []string
 		for _, st := range e.Steps {

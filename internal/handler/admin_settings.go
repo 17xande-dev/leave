@@ -22,6 +22,7 @@ type settingsForm struct {
 	FinalApprover int64
 	SickBackdate  string
 	SickCycle     string
+	TeamDefault   string
 }
 
 type settingsData struct {
@@ -39,6 +40,9 @@ func formFrom(st leave.Settings) settingsForm {
 	f := settingsForm{Days: map[string]bool{}, RestrictedMin: strconv.Itoa(st.RestrictedMinDays),
 		FinalApprover: st.FinalApproverID, SickBackdate: strconv.Itoa(st.SickBackdateDays),
 		SickCycle: strconv.Itoa(st.SickCycleAnchor)}
+	if st.TeamDefaultPercent > 0 {
+		f.TeamDefault = strconv.Itoa(st.TeamDefaultPercent)
+	}
 	for _, d := range leave.Days {
 		f.Days[d.Code] = st.Week.Has(d.Weekday)
 		if st.RestrictedDay != nil && *st.RestrictedDay == d.Weekday {
@@ -108,7 +112,7 @@ func (h *Handler) AdminSaveSettings(w http.ResponseWriter, r *http.Request) {
 	f := r.PostForm
 	form := settingsForm{Days: map[string]bool{}, RestrictedDay: f.Get("restricted_day"),
 		RestrictedMin: strings.TrimSpace(f.Get("restricted_min")), SickBackdate: strings.TrimSpace(f.Get("sick_backdate")),
-		SickCycle: strings.TrimSpace(f.Get("sick_cycle"))}
+		SickCycle: strings.TrimSpace(f.Get("sick_cycle")), TeamDefault: strings.TrimSpace(f.Get("team_default"))}
 	var in leave.Settings
 
 	// A day code outside the seven is a hand-made post, not a typo to
@@ -154,6 +158,13 @@ func (h *Handler) AdminSaveSettings(w http.ResponseWriter, r *http.Request) {
 	num(form.RestrictedMin, &in.RestrictedMinDays, "restricted_min", "Enter a whole number from 1 to 31.")
 	num(form.SickBackdate, &in.SickBackdateDays, "sick_backdate", "Enter a whole number of days from 0 to 365.")
 	num(form.SickCycle, &in.SickCycleAnchor, "sick_cycle", "Enter a year from 2000 to 2100.")
+
+	// Empty is no default, as on the Teams page.
+	if n, ok := parsePercent(form.TeamDefault); ok {
+		in.TeamDefaultPercent = n
+	} else {
+		errs["team_default"] = "Enter a whole number from 1 to 100, or leave it empty for no default."
+	}
 
 	if len(errs) == 0 {
 		err := h.leave.SaveSettings(r.Context(), currentUser(r), in)

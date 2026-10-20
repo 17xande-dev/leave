@@ -3,7 +3,8 @@
 
 {{.Request.UserName}} has applied for {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}), and it needs special permission. It has now come to you.
 {{with .Coverage}}
-Why: {{.}}
+{{if eq (len .) 1}}Why: {{index . 0}}{{else}}Why:{{range .}}
+- {{.}}{{end}}{{end}}
 {{end}}{{with .ApprovedBy}}
 Already approved by {{.}}.
 {{end}}{{with .Request.Note}}

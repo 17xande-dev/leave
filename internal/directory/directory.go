@@ -43,6 +43,30 @@ type Directory interface {
 	AllUsers(ctx context.Context) ([]User, error)
 }
 
+// Team is a group of volunteers as its source describes it.
+type Team struct {
+	// ID is the source's permanent id for the team (an AD group's objectGUID,
+	// later a Planning Center team id): names repeat and change, ids do not.
+	ID   string
+	Name string
+	// MemberIDs are directory user IDs (User.ID). People who are not users
+	// here are simply never matched when the teams are stored.
+	MemberIDs []string
+}
+
+// TeamSource is where volunteer teams come from. It is a separate interface
+// from Directory because the source is expected to change on its own:
+// Planning Center is the likely replacement for AD groups.
+type TeamSource interface {
+	// Teams lists every team. An empty list with a nil error means the source
+	// has no teams, and is applied as that; a failure must be an error.
+	Teams(ctx context.Context) ([]Team, error)
+}
+
+// ErrTeamsOff is what a source returns when the feature is not configured,
+// so the sync skips teams instead of treating the lack of them as a result.
+var ErrTeamsOff = errors.New("directory: teams are not configured")
+
 // NormalizeUsername turns the forms people actually type -- "EXAMPLE\alex",
 // "alex@example.org", " Alex " -- into the bare account name.
 func NormalizeUsername(s string) string {

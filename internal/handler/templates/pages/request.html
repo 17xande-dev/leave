@@ -26,9 +26,9 @@
 <p class="notice">Waiting for HR to allow this. It would put your balance {{if .Shortfall}}{{.Shortfall}} {{units .Shortfall .Request.TypeUnit}} {{end}}below zero. You will be emailed when they decide, and then asked to submit it.</p>
 {{end}}
 {{if .Request.Escalate}}
-<p class="notice">This request is over a department coverage limit, so it needs special permission: every level of approval, up to the final approver.</p>
+<p class="notice">This request is over a department or team coverage limit, so it needs special permission: every level of approval, up to the final approver.</p>
 {{end}}
-{{with .Coverage}}<p class="notice">{{.Sentence}}</p>{{end}}
+{{range .Coverage}}<p class="notice">{{.Sentence}}</p>{{end}}
 {{if .CanSubmit}}
 <form method="post" action="/leave/{{.Request.ID}}/submit" class="panel">
   {{template "csrf" $.CSRF}}

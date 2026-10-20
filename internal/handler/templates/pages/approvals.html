@@ -9,7 +9,7 @@
   {{range .}}
     <tr>
       <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
-      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{with .Coverage}}<br><small>{{.Sentence}}</small>{{end}}</td>
+      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}</td>
       <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
       <td class="num">{{.Days}}</td>
       <td>

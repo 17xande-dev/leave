@@ -216,7 +216,7 @@ type Input struct {
 	End    string
 	Note   string
 	// Override asks for special permission: a request over a department's
-	// coverage limit is saved anyway and goes up the whole approval chain.
+	// coverage limit (department or team) is saved anyway and goes up the whole approval chain.
 	Override bool
 	// Negative asks HR to allow a request that takes the balance below zero.
 	Negative bool
@@ -235,13 +235,13 @@ type Quote struct {
 	// Shortfall is how many days below zero the request would take the
 	// balance, whether or not that is allowed; 0 when it fits.
 	Shortfall int
-	// Coverage is set when the request is over its department's limit,
-	// whether or not that is allowed.
-	Coverage *Coverage
+	// Coverage has one entry for each limit (its department's, its teams')
+	// the request is over, whether or not that is allowed; empty when none.
+	Coverage []Coverage
 }
 
 // Offers reads what a refused quote leaves open to the person: canOverride is
-// special permission, offered when the request is over a department limit and
+// special permission, offered when the request is over any coverage limit and
 // nothing else stands in its way but the balance; canNegative is asking HR to
 // go below zero, offered when the balance is the only thing wrong (a coverage
 // limit does not matter until the request is submitted). fe is the quote's own
@@ -390,8 +390,8 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, start, end, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
-		if qt.Coverage != nil && !opt.override {
-			errs["coverage"] = qt.Coverage.Sentence() + " You can ask for special permission."
+		if len(qt.Coverage) > 0 && !opt.override {
+			errs["coverage"] = Sentences(qt.Coverage) + " You can ask for special permission."
 		}
 	}
 
@@ -500,12 +500,12 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 		if in.Negative && qt.Shortfall > 0 {
 			return s.saveAwaitingHR(ctx, tx, u, in, qt, &out)
 		}
-		if qt.Coverage != nil && !in.Override {
+		if len(qt.Coverage) > 0 && !in.Override {
 			// Negative relaxed coverage too, for a request that turned out
 			// not to need HR; it may not slip past the limit that way.
-			return FieldErrors{"coverage": qt.Coverage.Sentence() + " You can ask for special permission."}
+			return FieldErrors{"coverage": Sentences(qt.Coverage) + " You can ask for special permission."}
 		}
-		escalate := in.Override && qt.Coverage != nil
+		escalate := in.Override && len(qt.Coverage) > 0
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days,
 			cycle_start, note, status, approver_id, escalate, created_at)
 			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,

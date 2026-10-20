@@ -77,6 +77,19 @@ to the final approver, and the request page shows the trail. Approvers see the w
 the department stands now. Only leave types marked as blockable are refused; the others
 still count as being away.
 
+**Volunteer teams** add a second limit of the same kind: no more than n% of a team's
+members may be away at once. Everyone can be in any number of teams. Teams come from
+the directory (AD groups under `LDAP_TEAMS_BASE_DN`, synced hourly with the users), and
+only people with an account here are counted, in both the team's size and who is away.
+**Admin → Teams** lists them, each with an optional limit, plus a default (also on
+**Admin → Settings**) for every team with none of its own. The warning names the team
+("67% of the Band team (2 of 3) would be away..."), the same **special permission**
+path applies, and a request over several limits (its department and one or more teams)
+shows every warning. A team that disappears from the directory is disabled, not
+deleted, so its limit survives a brief outage; it is hidden behind "Show inactive
+teams". A person's teams are shown, read-only, on their admin page. With
+`LDAP_TEAMS_BASE_DN` unset the feature is off.
+
 **Negative leave.** Someone whose request would take a balance below zero can ask HR
 for permission instead of being refused, and must say why. The request waits on
 **Admin → Permissions** and reserves nothing. An admin grants or refuses it with a
@@ -94,8 +107,8 @@ the 36-month sick cycle counts from. They live in the database; the environment 
 only wiring and secrets.
 
 **The admin area** has: All requests (with a CSV export), People (approver overrides,
-balance adjustments, long weekends), Leave types, Public holidays, Shutdowns, Coverage
-limits, Permissions, Settings and Outbox.
+balance adjustments, long weekends, their teams), Leave types, Public holidays,
+Shutdowns, Coverage limits, Teams, Permissions, Settings and Outbox.
 
 **Email and calendar** go through an outbox. Each is a database row written in the
 same transaction as the change that causes it. A background worker then sends it,
@@ -179,7 +192,9 @@ make recreate-db         # drop the local database (after a schema change)
 ```
 
 The fake directory is `testdata/directory.json`: `pastor` (set as the final approver on **Admin → Settings**, which starts with none),
-`headops` and `headkids` (department heads), `staff1`, `staff2`, and `hr` (an admin). Any
+`headops` and `headkids` (department heads), `staff1`, `staff2`, and `hr` (an admin).
+Each has a `"teams"` list: `staff1`, `hr` and `headops` are in the Band, `staff2` and
+`headkids` in Kids church, so **Admin → Teams** has two working teams. Any
 non-empty password works. The config refuses `DIRECTORY=fake` unless
 `COOKIE_SECURE=false`, so it cannot reach a real deployment. Without Graph configured,
 calendar events are logged instead of created.
@@ -200,6 +215,11 @@ GRAPH_LIVE=1 go test -run Live ./internal/calendar/   # creates and deletes one 
 - Create a read-only service account (`LDAP_BIND_DN`). Plain domain-user rights are enough
   to read people and group membership.
 - Create the admin group (`LDAP_ADMIN_GROUP`). Nested groups work.
+- Optional, for team limits: put one AD group per volunteer team in an OU and set
+  `LDAP_TEAMS_BASE_DN` to it. Each group is a team (named by its `description` if it has
+  one, else its `cn`), and its enabled members, nested groups included, are the people
+  in it. The service account needs only read access. Left unset, there are no teams and
+  **Admin → Teams** says so.
 - Make sure each person's **Manager** field (Organization tab) is filled in. That is the
   approval chain. The admin's People page shows each person's resolved approver, so gaps
   are easy to spot.
@@ -259,6 +279,7 @@ The container listens on 8080, published on 127.0.0.1:8082 (HOST_PORT) behind th
 | Open question | Current behaviour | What would decide it |
 |---|---|---|
 | **Entra ID sign-in (OIDC)** | LDAP only | Confirm AD syncs to Entra (Entra Connect). `directory.Directory` is the seam, and `objectGUID` = `onPremisesImmutableId` keeps everyone's history |
+| **Planning Center as the team source** | AD security groups. `directory.TeamSource` is the seam: a PCO source would give each team's id and match members to users by email | A read-only look at PCO showed 74 Services teams whose names repeat per campus and service type (Band at Sandton AM2, Kyalami, Centurion, Ballito), and limits would apply to some and not others, so the mapping from PCO teams to limits needs deciding first |
 | Leave cycles per employee start date | Calendar year (sick: 36 months from the start year in Settings) | HR needing BCEA cycles from each start date; AD would need a start-date attribute |
 | Accrual (1.25 days/month) vs. full allowance up front | Up front | HR policy |
 | Cancelling leave that has already started | Not possible in-app; an admin adjusts the balance | How often it happens |

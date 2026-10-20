@@ -178,10 +178,10 @@ type requestData struct {
 	CanCancel           bool
 	CanDecide           bool
 	CanSubmit           bool
-	// Coverage is the department warning for a pending request needing special
-	// permission, as it stands now. Next names who it goes to if the viewer
+	// Coverage is the department and team warnings for a pending request
+	// needing special permission, as they stand now. Next names who it goes to if the viewer
 	// approves it; empty when their approval is the last.
-	Coverage *leave.Coverage
+	Coverage []leave.Coverage
 	Next     string
 	// Steps is the trail of decisions on the request.
 	Steps []leave.Step
@@ -424,11 +424,11 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 }
 
 // queueRow is a request in the approvals queue with what an approver needs to
-// weigh it: for one needing special permission, the coverage warning as it
+// weigh it: for one needing special permission, the coverage warnings as they
 // stands now, and who it would go to next.
 type queueRow struct {
 	leave.Request
-	Coverage *leave.Coverage
+	Coverage []leave.Coverage
 	Next     string
 }
 
