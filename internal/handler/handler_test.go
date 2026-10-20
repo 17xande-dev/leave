@@ -17,17 +17,20 @@ import (
 	"github.com/17xande-dev/leave/internal/dbtest"
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/leave"
+	"github.com/17xande-dev/leave/internal/mcpserver"
+	"github.com/17xande-dev/leave/internal/oauth"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
 
 type harness struct {
-	t   *testing.T
-	h   *Handler
-	srv *httptest.Server
-	dir *directory.Fake
-	svc *leave.Service
-	us  *users.Store
+	t     *testing.T
+	h     *Handler
+	srv   *httptest.Server
+	dir   *directory.Fake
+	svc   *leave.Service
+	us    *users.Store
+	oauth *oauth.Server
 }
 
 // newHarness serves the real mux (no CSRF layer: main_test covers that) over
@@ -60,7 +63,12 @@ func newHarness(t *testing.T) *harness {
 	if err := svc.SaveSettings(context.Background(), hr, st); err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(Config{SessionTTL: time.Hour}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir, Leave: svc, Outbox: outbox.NewStore(d)})
+	jobs := outbox.NewStore(d)
+	oa := oauth.New(d, oauth.Config{BaseURL: "http://leave.test"})
+	h, err := New(Config{SessionTTL: time.Hour}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir,
+		Leave: svc, Outbox: jobs, OAuth: oa,
+		MCP: mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: oa.Verify,
+			ResourceMetadataURL: oa.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +76,7 @@ func newHarness(t *testing.T) *harness {
 	h.Routes(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, h: h, srv: srv, dir: dir, svc: svc, us: us}
+	return &harness{t: t, h: h, srv: srv, dir: dir, svc: svc, us: us, oauth: oa}
 }
 
 func mustAll(t *testing.T, dir *directory.Fake) []directory.User {
@@ -168,6 +176,9 @@ func TestSafeNext(t *testing.T) {
 		`/\evil.example`:       "/",
 		"https://evil.example": "/",
 		"/login?next=/x":       "/",
+		// The consent screen is reached through sign-in with its whole query,
+		// so the person lands back on it.
+		"/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s": "/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s",
 	} {
 		if got := safeNext(in); got != want {
 			t.Errorf("safeNext(%q) = %q, want %q", in, got, want)
@@ -223,7 +234,15 @@ func TestProtectedRoutes(t *testing.T) {
 	for _, m := range got {
 		public = append(public, m[1])
 	}
-	want := "GET /healthz,GET /static/{file},GET /login,POST /login"
+	// The first four are the site's; the rest are the AI-assistant endpoints,
+	// public to the session check because they carry no session: the MCP
+	// endpoint (bearer token, checked inside), the OAuth token, registration
+	// and revocation endpoints, and discovery metadata. The consent screen,
+	// /oauth/authorize, is not here: it is behind sign-in.
+	want := "GET /healthz,GET /static/{file},GET /login,POST /login," +
+		"/mcp,POST /oauth/token,POST /oauth/register,POST /oauth/revoke," +
+		"/.well-known/oauth-authorization-server,/.well-known/oauth-protected-resource," +
+		"/.well-known/oauth-protected-resource/mcp"
 	if strings.Join(public, ",") != want {
 		t.Errorf("public routes = %v, want %s", public, want)
 	}

@@ -33,3 +33,38 @@ func TestCSRFRefusesTokenlessPost(t *testing.T) {
 		t.Fatalf("GET: %d, cookie %q", rec.Code, rec.Header().Get("Set-Cookie"))
 	}
 }
+
+// The exempt list is pinned, so adding an endpoint to it has to be done in the
+// open. Each of these takes a bearer token, its own secret, or nothing at all
+// (public metadata); none of them reads a cookie.
+func TestCSRFExemptions(t *testing.T) {
+	want := []string{"/mcp", "/oauth/token", "/oauth/register", "/oauth/revoke",
+		"/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/mcp"}
+	if strings.Join(csrfExempt, ",") != strings.Join(want, ",") {
+		t.Fatalf("csrfExempt = %v, want %v", csrfExempt, want)
+	}
+
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	post := func(path string) int {
+		req := httptest.NewRequest("POST", "http://leave.test"+path, strings.NewReader("x=1"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://leave.test")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for _, p := range csrfExempt {
+		if code := post(p); code != http.StatusOK {
+			t.Errorf("POST %s without a token: %d, want it exempt", p, code)
+		}
+	}
+	// Everything a browser form posts keeps the check, the consent form first of all.
+	for _, p := range []string{"/oauth/authorize", "/oauth/authorize/", "/oauth/tokens", "/mcp/x", "/login", "/logout",
+		"/leave", "/leave/1/decide", "/apps/abc/revoke", "/admin/settings"} {
+		if code := post(p); code != http.StatusForbidden {
+			t.Errorf("POST %s without a token: %d, want 403", p, code)
+		}
+	}
+}

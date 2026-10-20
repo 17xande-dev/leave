@@ -111,21 +111,11 @@ type quoteData struct {
 	CanOverride, CanNegative bool
 }
 
-// newQuoteData reads what a refused quote leaves open to the person. Errors
-// are the quote's own; the "end" error is the balance one only when the quote
-// carries a shortfall, because every earlier "end" error returns before the
-// balance is worked out.
+// newQuoteData reads what a refused quote leaves open to the person; see
+// leave.Offers.
 func newQuoteData(qt *leave.Quote, fe leave.FieldErrors) quoteData {
 	d := quoteData{Quote: qt, Errors: fe}
-	short := fe["end"] != "" && qt.Shortfall > 0
-	other := 0
-	for k := range fe {
-		if k != "coverage" && !(k == "end" && short) {
-			other++
-		}
-	}
-	d.CanOverride = fe["coverage"] != "" && other == 0
-	d.CanNegative = short && other == 0
+	d.CanOverride, d.CanNegative = leave.Offers(*qt, fe)
 	return d
 }
 

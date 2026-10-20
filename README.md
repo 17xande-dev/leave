@@ -103,6 +103,71 @@ retrying for about a day. Graph being down never blocks an approval, and nothing
 is lost. Anything that still hasn't gone through shows on **Admin → Outbox** with a
 Retry button.
 
+## AI assistants (MCP)
+
+The app is also an [MCP](https://modelcontextprotocol.io) server, so people can ask an AI
+assistant about their leave, apply for it, or approve what is waiting for them. Add a
+custom connector in claude.ai, Claude Desktop or Claude Code with the URL
+
+    BASE_URL/mcp          e.g. https://leave.example.org/mcp
+
+**How people connect.** Adding the connector sends them to the app's normal sign-in page
+(their Windows credentials), then to a consent screen naming the assistant. **Allow**
+connects it, **Deny** does not. **Connected apps** (the *Apps* link in the navigation,
+`/apps`) lists each connection with when it was made and last used, and **Disconnect**
+ends it at once. Nothing else is needed from an administrator.
+
+**What an assistant can do** is exactly what the person can do themselves. Every tool
+runs as them through the same code the pages use (the same service methods and
+the same permission checks), so there is no second set of rules. A refusal comes back to the assistant as a
+message it can relay, not an error. Tools that change anything are marked as such, so
+clients ask the person before calling them.
+
+| Tool | What it does |
+|---|---|
+| `my_balances` | Balances per leave type for the current cycle |
+| `my_requests` | Their own requests, optionally one status |
+| `get_request` | One request in full: decision trail, coverage warning, which actions are open to them |
+| `team_leave` | Current and upcoming leave of the people who report to them |
+| `public_holidays` | Holidays for a year |
+| `preview_request` | Day count, balance afterwards and every rule that would stop a request (dates, restricted day, overlap, coverage, balance), and whether special permission or asking HR is available. Changes nothing |
+| `apply_for_leave` | Submit a request. `override` asks for special permission and `ask_hr` asks HR to allow a negative balance, like the two buttons on the form |
+| `withdraw_request` | Withdraw their own undecided request |
+| `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |
+| `request_cancellation` | Ask for approved, not-yet-started leave to be cancelled |
+| `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, and the trail |
+| `decide_request` | Approve or decline (a decline needs a note) |
+| `all_requests` | Administrators only: every request, filtered by status, dates and person |
+| `who_is_away` | Administrators only: who is away in a date range, by department |
+| `outbox_problems` | Administrators only: failing emails and calendar jobs |
+
+**How it works underneath.** `/mcp` is a Streamable HTTP endpoint (stateless, JSON
+responses) in the same binary, using the official Go SDK. The app is its own OAuth 2.1
+authorization server for it: authorization code with PKCE (S256 only), dynamic client
+registration for public clients (what claude.ai uses), refresh token rotation and
+revocation, with the discovery documents at `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`. Access tokens are opaque, last an hour and
+are stored as sha256, like sessions. Refresh tokens last 30 days and rotate on every use;
+presenting an old one again ends the whole connection. A token is checked against the
+user on every call, so disabling someone in the directory stops their assistants at
+once. Registration is open to anyone, so the consent screen says plainly that the
+assistant chose its own name. Redirect URIs must match exactly, and are `https`, a
+loopback `http` address, or an app's own scheme. `/mcp`, `/oauth/token`,
+`/oauth/register`, `/oauth/revoke` and the metadata carry no cookies and are exempt from the CSRF
+check (the list is pinned by a test); the consent form at `/oauth/authorize` keeps it.
+`BASE_URL` must be set to the public address: it is the OAuth issuer.
+
+**Behind a reverse proxy.** The SDK refuses a request that *arrives on a loopback address*
+with a non-loopback `Host` header, to defeat DNS rebinding. The check looks at the
+address the connection was accepted on, not where the proxy is. The documented
+deployment is safe: the container listens on its own network address (the published
+`127.0.0.1:8082` is the host side) and gets the public `Host`. It breaks if the binary
+instead listens on loopback and the proxy forwards the public `Host` to it, for example
+a proxy on the same machine running the binary outside Docker. Every `/mcp` call then
+gets `403 Forbidden: invalid Host header`. Fix it by listening on a non-loopback
+address (`LISTEN_ADDR=:8080`), not by turning the check off. A test pins the
+behaviour so a change in the SDK is noticed.
+
 ## Local development
 
 ```sh
@@ -187,7 +252,7 @@ The container listens on 8080, published on 127.0.0.1:8082 (HOST_PORT) behind th
 | Sign-in | LDAP bind against the DC, per request, with no connection pool, so one user's bind can never leak into another's request. People are keyed on `objectGUID`, which survives OU moves and renames. |
 | Database | SQLite: one instance, one file. Switch to Postgres if a second instance or an outside reader is ever needed. |
 | Styling | One plain CSS file. No Web Awesome, because a component framework and a CDN or vendoring step bought nothing here. |
-| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens). The Graph calendar client is about 150 lines here rather than the Graph SDK. |
+| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
 
 ### Decisions still open
 

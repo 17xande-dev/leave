@@ -254,6 +254,62 @@ CREATE TABLE IF NOT EXISTS outbox (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(next_attempt_at) WHERE done_at IS NULL AND failed_at IS NULL;
+
+-- The app is an OAuth authorization server for its own MCP endpoint. Clients
+-- register themselves (RFC 7591), so a row here proves nothing about who the
+-- client is: it only names it for the consent screen. Ids and tokens are opaque
+-- random values; the tables hold only the sha256 of a code or token, as
+-- sessions do.
+CREATE TABLE IF NOT EXISTS oauth_clients (
+	id             TEXT PRIMARY KEY,
+	name           TEXT NOT NULL,
+	-- A JSON array of the exact redirect URIs the client registered.
+	redirect_uris  TEXT NOT NULL,
+	created_at     TEXT NOT NULL
+) STRICT;
+
+-- One person's consent to one client: what "Connected apps" lists and revokes.
+-- Created when a code is exchanged, so abandoned sign-ins leave nothing here.
+-- Revoking sets revoked_at, which ends every token of the grant at once.
+CREATE TABLE IF NOT EXISTS oauth_grants (
+	id            TEXT PRIMARY KEY,
+	client_id     TEXT NOT NULL REFERENCES oauth_clients(id),
+	user_id       INTEGER NOT NULL REFERENCES users(id),
+	scope         TEXT NOT NULL,
+	created_at    TEXT NOT NULL,
+	last_used_at  TEXT NOT NULL DEFAULT '',
+	revoked_at    TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_oauth_grants_user ON oauth_grants(user_id);
+
+-- An authorization code: one use, ten minutes. used_at is set on the first
+-- attempt whether or not it succeeds, and a second attempt revokes the grant
+-- the first one created (grant_id), as RFC 6749 asks.
+CREATE TABLE IF NOT EXISTS oauth_codes (
+	code_hash       TEXT PRIMARY KEY,
+	client_id       TEXT NOT NULL REFERENCES oauth_clients(id),
+	user_id         INTEGER NOT NULL REFERENCES users(id),
+	code_challenge  TEXT NOT NULL,
+	redirect_uri    TEXT NOT NULL,
+	scope           TEXT NOT NULL,
+	expires_at      TEXT NOT NULL,
+	used_at         TEXT,
+	grant_id        TEXT REFERENCES oauth_grants(id) ON DELETE SET NULL
+) STRICT;
+
+-- Access tokens (an hour) and refresh tokens (30 days, rotated on every use).
+-- A refresh token's used_at marks it spent: presenting it again means two
+-- parties hold it, so the whole grant is revoked.
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+	token_hash  TEXT PRIMARY KEY,
+	kind        TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+	grant_id    TEXT NOT NULL REFERENCES oauth_grants(id) ON DELETE CASCADE,
+	expires_at  TEXT NOT NULL,
+	used_at     TEXT
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_grant ON oauth_tokens(grant_id);
 `
 
 // Open opens (creating if needed) the database at path and applies the schema.
@@ -338,7 +394,8 @@ func checkCurrent(d *sql.DB) error {
 	}
 	// A new table is invisible to the column check above: with requests
 	// already there, a missing one means an older build made the database.
-	for _, table := range []string{"coverage_rules", "request_steps", "settings"} {
+	for _, table := range []string{"coverage_rules", "request_steps", "settings",
+		"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens"} {
 		var n int
 		if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
 			return err

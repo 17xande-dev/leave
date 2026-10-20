@@ -29,3 +29,13 @@ func TestSecurityHeadersPinned(t *testing.T) {
 		t.Errorf("404 missing headers: %d %v", rec.Code, rec.Header())
 	}
 }
+
+func TestCSPWithFormAction(t *testing.T) {
+	got := CSPWithFormAction("http://localhost:3142")
+	if !strings.Contains(got, "form-action 'self' http://localhost:3142;") {
+		t.Errorf("CSP %q does not add the source to form-action", got)
+	}
+	if strings.Replace(got, " http://localhost:3142", "", 1) != CSP {
+		t.Errorf("CSP changed in more than form-action: %q", got)
+	}
+}

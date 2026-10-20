@@ -94,6 +94,9 @@ var ErrNotAllowed = errors.New("leave: that is not possible for this request")
 
 func (s *Service) today() time.Time { return Today(s.Now(), s.cfg.Location) }
 
+// Today is the current date in the organisation's timezone, as midnight UTC.
+func (s *Service) Today() time.Time { return s.today() }
+
 func stampNow(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // withTx runs f in a transaction. _txlock=immediate (see db.Open) makes BEGIN

@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Connected apps</h1>
+<p class="muted">AI assistants you have allowed to use the leave system as you. Disconnecting one stops it straight away; it can ask you again later.</p>
+{{with .Data}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>App</th><th>Connected</th><th>Last used</th><th></th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{.Connected}}</td>
+      <td>{{.LastUsed}}</td>
+      <td><form method="post" action="/apps/{{.ID}}/revoke">{{template "csrf" $.CSRF}}<button type="submit" class="quiet">Disconnect</button></form></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p>No apps are connected.</p>{{end}}
+{{end}}

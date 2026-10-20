@@ -240,6 +240,26 @@ type Quote struct {
 	Coverage *Coverage
 }
 
+// Offers reads what a refused quote leaves open to the person: canOverride is
+// special permission, offered when the request is over a department limit and
+// nothing else stands in its way but the balance; canNegative is asking HR to
+// go below zero, offered when the balance is the only thing wrong (a coverage
+// limit does not matter until the request is submitted). fe is the quote's own
+// errors; the "end" error is the balance one only when the quote carries a
+// shortfall, because every earlier "end" error returns before the balance is
+// worked out. The apply form and the MCP preview both use this, so the two
+// cannot disagree about which buttons exist.
+func Offers(qt Quote, fe FieldErrors) (canOverride, canNegative bool) {
+	short := fe["end"] != "" && qt.Shortfall > 0
+	other := 0
+	for k := range fe {
+		if k != "coverage" && !(k == "end" && short) {
+			other++
+		}
+	}
+	return fe["coverage"] != "" && other == 0, short && other == 0
+}
+
 // maxSpan keeps a typo ("2062" for "2026") from becoming a request spanning
 // decades. Maternity leave, the longest, is four months.
 const maxSpan = 190

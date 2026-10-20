@@ -1,0 +1,25 @@
+{{define "content"}}
+<h1>Connect an app</h1>
+{{with .Data}}
+<p><strong>{{.ClientName}}</strong> is asking to use the leave system as you.</p>
+<p class="hint">The app chose that name itself and the leave system cannot check it, so only continue if you started this from an assistant you use. After you choose, you will be sent to <strong>{{.RedirectHost}}</strong>: if that is not the assistant you use, choose Deny.</p>
+<section class="panel">
+  <h2>What it will be able to do</h2>
+  <ul>
+    <li>See your balances and requests, your team's leave, and public holidays.</li>
+    <li>Apply for leave, withdraw requests and ask for cancellations for you.</li>
+    <li>Approve or decline requests waiting for you, if you are an approver.</li>
+    {{if .Admin}}<li>See every request, who is away, and failing notifications, because you are an administrator.</li>{{end}}
+  </ul>
+  <p>It can do anything you can do in this app and nothing more. You can disconnect it at any time under <a href="/apps">Connected apps</a>.</p>
+</section>
+<form method="post" action="/oauth/authorize">
+  {{template "csrf" $.CSRF}}
+  {{range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+  <div class="actions">
+    <button type="submit" name="decision" value="allow">Allow</button>
+    <button type="submit" name="decision" value="deny" class="quiet">Deny</button>
+  </div>
+</form>
+{{end}}
+{{end}}

@@ -184,6 +184,7 @@ var notices = map[string]string{
 	"negative-granted":   "Permission granted. The request is waiting for them to submit it.",
 	"negative-refused":   "Request refused.",
 	"coverage-saved":     "Coverage limit saved.",
+	"app-revoked":        "App disconnected. It can no longer act for you.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }
 

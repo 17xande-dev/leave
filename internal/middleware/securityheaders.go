@@ -1,7 +1,10 @@
 // Package middleware holds the handlers that wrap every route.
 package middleware
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // CSP is the one policy the whole app serves. Every page is a whole document
 // that loads a stylesheet and htmx from this origin and nothing else -- both are
@@ -30,4 +33,16 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Robots-Tag", "noindex, nofollow")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// CSPWithFormAction is CSP with one more place a form may send the browser.
+//
+// Browsers check form-action against the redirects that follow a form post,
+// not just its target: the consent form posts to this site, which answers with
+// a redirect to the AI assistant's own redirect URI, and under plain
+// form-action 'self' that last hop is blocked and the person is left looking at
+// the consent page. The consent page alone adds its client's registered redirect
+// origin, which is validated at registration.
+func CSPWithFormAction(source string) string {
+	return strings.Replace(CSP, "form-action 'self'", "form-action 'self' "+source, 1)
 }

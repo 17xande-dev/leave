@@ -15,6 +15,7 @@ import (
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/middleware"
+	"github.com/17xande-dev/leave/internal/oauth"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
@@ -32,6 +33,11 @@ type Deps struct {
 	Directory directory.Directory
 	Leave     *leave.Service
 	Outbox    *outbox.Store
+	// OAuth and MCP are the AI-assistant endpoints: OAuth serves the token,
+	// registration, revocation and metadata routes and the pages' grants; MCP
+	// is the bearer-protected tool endpoint.
+	OAuth *oauth.Server
+	MCP   http.Handler
 	// Kick wakes the outbox worker after an admin retries a job.
 	Kick func()
 }
@@ -43,6 +49,8 @@ type Handler struct {
 	directory directory.Directory
 	leave     *leave.Service
 	outbox    *outbox.Store
+	oauth     *oauth.Server
+	mcp       http.Handler
 	kick      func()
 
 	pages    map[string]*template.Template
@@ -69,7 +77,7 @@ func New(cfg Config, d Deps) (*Handler, error) {
 	}
 	return &Handler{
 		cfg: cfg, users: d.Users, sessions: d.Sessions, directory: d.Directory, leave: d.Leave,
-		outbox: d.Outbox, kick: d.Kick,
+		outbox: d.Outbox, oauth: d.OAuth, mcp: d.MCP, kick: d.Kick,
 		pages: pages, partials: partials,
 		// Five tries per username per 15 minutes -- below AD's usual lockout
 		// threshold, so a guesser meets this wall before a colleague is locked
@@ -86,6 +94,19 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /static/{file}", h.ServeStatic)
 	mux.HandleFunc("GET /login", h.LoginForm)
 	mux.HandleFunc("POST /login", h.Login)
+
+	// The AI-assistant endpoints are public to the session check because they
+	// carry no session: /mcp wants a bearer token (checked inside it), the OAuth
+	// endpoints are how a client gets one, and the metadata is for discovery.
+	// None uses cookies, so none is CSRF-exempt by accident; main lists the
+	// exemptions and a test pins them.
+	mux.Handle("/mcp", h.mcp)
+	mux.HandleFunc("POST /oauth/token", h.oauth.Token)
+	mux.HandleFunc("POST /oauth/register", h.oauth.Register)
+	mux.HandleFunc("POST /oauth/revoke", h.oauth.Revoke)
+	mux.Handle("/.well-known/oauth-authorization-server", h.oauth.AuthorizationServerMetadata())
+	mux.Handle("/.well-known/oauth-protected-resource", h.oauth.ResourceMetadata())
+	mux.Handle("/.well-known/oauth-protected-resource/mcp", h.oauth.ResourceMetadata())
 
 	for _, rt := range h.protectedRoutes() {
 		mux.Handle(rt.pattern, rt.handler)
@@ -114,6 +135,12 @@ func (h *Handler) protectedRoutes() []route {
 		u("POST /leave/{id}/decide", h.Decide),
 		u("GET /approvals", h.Approvals),
 		u("GET /team", h.Team),
+		// The consent screen. It stays behind the session and under CSRF: it is
+		// a form a person submits in a browser.
+		u("GET /oauth/authorize", h.Authorize),
+		u("POST /oauth/authorize", h.AuthorizeDecision),
+		u("GET /apps", h.Apps),
+		u("POST /apps/{id}/revoke", h.RevokeApp),
 	}
 	return append(routes, h.adminRoutes()...)
 }

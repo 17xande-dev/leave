@@ -119,3 +119,22 @@ func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
+
+// A database from before the OAuth tables would let the app start and then
+// fail the first time someone connects an assistant.
+func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+		allow_negative INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
+	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
+	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "oauth_clients") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}

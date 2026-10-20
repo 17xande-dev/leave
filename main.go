@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,8 +21,10 @@ import (
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/handler"
 	"github.com/17xande-dev/leave/internal/leave"
+	"github.com/17xande-dev/leave/internal/mcpserver"
 	"github.com/17xande-dev/leave/internal/middleware"
 	"github.com/17xande-dev/leave/internal/notify"
+	"github.com/17xande-dev/leave/internal/oauth"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
@@ -81,12 +84,12 @@ func run() error {
 	leaveSvc.OnEvent(notify.New(cfg.BaseURL).Hook)
 	leaveSvc.OnCommit(worker.Kick)
 
-	h, err := handler.New(handler.Config{
-		CookieSecure:   cfg.CookieSecure,
-		SessionTTL:     cfg.SessionTTL,
-		TrustedProxies: middleware.ParseTrustedProxies(cfg.TrustedProxies),
-	}, handler.Deps{Users: userStore, Sessions: sessions, Directory: dir, Leave: leaveSvc,
-		Outbox: jobs, Kick: worker.Kick})
+	if cfg.BaseURL == "" {
+		slog.Warn("BASE_URL is empty: AI assistants cannot sign in, and emails carry no links")
+	}
+	oauthSrv, mcpHandler := assistant(cfg, database, userStore, leaveSvc, jobs)
+	app, err := newApp(cfg, handler.Deps{Users: userStore, Sessions: sessions, Directory: dir, Leave: leaveSvc,
+		Outbox: jobs, Kick: worker.Kick, OAuth: oauthSrv, MCP: mcpHandler})
 	if err != nil {
 		return err
 	}
@@ -102,14 +105,16 @@ func run() error {
 		} else if n > 0 {
 			slog.Info("swept expired sessions", "n", n)
 		}
+		if n, err := oauthSrv.Sweep(ctx); err != nil {
+			slog.Error("sweep oauth", "err", err)
+		} else if n > 0 {
+			slog.Info("swept expired oauth rows", "n", n)
+		}
 	})
-
-	mux := http.NewServeMux()
-	h.Routes(mux)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           middleware.Logging(middleware.SecurityHeaders(csrf(mux, cfg))),
+		Handler:           app,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -133,6 +138,32 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+// assistant builds the AI-assistant side: the OAuth server that signs people
+// in and the MCP endpoint that accepts what it issues.
+func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.Service, jobs *outbox.Store) (*oauth.Server, http.Handler) {
+	o := oauth.New(database, oauth.Config{BaseURL: cfg.BaseURL,
+		TrustedProxies: middleware.ParseTrustedProxies(cfg.TrustedProxies)})
+	return o, mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: o.Verify,
+		ResourceMetadataURL: o.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})
+}
+
+// newApp is the whole HTTP stack: the routes, then CSRF, then the headers and
+// the log around everything. Tests build it the same way, so what they hit is
+// what is served.
+func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
+	h, err := handler.New(handler.Config{
+		CookieSecure:   cfg.CookieSecure,
+		SessionTTL:     cfg.SessionTTL,
+		TrustedProxies: middleware.ParseTrustedProxies(cfg.TrustedProxies),
+	}, d)
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	h.Routes(mux)
+	return middleware.Logging(middleware.SecurityHeaders(csrf(mux, cfg))), nil
 }
 
 func newDirectory(c config.Directory) (directory.Directory, error) {
@@ -181,6 +212,24 @@ func every(ctx context.Context, d time.Duration, f func()) {
 	}
 }
 
+// csrfExempt are the endpoints that skip the token check, because their
+// callers are programs with no cookie to ride: /mcp takes a bearer token, the
+// OAuth endpoints take their own secrets (a code with its PKCE verifier, a
+// refresh token) or nothing at all (registration), and the metadata is public.
+// A cross-site page cannot make a browser send an Authorization header or a
+// code verifier it does not have, which is all the token check defends against.
+// /oauth/authorize is deliberately absent: it is a form in a signed-in browser
+// and keeps its CSRF token. TestCSRFExemptions pins this list.
+var csrfExempt = []string{
+	"/mcp",
+	"/oauth/token",
+	"/oauth/register",
+	"/oauth/revoke",
+	"/.well-known/oauth-authorization-server",
+	"/.well-known/oauth-protected-resource",
+	"/.well-known/oauth-protected-resource/mcp",
+}
+
 // csrf wraps the mux in nosurf's token check plus its same-origin check.
 func csrf(next http.Handler, cfg config.Config) http.Handler {
 	n := nosurf.New(next)
@@ -192,6 +241,7 @@ func csrf(next http.Handler, cfg config.Config) http.Handler {
 	// nosurf compares Origin with the request's Host assuming https. Behind a
 	// TLS-terminating proxy r.TLS is nil, so CookieSecure is the honest signal
 	// for "the browser is on https".
+	n.ExemptPaths(csrfExempt...)
 	n.SetIsTLSFunc(func(*http.Request) bool { return cfg.CookieSecure })
 	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Host != "" {
 		own := u.Scheme + "://" + u.Host
