@@ -1,0 +1,20 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>People</h1>
+<p class="muted">Everyone comes from the directory, which refreshes hourly. Approvers follow each person's manager in AD unless overridden here.</p>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Name</th><th>Department</th><th>Approver</th><th></th></tr></thead>
+  <tbody>
+  {{range .Data}}
+    <tr>
+      <td><a href="/admin/users/{{.User.ID}}">{{.User.Name}}</a><br><small>{{.User.Username}}</small></td>
+      <td>{{.User.Department}}</td>
+      <td>{{if .User.Disabled}}—{{else}}{{.Approver}}{{if .Override}} <span class="badge">override</span>{{end}}{{end}}</td>
+      <td>{{if .User.Disabled}}<span class="badge problem">disabled</span>{{end}}{{if .User.Admin}}<span class="badge done">admin</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}

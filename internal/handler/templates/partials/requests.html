@@ -1,0 +1,20 @@
+{{/* A table of requests, from a []leave.Request. */}}
+{{define "requests"}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Dates</th><th>Type</th><th class="num">Days</th><th>Status</th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td><a href="/leave/{{.ID}}">{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a></td>
+      <td>{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</td>
+      <td class="num">{{.Days}}</td>
+      <td><span class="badge {{status .Status}}">{{.Status}}</span></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}
+
+{{define "status"}}<span class="badge {{status .}}">{{.}}</span>{{end}}

@@ -1,0 +1,11 @@
+# The database holds staff names and leave history -- never commit it,
+# wherever DB_PATH points. Includes the WAL/SHM sidecars.
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets
+.env
+
+/bin/

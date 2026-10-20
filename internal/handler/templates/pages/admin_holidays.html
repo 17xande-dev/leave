@@ -1,0 +1,49 @@
+{{define "content"}}
+{{template "adminnav"}}
+{{with .Data}}
+<div class="page-head">
+  <h1>Public holidays {{.Year}}</h1>
+  <nav class="row">
+    <a href="/admin/holidays?year={{add .Year -1}}">← {{add .Year -1}}</a>
+    <a href="/admin/holidays?year={{add .Year 1}}">{{add .Year 1}} →</a>
+  </nav>
+</div>
+<p class="muted">Computed from the Public Holidays Act, including the Sunday-to-Monday rule. Add a day declared by proclamation (an election day) by hand; delete one that was moved.</p>
+{{if .Holidays}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Date</th><th>Holiday</th><th></th><th></th></tr></thead>
+  <tbody>
+  {{range .Holidays}}
+    <tr>
+      <td>{{date .Date}}</td><td>{{.Name}}</td>
+      <td>{{if eq .Source "manual"}}<span class="badge">added</span>{{end}}</td>
+      <td>
+        <form method="post" action="/admin/holidays/delete">
+          {{template "csrf" $.CSRF}}<input type="hidden" name="date" value="{{.Date}}">
+          <button type="submit" class="quiet">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="muted">No holidays recorded for {{.Year}}.</p>{{end}}
+
+<form method="post" action="/admin/holidays/generate" class="actions">
+  {{template "csrf" $.CSRF}}<input type="hidden" name="year" value="{{.Year}}">
+  <button type="submit" class="quiet">Add any missing computed holidays for {{.Year}}</button>
+</form>
+
+<form method="post" action="/admin/holidays" class="panel">
+  {{template "csrf" $.CSRF}}<input type="hidden" name="year" value="{{.Year}}">
+  <h2>Add a holiday</h2>
+  <div class="field-row">
+    <div class="field"><label for="date">Date</label><input type="date" id="date" name="date" value="{{.Date}}" required>{{template "err" index .Errors "date"}}</div>
+    <div class="field"><label for="hname">Name</label><input id="hname" name="name" value="{{.Name}}" required>{{template "err" index .Errors "name"}}</div>
+  </div>
+  <div class="actions"><button type="submit">Add</button></div>
+</form>
+{{end}}
+{{end}}

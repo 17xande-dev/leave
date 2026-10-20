@@ -1,0 +1,17 @@
+{{/*
+  The live preview under the apply form, swapped in by htmx on every change.
+  Apply repeats every check, so this is information, not a gate.
+*/}}
+{{define "quote"}}
+<div id="quote" class="quote" aria-live="polite">
+{{if .Incomplete}}
+  <p class="muted">Choose a type of leave and your dates to see how many days this is.</p>
+{{else}}
+  {{with .Errors}}{{range .}}<p class="error">{{.}}</p>{{end}}{{end}}
+  {{with .Quote}}{{if .Days}}
+    <p><strong>{{.Days}} {{if eq .Type.Unit "calendar"}}calendar {{else}}working {{end}}{{plural .Days "day" "days"}}</strong>
+    {{with .After}} — {{.}} left in this cycle afterwards{{end}}</p>
+  {{end}}{{end}}
+{{end}}
+</div>
+{{end}}

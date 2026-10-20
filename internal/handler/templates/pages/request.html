@@ -1,0 +1,79 @@
+{{define "content"}}
+{{with .Data}}{{with .Request}}
+<a class="back" href="/">← My leave</a>
+<div class="page-head">
+  <h1>{{if .IsCancellation}}Cancel {{lower .TypeName}}{{else}}{{.TypeName}}{{end}}</h1>
+  {{template "status" .Status}}
+</div>
+<table class="facts">
+  <tr><th>Who</th><td>{{.UserName}}{{with .Department}} <small>{{.}}</small>{{end}}</td></tr>
+  <tr><th>Dates</th><td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td></tr>
+  <tr><th>Days</th><td>{{.Days}} {{if eq .TypeUnit "calendar"}}calendar{{else}}working{{end}} {{plural .Days "day" "days"}}</td></tr>
+  {{with .Note}}<tr><th>Note</th><td>{{.}}</td></tr>{{end}}
+  <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
+  {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}
+  {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}
+</table>
+{{end}}
+
+{{with .Original}}
+<p class="notice">This asks to cancel <a href="/leave/{{.ID}}">{{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a>, which is currently {{.Status}}. If it is approved, the days go back to the balance.</p>
+{{end}}
+{{with .PendingCancellation}}
+<p class="notice">A <a href="/leave/{{.ID}}">cancellation of this leave</a> is waiting for approval. Until then the leave stays booked.</p>
+{{end}}
+
+{{if .CanDecide}}
+<form method="post" action="/leave/{{.Request.ID}}/decide" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Your decision</h2>
+  <div class="field">
+    <label for="note">Note <small>(required to decline)</small></label>
+    <textarea id="note" name="note" rows="2">{{.Note}}</textarea>
+    {{template "err" index .Errors "note"}}
+  </div>
+  <div class="actions">
+    <button type="submit" name="decision" value="approve">Approve</button>
+    <button type="submit" name="decision" value="decline" class="quiet">Decline</button>
+  </div>
+</form>
+{{end}}
+
+{{with .Candidates}}
+<form method="post" action="/admin/requests/{{$.Data.Request.ID}}/reassign" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Reassign <small>(admin)</small></h2>
+  <div class="field-row">
+    <div class="field">
+      <label for="approver">Approver</label>
+      <select id="approver" name="approver">
+        <option value="0"{{if eq $.Data.Request.ApproverID 0}} selected{{end}}>Leave administrators</option>
+        {{range .}}<option value="{{.ID}}"{{if eq .ID $.Data.Request.ApproverID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field"><button type="submit" class="quiet">Reassign</button></div>
+  </div>
+</form>
+{{end}}
+
+{{if .CanWithdraw}}
+<form method="post" action="/leave/{{.Request.ID}}/withdraw" class="actions">
+  {{template "csrf" $.CSRF}}
+  <button type="submit" class="quiet">Withdraw this request</button>
+</form>
+{{end}}
+
+{{if .CanCancel}}
+<form method="post" action="/leave/{{.Request.ID}}/cancel" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Cancel this leave</h2>
+  <p class="hint">Cancelling approved leave needs approval too. Until it is approved, the leave stays booked.</p>
+  <div class="field">
+    <label for="cancel-note">Reason</label>
+    <textarea id="cancel-note" name="note" rows="2"></textarea>
+  </div>
+  <div class="actions"><button type="submit" class="quiet">Request cancellation</button></div>
+</form>
+{{end}}
+{{end}}
+{{end}}

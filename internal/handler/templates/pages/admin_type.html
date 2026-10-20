@@ -1,0 +1,55 @@
+{{define "content"}}
+{{template "adminnav"}}
+{{with .Data}}
+<a class="back" href="/admin/types">← Leave types</a>
+<h1>{{with .Type.Name}}{{.}}{{else}}New leave type{{end}}</h1>
+<form method="post" action="/admin/types">
+  {{template "csrf" $.CSRF}}
+  <input type="hidden" name="id" value="{{.Type.ID}}">
+  <div class="field">
+    <label for="name">Name</label>
+    <input id="name" name="name" value="{{.Type.Name}}" required>
+    {{template "err" index .Errors "name"}}
+  </div>
+  <div class="field narrow">
+    <label for="code">Code</label>
+    <input id="code" name="code" value="{{.Type.Code}}" required>
+    <span class="hint">Short and permanent, e.g. <code>annual</code>.</span>
+    {{template "err" index .Errors "code"}}
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="allowance">Days per cycle</label>
+      <input id="allowance" name="allowance" inputmode="numeric" size="6" value="{{.Allowance}}">
+      <span class="hint">Empty means no limit.</span>
+      {{template "err" index .Errors "allowance"}}
+    </div>
+    <div class="field">
+      <label for="cycle_months">Cycle</label>
+      <select id="cycle_months" name="cycle_months">
+        <option value="12"{{if eq .Type.CycleMonths 12}} selected{{end}}>12 months (calendar year)</option>
+        <option value="36"{{if eq .Type.CycleMonths 36}} selected{{end}}>36 months (BCEA sick-leave cycle)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="unit">Counts</label>
+      <select id="unit" name="unit">
+        <option value="workdays"{{if eq .Type.Unit "workdays"}} selected{{end}}>Working days</option>
+        <option value="calendar"{{if eq .Type.Unit "calendar"}} selected{{end}}>Calendar days</option>
+      </select>
+      {{template "err" index .Errors "unit"}}
+    </div>
+    <div class="field narrow">
+      <label for="sort">Order</label>
+      <input id="sort" name="sort" inputmode="numeric" size="4" value="{{.Type.Sort}}">
+    </div>
+  </div>
+  <div class="checks">
+    <label><input type="checkbox" name="backdate" value="1"{{if .Type.Backdate}} checked{{end}}> May start in the past</label>
+    <label><input type="checkbox" name="requires_note" value="1"{{if .Type.RequiresNote}} checked{{end}}> Requires a note</label>
+    <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Offered on the apply form</label>
+  </div>
+  <div class="actions"><button type="submit">Save</button><a href="/admin/types">Cancel</a></div>
+</form>
+{{end}}
+{{end}}

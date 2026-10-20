@@ -1,0 +1,11 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Admin</h1>
+{{with .Data}}
+<ul class="stats">
+  <li><a href="/admin/requests?status=pending"><strong>{{.Pending}}</strong> {{plural .Pending "request" "requests"}} awaiting a decision</a></li>
+  <li><a href="/admin/users"><strong>{{.Users}}</strong> people from the directory</a></li>
+  <li><a href="/admin/outbox"><strong>{{.Problems}}</strong> {{plural .Problems "email or calendar update" "emails or calendar updates"}} not yet delivered</a>{{if .Problems}} <span class="badge problem">check</span>{{end}}</li>
+</ul>
+{{end}}
+{{end}}

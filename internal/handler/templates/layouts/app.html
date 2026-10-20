@@ -1,0 +1,35 @@
+{{/*
+  The signed-in chrome, for every page under templates/pages/. The sign-in page
+  uses plain.html instead, so there is no navigation or sign-out form in scope for
+  it to render by mistake.
+*/}}
+{{define "layout"}}
+{{template "document_head" .}}
+<body>
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="/">Leave</a>
+    {{/* Links are hidden by role for tidiness only: h.admin is what refuses the request. */}}
+    <nav aria-label="Main">
+      <a href="/"{{if eq .Path "/"}} aria-current="page"{{end}}>My leave</a>
+      <a href="/leave/new"{{if eq .Path "/leave/new"}} aria-current="page"{{end}}>Apply</a>
+      <a href="/approvals"{{if eq .Path "/approvals"}} aria-current="page"{{end}}>Approvals{{with .Me}}{{if .PendingApprovals}} <span class="count">{{.PendingApprovals}}</span>{{end}}{{end}}</a>
+      <a href="/team"{{if eq .Path "/team"}} aria-current="page"{{end}}>Team</a>
+      {{if and .Me .Me.Admin}}<a href="/admin"{{if eq .Path "/admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
+    </nav>
+    <form method="post" action="/logout" class="signout">
+      {{template "csrf" .CSRF}}
+      {{with .Me}}<span class="muted">{{.Name}}</span>{{end}}
+      <button class="quiet" type="submit">Sign out</button>
+    </form>
+  </div>
+</header>
+<main>
+<div class="inner">
+{{template "notice" .Notice}}
+{{block "content" .}}{{end}}
+</div>
+</main>
+</body>
+</html>
+{{end}}

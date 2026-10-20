@@ -1,0 +1,87 @@
+{{define "content"}}
+{{template "adminnav"}}
+{{with .Data}}
+<a class="back" href="/admin/users">← People</a>
+<h1>{{.User.Name}}</h1>
+<table class="facts">
+  <tr><th>Username</th><td>{{.User.Username}}</td></tr>
+  <tr><th>Email</th><td>{{with .User.Email}}{{.}}{{else}}<span class="badge problem">none in the directory: no emails will reach them</span>{{end}}</td></tr>
+  <tr><th>Department</th><td>{{.User.Department}}</td></tr>
+  <tr><th>Manager in AD</th><td>{{with .Manager}}{{.}}{{else}}—{{end}}</td></tr>
+  <tr><th>Approver</th><td>{{.Approver}}</td></tr>
+</table>
+
+<form method="post" action="/admin/users/{{.User.ID}}/approver" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Approver override</h2>
+  <p class="hint">Applies to new requests. Pending requests keep their approver; reassign those from the request page.</p>
+  <div class="field">
+    <label for="approver">Approver</label>
+    <select id="approver" name="approver">
+      <option value="0">Follow the directory</option>
+      {{range .Candidates}}<option value="{{.ID}}"{{if eq .ID $.Data.OverrideID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </div>
+  <div class="actions"><button type="submit">Save</button></div>
+</form>
+
+<h2>Balances</h2>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Type</th><th>Cycle</th><th class="num">Allowance</th><th class="num">Adjusted</th><th class="num">Taken</th><th class="num">Pending</th><th class="num">Available</th></tr></thead>
+  <tbody>
+  {{range .Balances}}
+    <tr>
+      <td>{{.Type.Name}}</td>
+      <td><small>{{date .CycleStart}} – {{date .CycleEnd}}</small></td>
+      <td class="num">{{with .Allowance}}{{.}}{{else}}—{{end}}</td>
+      <td class="num">{{.Adjustments}}</td>
+      <td class="num">{{.Taken}}</td>
+      <td class="num">{{.Pending}}</td>
+      <td class="num">{{with .Available}}{{.}}{{else}}No limit{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+
+<form method="post" action="/admin/users/{{.User.ID}}/adjustments" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Adjust a balance</h2>
+  <p class="hint">Carry-over, a part-year start, or a correction. Use a negative number to subtract.</p>
+  <div class="field-row">
+    <div class="field">
+      <label for="target">Leave type and cycle</label>
+      <select id="target" name="target">
+        {{range .Balances}}{{if .Allowance}}<option value="{{.Type.ID}}:{{.CycleStart}}"{{if and (eq .Type.ID $.Data.Adj.TypeID) (eq .CycleStart $.Data.Adj.CycleStart)}} selected{{end}}>{{.Type.Name}} ({{date .CycleStart}})</option>{{end}}{{end}}
+      </select>
+      {{template "err" index .Errors "type"}}{{template "err" index .Errors "cycle"}}
+    </div>
+    <div class="field narrow">
+      <label for="days">Days</label>
+      <input id="days" name="days" inputmode="numeric" size="5" value="{{with .Adj.Days}}{{.}}{{end}}">
+      {{template "err" index .Errors "days"}}
+    </div>
+  </div>
+  <div class="field">
+    <label for="reason">Reason</label>
+    <input id="reason" name="reason" value="{{.Adj.Reason}}">
+    {{template "err" index .Errors "reason"}}
+  </div>
+  <div class="actions"><button type="submit">Add adjustment</button></div>
+</form>
+
+{{with .Adjustments}}
+<h2>Adjustments</h2>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Type</th><th>Cycle</th><th class="num">Days</th><th>Reason</th><th>By</th></tr></thead>
+  <tbody>{{range .}}<tr><td>{{.TypeName}}</td><td>{{date .CycleStart}}</td><td class="num">{{.Days}}</td><td>{{.Reason}}</td><td>{{.ByName}}</td></tr>{{end}}</tbody>
+</table>
+</div>
+{{end}}
+
+<h2>Requests</h2>
+{{if .Requests}}{{template "requests" .Requests}}{{else}}<p class="muted">None yet.</p>{{end}}
+{{end}}
+{{end}}

@@ -1,0 +1,47 @@
+{{define "content"}}
+{{template "adminnav"}}
+<div class="page-head">
+  <h1>All requests</h1>
+  <a class="button quiet" href="/admin/requests.csv?{{.Data.Query}}">Download CSV</a>
+</div>
+{{with .Data}}
+<form method="get" action="/admin/requests" class="field-row filters">
+  <div class="field">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">Any</option>
+      {{range $s := (list "pending" "approved" "declined" "withdrawn" "cancelled")}}<option value="{{$s}}"{{if eq $s $.Data.Filter.Status}} selected{{end}}>{{$s}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label for="user">Person</label>
+    <select id="user" name="user">
+      <option value="">Anyone</option>
+      {{range .Users}}<option value="{{.ID}}"{{if eq .ID $.Data.Filter.UserID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field"><label for="from">Ending on or after</label><input type="date" id="from" name="from" value="{{.Filter.From}}"></div>
+  <div class="field"><label for="to">Starting on or before</label><input type="date" id="to" name="to" value="{{.Filter.To}}"></div>
+  <div class="field"><button type="submit">Filter</button></div>
+</form>
+{{if .Requests}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Who</th><th>Request</th><th>Dates</th><th class="num">Days</th><th>Status</th><th>Approver</th></tr></thead>
+  <tbody>
+  {{range .Requests}}
+    <tr>
+      <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
+      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a></td>
+      <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
+      <td class="num">{{.Days}}</td>
+      <td>{{template "status" .Status}}</td>
+      <td>{{with .ApproverName}}{{.}}{{else}}Admins{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="muted">No requests match.</p>{{end}}
+{{end}}
+{{end}}

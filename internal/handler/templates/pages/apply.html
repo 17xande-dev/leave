@@ -1,0 +1,46 @@
+{{define "content"}}
+<h1>Apply for leave</h1>
+{{with .Data}}
+<p class="muted">Your request will go to <strong>{{.Approver}}</strong> for approval.</p>
+{{/*
+  A plain POST form that works without JavaScript. htmx adds only the preview:
+  any change inside the form re-fetches #quote, sending the form's fields as a
+  GET query. hx-trigger/hx-get are attributes, not inline script, so the CSP is
+  untouched.
+*/}}
+<form method="post" action="/leave" id="apply"
+      hx-get="/leave/quote" hx-trigger="change" hx-target="#quote" hx-swap="outerHTML">
+  {{template "csrf" $.CSRF}}
+  <div class="field">
+    <label for="type">Type of leave</label>
+    <select id="type" name="type" required>
+      <option value="">Choose…</option>
+      {{range .Types}}<option value="{{.ID}}"{{if eq .ID $.Data.Input.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    {{template "err" index .Errors "type"}}
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="start">First day</label>
+      <input type="date" id="start" name="start" value="{{.Input.Start}}" required>
+      {{template "err" index .Errors "start"}}
+    </div>
+    <div class="field">
+      <label for="end">Last day</label>
+      <input type="date" id="end" name="end" value="{{.Input.End}}" required>
+      {{template "err" index .Errors "end"}}
+    </div>
+  </div>
+  <div class="field">
+    <label for="note">Note <small>(optional for most types)</small></label>
+    <textarea id="note" name="note" rows="3">{{.Input.Note}}</textarea>
+    {{template "err" index .Errors "note"}}
+  </div>
+  {{template "quote" .Preview}}
+  <div class="actions">
+    <button type="submit">Submit request</button>
+    <a href="/">Cancel</a>
+  </div>
+</form>
+{{end}}
+{{end}}

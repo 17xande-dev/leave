@@ -1,0 +1,8 @@
+[
+  {"username": "pastor",  "name": "Senior Pastor",   "email": "pastor@example.test",  "department": "Leadership", "manager": ""},
+  {"username": "headops", "name": "Olivia Operations","email": "headops@example.test", "department": "Operations", "manager": "pastor"},
+  {"username": "headkids","name": "Kagiso Kids",     "email": "headkids@example.test","department": "Kids",       "manager": "pastor"},
+  {"username": "staff1",  "name": "Sam Staff",       "email": "staff1@example.test",  "department": "Operations", "manager": "headops"},
+  {"username": "staff2",  "name": "Thandi Teacher",  "email": "staff2@example.test",  "department": "Kids",       "manager": "headkids"},
+  {"username": "hr",      "name": "Hannah HR",       "email": "hr@example.test",      "department": "Operations", "manager": "headops", "admin": true}
+]

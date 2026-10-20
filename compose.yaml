@@ -1,0 +1,17 @@
+# The on-prem deployment. The image is built on a workstation (make publish)
+# and pulled here; pin TAG in .env to a commit so a rollback is one line.
+services:
+  leave:
+    image: ghcr.io/17xande-dev/leave:${TAG:-latest}
+    build: .
+    env_file: .env
+    volumes:
+      - leave-data:/data
+    ports:
+      # Behind the TLS-terminating proxy; bind to localhost unless the proxy
+      # is on another host.
+      - "127.0.0.1:${HOST_PORT:-8082}:8080"
+    restart: unless-stopped
+
+volumes:
+  leave-data:

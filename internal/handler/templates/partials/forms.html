@@ -1,0 +1,11 @@
+{{/*
+  What every form repeats:
+    {{template "csrf" .CSRF}}
+    {{template "err" index .Errors "field"}}
+  err takes the value, not the map, so a field with no error renders nothing.
+*/}}
+{{define "csrf"}}<input type="hidden" name="csrf_token" value="{{.}}">{{end}}
+
+{{define "err"}}{{with .}}<p class="error">{{.}}</p>{{end}}{{end}}
+
+{{define "notice"}}{{with .}}<p class="notice" role="status">{{.}}</p>{{end}}{{end}}

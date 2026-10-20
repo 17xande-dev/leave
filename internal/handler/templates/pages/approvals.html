@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1>Approvals</h1>
+{{with .Data.Queue}}
+<p class="muted">Requests waiting for you, oldest first. Open one to decline it with a reason.</p>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Who</th><th>Request</th><th>Dates</th><th class="num">Days</th><th></th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
+      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{with .Note}}<br><small>{{.}}</small>{{end}}</td>
+      <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
+      <td class="num">{{.Days}}</td>
+      <td>
+        <form method="post" action="/leave/{{.ID}}/decide" class="row">
+          {{template "csrf" $.CSRF}}
+          <input type="hidden" name="from" value="queue">
+          <button type="submit" name="decision" value="approve">Approve</button>
+          <a href="/leave/{{.ID}}">Decline…</a>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}
+<p class="muted">Nothing is waiting for you.</p>
+{{end}}
+{{end}}

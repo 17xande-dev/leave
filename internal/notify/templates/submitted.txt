@@ -1,0 +1,10 @@
+{{define "subject"}}{{if .Request.IsCancellation}}Cancellation request{{else}}Leave request{{end}} from {{.Request.UserName}}: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{if .Reassigned}}A request has been reassigned to you for approval.
+
+{{end}}{{if .Request.IsCancellation}}{{.Request.UserName}} asks to cancel approved {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}).{{else}}{{.Request.UserName}} has applied for {{lower .Request.TypeName}} for {{.Dates}} ({{.Days}}).{{end}}
+{{with .Request.Note}}
+Their note: {{.}}
+{{end}}
+Please approve or decline it.{{end}}

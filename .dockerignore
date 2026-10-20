@@ -1,0 +1,9 @@
+# The Dockerfile copies the whole context; keep data and secrets out of it.
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+/bin/
+.git
+.claude/

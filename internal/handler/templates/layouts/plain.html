@@ -1,0 +1,16 @@
+{{/* For pages seen without a session: no navigation, no sign-out. */}}
+{{define "layout"}}
+{{template "document_head" .}}
+<body>
+<header class="site-header">
+  <div class="inner"><span class="brand">Leave</span></div>
+</header>
+<main>
+<div class="inner narrow">
+{{template "notice" .Notice}}
+{{block "content" .}}{{end}}
+</div>
+</main>
+</body>
+</html>
+{{end}}

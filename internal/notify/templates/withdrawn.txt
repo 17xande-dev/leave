@@ -1,0 +1,4 @@
+{{define "subject"}}Withdrawn: {{.Request.UserName}}, {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Request.UserName}} has withdrawn their {{if .Request.IsCancellation}}cancellation request{{else}}request for {{lower .Request.TypeName}}{{end}} for {{.Dates}}. There is nothing for you to do.{{end}}

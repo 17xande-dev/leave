@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Sign in</h1>
+<p class="muted">Use the same username and password you use to sign in to your work computer.</p>
+{{with .Data}}
+{{if .Error}}<p class="notice problem" role="alert">{{.Error}}</p>{{end}}
+<form method="post" action="/login">
+  {{template "csrf" $.CSRF}}
+  <input type="hidden" name="next" value="{{.Next}}">
+  <div class="field">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{.Username}}" autocomplete="username"
+           autocapitalize="none" spellcheck="false" autofocus required>
+  </div>
+  <div class="field">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" required>
+  </div>
+  <div class="actions"><button type="submit">Sign in</button></div>
+</form>
+{{end}}
+{{end}}

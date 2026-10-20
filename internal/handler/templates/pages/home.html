@@ -1,0 +1,28 @@
+{{define "content"}}
+<div class="page-head">
+  <h1>My leave</h1>
+  <a class="button" href="/leave/new">Apply for leave</a>
+</div>
+{{with .Data}}
+<h2>Balances</h2>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Type</th><th class="num">Available</th><th class="num">Taken</th><th class="num">Awaiting approval</th><th>Cycle</th></tr></thead>
+  <tbody>
+  {{range .Balances}}
+    <tr>
+      <td>{{.Type.Name}}</td>
+      <td class="num">{{with .Available}}{{.}}{{else}}No limit{{end}}</td>
+      <td class="num">{{.Taken}}</td>
+      <td class="num">{{.Pending}}</td>
+      <td><small>{{date .CycleStart}} – {{date .CycleEnd}}</small></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+
+<h2>My requests</h2>
+{{if .Requests}}{{template "requests" .Requests}}{{else}}<p class="muted">You have not applied for any leave yet.</p>{{end}}
+{{end}}
+{{end}}

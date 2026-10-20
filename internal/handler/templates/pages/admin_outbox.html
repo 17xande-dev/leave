@@ -1,0 +1,24 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Outbox</h1>
+<p class="muted">Emails and calendar updates that have not gone through yet. They retry on their own for about a day; after that they wait here.</p>
+{{with .Data}}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>What</th><th>Attempts</th><th>Last error</th><th></th></tr></thead>
+  <tbody>
+  {{range .}}
+    <tr>
+      <td>{{.Summary}}<br><small>queued {{.Job.CreatedAt}} (UTC)</small></td>
+      <td class="num">{{.Job.Attempts}}</td>
+      <td><small>{{.Job.LastError}}</small></td>
+      <td>{{if .Job.FailedAt}}
+        <form method="post" action="/admin/outbox/{{.Job.ID}}/retry">{{template "csrf" $.CSRF}}<button type="submit" class="quiet">Retry</button></form>
+      {{else}}<small>retrying, next {{.Job.NextAttempt}} (UTC)</small>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p>Everything has been delivered.</p>{{end}}
+{{end}}

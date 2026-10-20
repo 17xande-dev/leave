@@ -1,0 +1,26 @@
+{{define "document_head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — Leave</title>
+{{/*
+  Two htmx settings, both load-bearing.
+
+  includeIndicatorStyles:false -- htmx would otherwise inject its .htmx-indicator
+  rules as a <style> block, which style-src 'self' blocks silently and *open*: a
+  spinner would sit there permanently visible. The rules live in styles.css.
+
+  responseHandling -- htmx does not swap 4xx/5xx by default, which would swallow
+  a validation message and leave the page looking as though nothing happened.
+*/}}
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,
+  "responseHandling":[{"code":"204","swap":false},
+                      {"code":"[23]..","swap":true},
+                      {"code":"[45]..","swap":true,"error":true}]}'>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="{{asset "icon.svg"}}" type="image/svg+xml">
+<link rel="stylesheet" href="{{asset "styles.css"}}">
+<script src="{{asset "htmx.min.js"}}" defer></script>
+</head>
+{{end}}

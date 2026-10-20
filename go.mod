@@ -1,0 +1,20 @@
+module github.com/17xande-dev/leave
+
+go 1.27.1
+
+require (
+	github.com/17xande-dev/mailer v0.2.0
+	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/justinas/nosurf v1.2.0
+	github.com/mattn/go-sqlite3 v1.14.48
+	golang.org/x/time v0.15.0
+)
+
+require (
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/wneessen/go-mail v0.8.1 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
+)

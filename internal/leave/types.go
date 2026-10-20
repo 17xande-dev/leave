@@ -1,0 +1,274 @@
+package leave
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	UnitWorkdays = "workdays"
+	UnitCalendar = "calendar"
+)
+
+// Type is a kind of leave and its allowance.
+type Type struct {
+	ID   int64
+	Code string
+	Name string
+	// Allowance is days per cycle; nil means unlimited (unpaid leave).
+	Allowance    *int
+	CycleMonths  int
+	Unit         string
+	Backdate     bool
+	RequiresNote bool
+	Active       bool
+	Sort         int
+}
+
+func intp(n int) *int { return &n }
+
+// bceaDefaults are the Basic Conditions of Employment Act minimums for a
+// five-day week, seeded into an empty database. An admin edits them from there;
+// the seed never overwrites.
+var bceaDefaults = []Type{
+	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays},
+	// 30 days per 36-month cycle, usable in arrears.
+	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true},
+	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true},
+	// Four consecutive months, stored as 120 calendar days.
+	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar},
+	{Code: "parental", Name: "Parental leave", Allowance: intp(10), CycleMonths: 12, Unit: UnitCalendar},
+	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true},
+}
+
+// ErrNotFound is returned for a missing type or request.
+var ErrNotFound = errors.New("leave: not found")
+
+const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort`
+
+func scanType(row interface{ Scan(...any) error }) (Type, error) {
+	var t Type
+	var allowance sql.NullInt64
+	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Type{}, ErrNotFound
+	}
+	if allowance.Valid {
+		t.Allowance = intp(int(allowance.Int64))
+	}
+	return t, err
+}
+
+// SeedTypes inserts the BCEA defaults into an empty leave_types table. A
+// table with any row in it is left alone, so an admin's edits survive every
+// restart.
+func (s *Service) SeedTypes(ctx context.Context) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM leave_types`).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	for i, t := range bceaDefaults {
+		t.Active, t.Sort = true, i
+		if _, err := s.SaveType(ctx, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Types lists leave types in display order.
+func (s *Service) Types(ctx context.Context, activeOnly bool) ([]Type, error) {
+	q := `SELECT ` + typeCols + ` FROM leave_types`
+	if activeOnly {
+		q += ` WHERE active = 1`
+	}
+	rows, err := s.db.QueryContext(ctx, q+` ORDER BY sort, name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Type
+	for rows.Next() {
+		t, err := scanType(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) Type(ctx context.Context, id int64) (Type, error) {
+	return scanType(s.db.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, id))
+}
+
+// SaveType inserts (ID 0) or updates a type.
+func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
+	t.Code = strings.TrimSpace(strings.ToLower(t.Code))
+	t.Name = strings.TrimSpace(t.Name)
+	errs := FieldErrors{}
+	if t.Code == "" {
+		errs["code"] = "Enter a short code, e.g. annual."
+	}
+	if t.Name == "" {
+		errs["name"] = "Enter a name."
+	}
+	if t.Unit != UnitWorkdays && t.Unit != UnitCalendar {
+		errs["unit"] = "Choose how days are counted."
+	}
+	if t.CycleMonths != 12 && t.CycleMonths != 36 {
+		errs["cycle_months"] = "The cycle is 12 or 36 months."
+	}
+	if t.Allowance != nil && *t.Allowance < 0 {
+		errs["allowance"] = "The allowance cannot be negative."
+	}
+	if len(errs) > 0 {
+		return 0, errs
+	}
+	var allowance any
+	if t.Allowance != nil {
+		allowance = *t.Allowance
+	}
+	if t.ID == 0 {
+		res, err := s.db.ExecContext(ctx, `INSERT INTO leave_types
+			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
+			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return 0, FieldErrors{"code": "Another leave type already uses that code."}
+		}
+		return res.LastInsertId()
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET code = ?, name = ?, allowance_days = ?,
+		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ? WHERE id = ?`,
+		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.ID)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return 0, FieldErrors{"code": "Another leave type already uses that code."}
+		}
+		return 0, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return 0, ErrNotFound
+	}
+	return t.ID, nil
+}
+
+// HolidayRow is a stored public holiday.
+type HolidayRow struct {
+	Date   string
+	Name   string
+	Source string
+}
+
+// EnsureHolidays generates the computed holidays for a year the first time the
+// year is needed. A year that already has computed rows is left alone, so an
+// admin who deleted one (a holiday moved by proclamation) is not overruled.
+func (s *Service) EnsureHolidays(ctx context.Context, year int) error {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM holidays
+		WHERE source = 'computed' AND date BETWEEN ? AND ?`,
+		fmt.Sprintf("%d-01-01", year), fmt.Sprintf("%d-12-31", year)).Scan(&n); err != nil || n > 0 {
+		return err
+	}
+	return s.GenerateHolidays(ctx, year)
+}
+
+// GenerateHolidays (re)inserts the computed holidays for a year, leaving any
+// existing row -- manual or computed -- as it is.
+func (s *Service) GenerateHolidays(ctx context.Context, year int) error {
+	for _, h := range SAPublicHolidays(year) {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO holidays (date, name, source) VALUES (?, ?, 'computed')
+			ON CONFLICT(date) DO NOTHING`, fmtDate(h.Date), h.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) AddHoliday(ctx context.Context, date, name string) error {
+	t, err := ParseDate(date)
+	errs := FieldErrors{}
+	if err != nil {
+		errs["date"] = "Enter a date."
+	}
+	if strings.TrimSpace(name) == "" {
+		errs["name"] = "Enter a name."
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO holidays (date, name, source) VALUES (?, ?, 'manual')
+		ON CONFLICT(date) DO UPDATE SET name = excluded.name`, fmtDate(t), strings.TrimSpace(name))
+	return err
+}
+
+func (s *Service) DeleteHoliday(ctx context.Context, date string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM holidays WHERE date = ?`, date)
+	return err
+}
+
+func (s *Service) HolidaysInYear(ctx context.Context, year int) ([]HolidayRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT date, name, source FROM holidays
+		WHERE date BETWEEN ? AND ? ORDER BY date`, fmt.Sprintf("%d-01-01", year), fmt.Sprintf("%d-12-31", year))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HolidayRow
+	for rows.Next() {
+		var h HolidayRow
+		if err := rows.Scan(&h.Date, &h.Name, &h.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// holidaySet returns the stored holidays between start and end. Callers run
+// ensureYears first and outside any transaction: with _txlock=immediate a
+// write on s.db from inside a transaction would wait on its own lock.
+func (s *Service) holidaySet(ctx context.Context, q querier, start, end time.Time) (map[time.Time]bool, error) {
+	out := map[time.Time]bool{}
+	rows, err := q.QueryContext(ctx, `SELECT date FROM holidays WHERE date BETWEEN ? AND ?`, fmtDate(start), fmtDate(end))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ds string
+		if err := rows.Scan(&ds); err != nil {
+			return nil, err
+		}
+		if t, err := ParseDate(ds); err == nil {
+			out[t] = true
+		}
+	}
+	return out, rows.Err()
+}
+
+type querier interface {
+	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+}
+
+// FieldErrors maps a form field to what is wrong with it. It is an error so
+// store methods can return it, and handlers render it next to each field.
+type FieldErrors map[string]string
+
+func (e FieldErrors) Error() string {
+	parts := make([]string, 0, len(e))
+	for k, v := range e {
+		parts = append(parts, k+": "+v)
+	}
+	return "invalid: " + strings.Join(parts, "; ")
+}
