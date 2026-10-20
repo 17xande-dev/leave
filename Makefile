@@ -17,7 +17,7 @@ DEV_ENV = DIRECTORY=fake COOKIE_SECURE=false \
 #   Host leave-server
 #     HostName <the server's address>
 #     User <you>
-DEPLOY_HOST ?= leave-server
+DEPLOY_HOST ?= docker-server
 DEPLOY_DIR ?= ~/leave
 REPO ?= git@github.com:17xande-dev/leave.git
 
