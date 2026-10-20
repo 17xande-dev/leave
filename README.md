@@ -250,13 +250,36 @@ until the new secret is in place, then Retry clears them.
 
 ### 3. The server
 
-```sh
-make publish                          # on a workstation: build + push ghcr.io/17xande-dev/leave:<sha>
-# on the server, next to compose.yaml:
-cp .env.example .env && $EDITOR .env  # set TAG to the pushed sha
-docker compose pull && docker compose up -d
-docker compose logs -f
-```
+`make deploy` updates the server from a workstation. It clones or pulls the repo on the
+server, then rebuilds and restarts the container with `docker compose up -d --build`. It
+refuses to run with uncommitted or unpushed changes, because the server pulls from GitHub.
+
+One-time setup:
+
+1. **Name the server in `~/.ssh/config`** on your workstation. The address stays out of the
+   repo, and the Makefile uses only the alias (`DEPLOY_HOST`, default `leave-server`):
+   ```
+   Host leave-server
+     HostName <the server's address>
+     User <your user on the server>
+   ```
+2. **Let the server read the private repo.** On the server, create a key with
+   `ssh-keygen -t ed25519 -f ~/.ssh/leave_deploy`. Add the public half on GitHub under the
+   repo's **Settings → Deploy keys** (read-only). Then tell the server's ssh to use it for
+   GitHub in its own `~/.ssh/config` (`Host github.com`, `IdentityFile ~/.ssh/leave_deploy`).
+3. **Run `make deploy` once.** It clones into `~/leave` (`DEPLOY_DIR`) and stops, because
+   there's no `.env` yet. On the server, run `cp ~/leave/.env.example ~/leave/.env` and fill
+   it in, then deploy again.
+
+After that, every deploy is: commit, push, `make deploy`. Logs are at
+`ssh leave-server 'cd ~/leave && docker compose logs -f'`.
+
+The schema has no migrations yet. If a change refuses to start against the old database,
+the logs say so. Back up the database first (below), then recreate it with
+`docker compose down -v && docker compose up -d`.
+
+`make publish` (build on a workstation, push to GHCR, `docker compose pull` on the server)
+is still there for when you'd rather the server never build anything.
 
 The database lives in the `leave-data` volume. Back it up with
 `docker compose exec leave sqlite3 /data/leave.db ".backup /data/backup.db"`. That uses
