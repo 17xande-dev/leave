@@ -10,3 +10,6 @@
 
 # Mounted at run time by compose.yaml, never baked into an image.
 /certs/
+
+# Secrets are mounted or read at run time, never baked into an image.
+/tunnel.env

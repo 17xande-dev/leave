@@ -18,5 +18,32 @@ services:
       - "127.0.0.1:${HOST_PORT:-8082}:8080"
     restart: unless-stopped
 
+  # Public access without opening a port: cloudflared dials OUT to Cloudflare and
+  # forwards the tunnel's hostname to http://leave:8080 over this compose network
+  # (the routing lives in Cloudflare, not here). Its token is in tunnel.env, a
+  # separate file from .env on purpose: .env is loaded into the app's own
+  # environment, and the app has no business holding the tunnel's secret.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.2
+    # The image's entrypoint is `cloudflared --no-autoupdate`.
+    command: tunnel run
+    env_file: tunnel.env
+    depends_on:
+      - leave
+    networks:
+      default:
+        # A fixed address, so the app can trust this one container -- and no other
+        # -- to say who the real client is (TRUSTED_PROXIES=172.30.16.10/32).
+        ipv4_address: 172.30.16.10
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        # Fixed so the address above is stable. Pick another private range if this
+        # one overlaps something the host must reach.
+        - subnet: 172.30.16.0/24
+
 volumes:
   leave-data:

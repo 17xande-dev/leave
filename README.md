@@ -290,8 +290,50 @@ The database lives in the `leave-data` volume. Back it up with
 `docker compose exec leave sqlite3 /data/leave.db ".backup /data/backup.db"`. That uses
 SQLite's backup API, because a plain `cp` of a live database can capture a torn state.
 
-The container listens on 8080, published on 127.0.0.1:8082 (HOST_PORT) behind the TLS-terminating reverse proxy. Set
-`TRUSTED_PROXIES` to the proxy's address so sign-in rate limits see the real client IP.
+The container listens on 8080 and is published only on `127.0.0.1:8082` (`HOST_PORT`), for
+checking from the server itself. Public access goes through the tunnel below.
+
+### 4. Public access: a Cloudflare Tunnel
+
+The app must be served over HTTPS: its session cookies are `Secure`, and `BASE_URL`
+(the public address) is used for CSRF checks, email links and the AI connector's OAuth
+issuer. `compose.yaml` runs `cloudflared` next to the app. It makes an outbound-only
+connection to Cloudflare, so no inbound port is opened, and Cloudflare provides the
+certificate.
+
+What has to exist (once):
+
+1. **A remotely-managed tunnel** in the Cloudflare account that owns your domain, with a
+   public hostname routing `leave.example.org` to the service `http://leave:8080`
+   (the compose service name, on the compose network), and the DNS record for it:
+   a proxied `CNAME` to `<tunnel-id>.cfargotunnel.com`. With the `cf` CLI:
+   ```sh
+   cf tunnels create --name leave --config-source cloudflare
+   cf tunnels config update <tunnel-id> --body '{"config":{"ingress":[
+     {"hostname":"leave.example.org","service":"http://leave:8080"},
+     {"service":"http_status:404"}]}}'
+   cf dns records create --zone <your domain> --body '{"type":"CNAME","name":"leave",
+     "content":"<tunnel-id>.cfargotunnel.com","proxied":true,"ttl":1}'
+   ```
+   A tunnel and its DNS record must be in the same Cloudflare account.
+2. **The tunnel token in `tunnel.env`** next to `compose.yaml` on the server, one line,
+   `TUNNEL_TOKEN=...` (`cf tunnels token get <tunnel-id>`). It is a secret: the file is
+   git-ignored, docker-ignored, and should be mode 600. It is separate from `.env` so
+   it is not loaded into the app's own environment.
+3. **`BASE_URL=https://leave.example.org` and `TRUSTED_PROXIES=172.30.16.10/32`** in
+   `.env`. The second is the `cloudflared` container's fixed address on the compose
+   network (the subnet is fixed in `compose.yaml`). The app trusts forwarding headers
+   only from that one address, which is how the sign-in rate limit sees real client IPs
+   instead of the tunnel's. If you change the subnet, change this to match.
+
+Then `make deploy`. Check it with `docker compose logs cloudflared` (look for
+"Registered tunnel connection") and open `BASE_URL`.
+
+Note that this puts the AD sign-in page on the internet. The app rate-limits sign-in per
+username and per address, but consider putting **Cloudflare Access** in front, which
+restricts who can even reach the page. If you want the AI connector to keep working,
+`/mcp`, `/oauth/*` and `/.well-known/*` must stay reachable without that login, so they
+need a bypass rule.
 
 ## Decisions
 
