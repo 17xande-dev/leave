@@ -9,3 +9,6 @@
 .env
 
 /bin/
+
+# Internal CA certificates for LDAPS, mounted by compose.yaml: the server's, not the repo's.
+/certs/

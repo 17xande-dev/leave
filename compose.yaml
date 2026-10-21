@@ -7,6 +7,11 @@ services:
     env_file: .env
     volumes:
       - leave-data:/data
+      # The internal CA certificate(s) that signed the DCs' LDAPS certificates,
+      # for LDAP_CA_FILE (e.g. /certs/root-ca.pem). Lives on the server only,
+      # next to this file, and is git-ignored: it is the organisation's, not
+      # the project's. Read-only, because the app has no reason to write it.
+      - ./certs:/certs:ro
     ports:
       # Behind the TLS-terminating proxy; bind to localhost unless the proxy
       # is on another host.

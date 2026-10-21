@@ -7,3 +7,6 @@
 /bin/
 .git
 .claude/
+
+# Mounted at run time by compose.yaml, never baked into an image.
+/certs/

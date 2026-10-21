@@ -224,8 +224,12 @@ GRAPH_LIVE=1 go test -run Live ./internal/calendar/   # creates and deletes one 
   approval chain. The admin's People page shows each person's resolved approver, so gaps
   are easy to spot.
 - The DC must offer **LDAPS (636)**, or StartTLS on 389. The app refuses to send
-  passwords in the clear. If the DC's certificate comes from an internal CA, mount its
-  PEM and set `LDAP_CA_FILE`.
+  passwords in the clear. If the DC's certificate comes from an internal CA, copy the
+  CA's PEM into `certs/` next to `compose.yaml` on the server (git-ignored, mounted
+  read-only at `/certs`) and set `LDAP_CA_FILE=/certs/<file>.pem`. Use the DC's full
+  name in `LDAP_URL`, because that is what its certificate names. Check the setup with
+  the `LDAP_LIVE=1` test rather than `ldapsearch` or `openssl`: recent OpenSSL refuses
+  a 1024-bit DC key that the app itself accepts.
 - Keep AD's account-lockout threshold above 5 attempts. The app's own sign-in limit
   (5 per username per ~15 minutes) is set lower, so a guesser hits the app's limit
   before a colleague is locked out of Windows.
