@@ -39,11 +39,12 @@
     {{template "err" index .Errors "type"}}
   </div>
   <div class="field">
-    {{/* Two month grid, one field. A partial range is left out of value: the
-         component treats it as blank, so the native inputs below keep whatever
-         was typed. */}}
+    {{/* Two month grid (one on a phone), one field. A partial range is left out
+         of value: the component treats it as blank, so the native inputs below
+         keep whatever was typed. locale="en-GB" puts the day before the month,
+         as the server's own dates do ("Mon 2 Jan 2006"). */}}
     <date-range-input label="Dates" start-name="start" end-name="end" required
-        months="2" first-day-of-week="1" with-clear
+        months="2" first-day-of-week="1" with-clear locale="en-GB"
         {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
       <label for="start">First day</label>
       <input type="date" id="start" name="start" value="{{.Input.Start}}" required>

@@ -614,9 +614,6 @@ date-range-input {
 
   font-size: var(--text);
 
-  /* Until the script upgrades it (or when it never runs), the element holds the two
-     native date inputs and their labels: lay each label over its input, side by
-     side, as the old field row did. */
   /* The label matches the other fields' labels. */
   &::part(form-control-label) {
     font-size: var(--text-small);
@@ -625,15 +622,10 @@ date-range-input {
     margin-block-end: var(--gap-xs);
   }
 
-  /* On a phone two months side by side are wider than the screen, so stack them;
-     the popup scrolls if the pair is taller than the space left. */
-  @media (max-width: 40rem) {
-    &::part(calendar-months) {
-      flex-direction: column;
-      gap: var(--gap-sm);
-    }
-  }
-
+  /* Until the script upgrades it (or when it never runs), the element holds the two
+     native date inputs and their labels: lay each label over its input, side by
+     side, as the old field row did. (On a phone the component itself drops to one
+     month, so the popup needs no narrow-screen rules here.) */
   &:not(:defined) {
     display: grid;
     grid-auto-flow: column;

@@ -52,10 +52,10 @@ bypass the content-hashed URL).
 The `<date-range-input>` web component on the apply page. It is our own, kept in a
 separate repository, which is the source of truth: do not edit the copy here.
 
-- Source: `/home/alex/dev/date-range-input/date-range-input.js`, commit `8e87fe6`
+- Source: `/home/alex/dev/date-range-input/date-range-input.js`, commit `33999ff`
 - Licence: MIT (`date-range-input.LICENSE`)
-- Size: 28 402 bytes
-- SHA-256: `db98157d1ea79630a030e4def5a862c7cc40d74babd40f4265c63410ad81f0fc`
+- Size: 28 987 bytes
+- SHA-256: `6a755403da4860a5d869ec661dd93486ef95567d76e740e24cb688b9d5ab24d0`
 
 To update, copy from that repo and record the new commit, size and hash above:
 

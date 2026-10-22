@@ -24,6 +24,7 @@ const CSS = /* css */ `
   --_popup-background: var(--dri-popup-background, light-dark(#fff, #232327));
   --_popup-shadow: var(--dri-popup-shadow, 0 8px 24px light-dark(rgb(0 0 0 / 0.15), rgb(0 0 0 / 0.55)));
   --_gap: var(--dri-popup-gap, 0.25rem);
+  --_two-months: var(--dri-two-months-min-width, 36rem);
 }
 :host([hidden]) { display: none; }
 [hidden] { display: none !important; }
@@ -104,6 +105,7 @@ label {
   margin-block: var(--_gap);
   box-sizing: border-box;
   max-inline-size: calc(100vw - 1rem);
+  max-block-size: calc(100vh - 2rem);
   overflow: auto;
   padding: 0.75rem;
   background: var(--_popup-background);
@@ -113,6 +115,8 @@ label {
   box-shadow: var(--_popup-shadow);
   font: inherit;
 }
+
+.probe { position: absolute; visibility: hidden; pointer-events: none; block-size: 0; inline-size: var(--_two-months); }
 
 .months { display: flex; gap: 1.5rem; }
 
@@ -205,6 +209,7 @@ TEMPLATE.innerHTML = `
   </div>
   <div part="hint" class="hint" id="hint" hidden><slot name="hint"><span id="hint-text"></span></slot></div>
   <div part="popup" class="popup" id="popup" popover="auto" role="dialog"></div>
+  <div class="probe" id="probe" aria-hidden="true"></div>
   <div class="fallback" hidden><slot id="fallback"></slot></div>
 </div>`;
 
@@ -565,7 +570,7 @@ export class DateRangeInput extends HTMLElement {
       `<span slot="previous">${PREV}<span class="vh">Previous month</span></span>` +
       `<span slot="next">${NEXT}<span class="vh">Next month</span></span>` +
       '<div class="months" part="calendar-months"></div>';
-    const months = this.months;
+    const months = this.#visibleMonths;
     const wrap = cal.querySelector('.months');
     for (let i = 0; i < months; i++) {
       const m = document.createElement('calendar-month');
@@ -602,6 +607,13 @@ export class DateRangeInput extends HTMLElement {
     });
     cal.addEventListener('rangeend', (e) => e.stopPropagation());
     return cal;
+  }
+
+  /** `months` is a maximum: two only when the viewport is at least --dri-two-months-min-width wide. */
+  get #visibleMonths() {
+    if (this.months < 2) return 1;
+    const needed = this.#els.probe.getBoundingClientRect().width;
+    return document.documentElement.clientWidth >= needed ? 2 : 1;
   }
 
   #installCalendar() {
