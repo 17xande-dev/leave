@@ -34,6 +34,22 @@ func TestCSRFRefusesTokenlessPost(t *testing.T) {
 	}
 }
 
+// The appearance form is public but not exempt: without the token check a
+// cross-site page could flip a visitor's theme.
+func TestCSRFRefusesTokenlessThemePost(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusSeeOther) })
+	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+
+	req := httptest.NewRequest("POST", "http://leave.test/theme", strings.NewReader(url.Values{"theme": {"dark"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://leave.test")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("tokenless POST /theme: %d, want 403", rec.Code)
+	}
+}
+
 // The exempt list is pinned, so adding an endpoint to it has to be done in the
 // open. Each of these takes a bearer token, its own secret, or nothing at all
 // (public metadata); none of them reads a cookie.

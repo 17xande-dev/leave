@@ -98,6 +98,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /static/{file}", h.ServeStatic)
 	mux.HandleFunc("GET /login", h.LoginForm)
 	mux.HandleFunc("POST /login", h.Login)
+	mux.HandleFunc("POST /theme", h.SetTheme)
 
 	// The AI-assistant endpoints are public to the session check because they
 	// carry no session: /mcp wants a bearer token (checked inside it), the OAuth

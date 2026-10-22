@@ -181,6 +181,14 @@ func TestSafeNext(t *testing.T) {
 		`/\evil.example`:       "/",
 		"https://evil.example": "/",
 		"/login?next=/x":       "/",
+		"/\t/evil.example":     "/",
+		"/\v/evil.example":     "/",
+		"/\f/evil.example":     "/",
+		"/\n/evil.example":     "/",
+		"/\r/evil.example":     "/",
+		"/\x7f/evil.example":   "/",
+		"/team\t":              "/",
+		"/team\x00":            "/",
 		// The consent screen is reached through sign-in with its whole query,
 		// so the person lands back on it.
 		"/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s": "/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s",
@@ -239,12 +247,12 @@ func TestProtectedRoutes(t *testing.T) {
 	for _, m := range got {
 		public = append(public, m[1])
 	}
-	// The first four are the site's; the rest are the AI-assistant endpoints,
+	// The first five are the site's (the appearance form among them); the rest are the AI-assistant endpoints,
 	// public to the session check because they carry no session: the MCP
 	// endpoint (bearer token, checked inside), the OAuth token, registration
 	// and revocation endpoints, and discovery metadata. The consent screen,
 	// /oauth/authorize, is not here: it is behind sign-in.
-	want := "GET /healthz,GET /static/{file},GET /login,POST /login," +
+	want := "GET /healthz,GET /static/{file},GET /login,POST /login,POST /theme," +
 		"/mcp,POST /oauth/token,POST /oauth/register,POST /oauth/revoke," +
 		"/.well-known/oauth-authorization-server,/.well-known/oauth-protected-resource," +
 		"/.well-known/oauth-protected-resource/mcp"
@@ -270,5 +278,166 @@ func TestNoInlineStyleOrHandlers(t *testing.T) {
 	}
 	if n < 5 {
 		t.Fatalf("checked only %d templates", n)
+	}
+}
+
+func TestSafePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                     "/",
+		"/team":                "/team",
+		"/login":               "/login",
+		"/\t/evil.example":     "/",
+		"/\v/evil.example":     "/",
+		"/\f/evil.example":     "/",
+		"/\n/evil.example":     "/",
+		"/\r/evil.example":     "/",
+		"/\x7f/evil.example":   "/",
+		"/team\t":              "/",
+		"/team\x00":            "/",
+		"//evil.example":       "/",
+		`/\evil.example`:       "/",
+		"https://evil.example": "/",
+	} {
+		if got := safePath(in); got != want {
+			t.Errorf("safePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSetTheme(t *testing.T) {
+	hs := newHarness(t)
+	themeCookieOf := func(res *http.Response) *http.Cookie {
+		for _, c := range res.Cookies() {
+			if c.Name == "theme" {
+				return c
+			}
+		}
+		return nil
+	}
+	for _, v := range []string{"light", "dark"} {
+		res, _ := hs.post(hs.client(), "/theme", url.Values{"theme": {v}, "next": {"/team?x=1"}})
+		c := themeCookieOf(res)
+		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/team?x=1" {
+			t.Errorf("%s: %d %q", v, res.StatusCode, res.Header.Get("Location"))
+		}
+		if c == nil || c.Value != v || c.Path != "/" || !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.MaxAge != 365*24*3600 {
+			t.Errorf("%s: cookie %+v", v, c)
+		}
+	}
+
+	res, _ := hs.post(hs.client(), "/theme", url.Values{"theme": {"system"}, "next": {"/login"}})
+	if c := themeCookieOf(res); c == nil || c.MaxAge >= 0 || c.Value != "" {
+		t.Errorf("system should clear the cookie, got %+v", c)
+	}
+	if res.Header.Get("Location") != "/login" {
+		t.Errorf("/login is a valid next, got %q", res.Header.Get("Location"))
+	}
+
+	for _, v := range []url.Values{{}, {"theme": {""}}, {"theme": {"purple"}}, {"theme": {"Dark"}}} {
+		res, _ := hs.post(hs.client(), "/theme", v)
+		if res.StatusCode != http.StatusBadRequest || themeCookieOf(res) != nil {
+			t.Errorf("%v: %d, cookie %v; want 400 and none", v, res.StatusCode, themeCookieOf(res))
+		}
+	}
+
+	for _, next := range []string{"//evil.example", `/\evil.example`, "https://evil.example",
+		"/\t/evil.example", "/\n/evil.example", "/\x7f/evil.example", "/team\r"} {
+		res, _ := hs.post(hs.client(), "/theme", url.Values{"theme": {"dark"}, "next": {next}})
+		if res.Header.Get("Location") != "/" {
+			t.Errorf("next %q redirected to %q, want /", next, res.Header.Get("Location"))
+		}
+	}
+}
+
+func TestThemeRendering(t *testing.T) {
+	hs := newHarness(t)
+	withCookie := func(c *http.Client, v string) {
+		u, _ := url.Parse(hs.srv.URL)
+		c.Jar.SetCookies(u, []*http.Cookie{{Name: "theme", Value: v, Path: "/"}})
+	}
+	pressed := func(body, value string) bool {
+		return regexp.MustCompile(`name="theme" value="` + value + `" aria-pressed="true"`).MatchString(body)
+	}
+
+	// Plain layout (sign-in) and app layout (home), each in every state.
+	for _, page := range []struct{ name, path, user string }{
+		{"plain", "/login", ""}, {"app", "/", "staff1"},
+	} {
+		newClient := func() *http.Client {
+			if page.user == "" {
+				return hs.client()
+			}
+			return hs.signIn(page.user)
+		}
+		c := newClient()
+		_, body := hs.get(c, page.path)
+		if strings.Contains(body, "data-theme") || !pressed(body, "system") {
+			t.Errorf("%s without a cookie: forced theme or Auto not pressed", page.name)
+		}
+		if !strings.Contains(body, `action="/theme"`) || !regexp.MustCompile(`action="/theme"[\s\S]*?name="csrf_token"`).MatchString(body) {
+			t.Errorf("%s: no theme toggle with a CSRF field", page.name)
+		}
+		if !strings.Contains(body, `name="next" value="`+page.path+`"`) {
+			t.Errorf("%s: next is not the current path", page.name)
+		}
+
+		for _, v := range []string{"light", "dark"} {
+			c := newClient()
+			withCookie(c, v)
+			_, body := hs.get(c, page.path)
+			if !strings.Contains(body, `<html lang="en" data-theme="`+v+`">`) || !pressed(body, v) || pressed(body, "system") {
+				t.Errorf("%s with cookie %s: wrong theme or pressed button", page.name, v)
+			}
+		}
+
+		c = newClient()
+		withCookie(c, `"><script>`)
+		_, body = hs.get(c, page.path)
+		if strings.Contains(body, "data-theme") || strings.Contains(body, "<script>") || !pressed(body, "system") {
+			t.Errorf("%s: a junk cookie was not ignored", page.name)
+		}
+	}
+
+	// A re-rendered POST has no GET URL to go back to.
+	r, body := hs.post(hs.client(), "/login", url.Values{"username": {"nobody"}, "password": {"x"}})
+	if r.StatusCode != http.StatusUnauthorized || !strings.Contains(body, `name="next" value="/"`) {
+		t.Errorf("refused sign-in should offer / as next: %d", r.StatusCode)
+	}
+}
+
+func TestThemeNextAfterRefusedPost(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.signIn("staff1")
+	post := func(referer string) string {
+		req, _ := http.NewRequest("POST", hs.srv.URL+"/leave", strings.NewReader(url.Values{"type": {"1"}, "start": {"2026-11-12"}, "end": {"2026-11-10"}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if referer != "" {
+			req.Header.Set("Referer", referer)
+		}
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("refused apply: %d", res.StatusCode)
+		}
+		m := regexp.MustCompile(`name="next" value="([^"]*)"`).FindStringSubmatch(string(b))
+		if m == nil {
+			t.Fatal("no next field")
+		}
+		return m[1]
+	}
+	if got := post(hs.srv.URL + "/leave/new?x=1"); got != "/leave/new?x=1" {
+		t.Errorf("same-origin Referer: next = %q", got)
+	}
+	for name, ref := range map[string]string{
+		"missing": "", "foreign": "https://evil.example/leave/new", "garbage": "%zz",
+		"scheme-relative": "//evil.example/x",
+	} {
+		if got := post(ref); got != "/" {
+			t.Errorf("%s Referer: next = %q, want /", name, got)
+		}
 	}
 }

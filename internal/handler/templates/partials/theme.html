@@ -1,0 +1,14 @@
+{{/*
+  The appearance switch: a form of three buttons, because the CSP rules out the
+  script that would otherwise remember the choice. It posts to /theme, which sets a
+  cookie and comes straight back here. Takes the whole view.
+*/}}
+{{define "theme_toggle"}}<form method="post" action="/theme" class="theme-toggle">
+  {{template "csrf" .CSRF}}
+  <input type="hidden" name="next" value="{{.Next}}">
+  <div role="group" aria-label="Appearance">
+  <button type="submit" name="theme" value="system"{{if eq .Theme ""}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>Auto</button>
+  <button type="submit" name="theme" value="light"{{if eq .Theme "light"}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>Light</button>
+  <button type="submit" name="theme" value="dark"{{if eq .Theme "dark"}} aria-pressed="true"{{else}} aria-pressed="false"{{end}}>Dark</button>
+  </div>
+</form>{{end}}

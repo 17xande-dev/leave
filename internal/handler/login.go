@@ -89,13 +89,28 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?notice=signed-out", http.StatusSeeOther)
 }
 
-// safeNext keeps a post-sign-in redirect on this site. "//evil.example" and
-// "/\evil.example" are both read by browsers as another host, so a leading
-// slash alone is not enough.
-func safeNext(next string) string {
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") ||
-		strings.HasPrefix(next, `/\`) || strings.HasPrefix(next, "/login") {
+// safePath keeps a redirect on this site. "//evil.example" and "/\evil.example"
+// are both read by browsers as another host, so a leading slash alone is not
+// enough.
+func safePath(p string) string {
+	// Browsers strip tab and newline from a URL before reading it, so
+	// "/<TAB>/evil.example" is "//evil.example" to them, though it looks fine here.
+	for i := 0; i < len(p); i++ {
+		if p[i] < 0x20 || p[i] == 0x7f {
+			return "/"
+		}
+	}
+	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.HasPrefix(p, `/\`) {
 		return "/"
 	}
-	return next
+	return p
+}
+
+// safeNext is safePath for after sign-in, which also refuses the sign-in page
+// itself so nobody is bounced straight back to it.
+func safeNext(next string) string {
+	if p := safePath(next); !strings.HasPrefix(p, "/login") {
+		return p
+	}
+	return "/"
 }

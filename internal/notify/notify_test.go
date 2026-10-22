@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -368,5 +369,18 @@ func TestSpecialPermissionEmailListsEveryWarning(t *testing.T) {
 	m = email(t, jobs[0])
 	if !strings.Contains(m.Text, "Why:\n- 100% of Pair (2 of 2)") || !strings.Contains(m.Text, "\n- 100% of the Band team (2 of 2)") {
 		t.Fatalf("escalated email:\n%s", m.Text)
+	}
+}
+
+// Outlook's Word engine drops the padding and often the background of an inline
+// link, so the button is a table cell with its own bgcolor and the link inside.
+func TestEmailButtonIsATableCell(t *testing.T) {
+	e := setup(t)
+	if _, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14"}); err != nil {
+		t.Fatal(err)
+	}
+	m := email(t, e.drain(t)[0])
+	if !strings.Contains(m.HTML, `<td bgcolor="#0c0c0c"`) || !regexp.MustCompile(`<td bgcolor="#0c0c0c"[^>]*><a href="https://leave\.test/[^"]*"`).MatchString(m.HTML) {
+		t.Fatalf("no table-cell button with the link inside:\n%s", m.HTML)
 	}
 }

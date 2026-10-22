@@ -11,7 +11,7 @@
       <td><a href="/admin/users/{{.User.ID}}">{{.User.Name}}</a><br><small>{{.User.Username}}</small></td>
       <td>{{.User.Department}}</td>
       <td>{{if .User.Disabled}}—{{else}}{{.Approver}}{{if .Override}} <span class="badge">override</span>{{end}}{{end}}</td>
-      <td>{{if .User.Disabled}}<span class="badge problem">disabled</span>{{end}}{{if .User.Admin}}<span class="badge done">admin</span>{{end}}</td>
+      <td>{{if .User.Disabled}}<span class="badge problem">disabled</span>{{end}}{{if .User.Admin}}<span class="badge">admin</span>{{end}}</td>
     </tr>
   {{end}}
   </tbody>

@@ -18,11 +18,14 @@
       <a href="/apps"{{if eq .Path "/apps"}} aria-current="page"{{end}}>Apps</a>
       {{if and .Me .Me.Admin}}<a href="/admin"{{if eq .Path "/admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
     </nav>
-    <form method="post" action="/logout" class="signout">
-      {{template "csrf" .CSRF}}
-      {{with .Me}}<span class="muted">{{.Name}}</span>{{end}}
-      <button class="quiet" type="submit">Sign out</button>
-    </form>
+    <div class="tools">
+      {{template "theme_toggle" .}}
+      <form method="post" action="/logout" class="signout">
+        {{template "csrf" .CSRF}}
+        {{with .Me}}<span class="muted">{{.Name}}</span>{{end}}
+        <button class="quiet" type="submit">Sign out</button>
+      </form>
+    </div>
   </div>
 </header>
 <main>

@@ -181,6 +181,14 @@ gets `403 Forbidden: invalid Host header`. Fix it by listening on a non-loopback
 address (`LISTEN_ADDR=:8080`), not by turning the check off. A test pins the
 behaviour so a change in the SDK is noticed.
 
+## Appearance
+
+The pages follow the system's light or dark setting. The Auto, Light and Dark buttons
+in the header override it with a `theme` cookie, set by `POST /theme` (no JavaScript,
+which the CSP would block anyway); Auto clears it. The colours are custom properties
+in the `:root` block of `internal/handler/static/styles.css`, each declared once with
+`light-dark()`, and a test checks their contrast in both themes. Changing the theme reloads the page, so unsaved input in a form on it is lost. Emails stay light.
+
 ## Local development
 
 ```sh

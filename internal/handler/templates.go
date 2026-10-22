@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -104,6 +105,10 @@ type view struct {
 	Notice string
 	Path   string
 	Data   any
+	// Theme is the person's forced appearance ("light" or "dark"), or empty to
+	// follow the system. Next is where the theme form sends them back to.
+	Theme string
+	Next  string
 }
 
 // me is the signed-in person as the layout needs them.
@@ -124,6 +129,8 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, pag
 	}
 	v.CSRF = csrfToken(r)
 	v.Path = r.URL.Path
+	v.Theme = themeFrom(r)
+	v.Next = nextFor(r)
 	if v.Me == nil {
 		v.Me = h.meFor(r)
 	}
@@ -136,6 +143,19 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, pag
 		return
 	}
 	writeHTML(w, status, &buf)
+}
+
+// nextFor is where the theme form sends the person back to. A GET URL is a page
+// one can return to. A re-rendered POST (a refused form) is not, but its form
+// page is what the browser sent as Referer, when that is this site.
+func nextFor(r *http.Request) string {
+	if r.Method == http.MethodGet {
+		return safePath(r.URL.RequestURI())
+	}
+	if u, err := url.Parse(r.Referer()); err == nil && u.Host != "" && u.Host == r.Host {
+		return safePath(u.RequestURI())
+	}
+	return "/"
 }
 
 // renderPartial executes one partial with no layout, for an htmx swap.

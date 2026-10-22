@@ -6,29 +6,40 @@
  *
  * Everything worth changing is a custom property in the block below — there are no
  * colour literals anywhere else in this file, so rebranding means editing a dozen
- * values rather than hunting through selectors.
+ * values rather than hunting through selectors. A test enforces that, and checks
+ * the contrast of every text and background pair in both themes.
  *
  * No web font. The system stack is what every operating system already has, it loads
  * instantly, and it keeps the admin CSP free of a third-party origin.
  */
 
 :root {
-  /* Palette. Deliberately neutral: ink on paper, one accent for actions. The
-     admin is a tool, not a brand surface. */
-  --paper: #ffffff;
-  --paper-sunk: #f6f6f4;
-  --ink: #1a1a18;
-  --ink-soft: #5c5c56;
-  --ink-faint: #8a8a82;
-  --rule: #e4e4df;
-  --accent: #1f4d3f;
-  --accent-ink: #ffffff;
-  --warn: #8a2f1d;
-  --pending: #7a5a00;
+  /* Light and dark follow the system; data-theme (set from the theme cookie)
+     forces one. Each colour is declared once as light-dark(light, dark), and
+     color-scheme also makes native controls and scrollbars match. */
+  color-scheme: light dark;
+
+  /* Palette: a monochrome brand palette. Ink on paper, one inverted fill for
+     actions, red only for trouble and a lime highlight for what to notice. The
+     two values of every pair are checked for contrast by a test. */
+  --paper: light-dark(#ffffff, #0c0c0c);
+  --paper-sunk: light-dark(#f4f4f4, #161616);
+  --ink: light-dark(#0c0c0c, #f2f2f2);
+  --ink-soft: light-dark(#4d4d4d, #b3b3b3);
+  --ink-faint: light-dark(#6b6b6b, #8f8f8f);
+  --rule: light-dark(#dddddd, #2e2e2e);
+  --accent: light-dark(#0c0c0c, #ffffff);
+  --accent-ink: light-dark(#ffffff, #0c0c0c);
+  /* A token of its own: mixing black with black would do nothing. */
+  --accent-hover: light-dark(#333333, #d9d9d9);
+  --warn: light-dark(#c40d0d, #ff6b6b);
+  --pending: light-dark(#8a5a00, #e5a63a);
+  --highlight: light-dark(#daf617, #daf617);
+  --highlight-ink: light-dark(#0c0c0c, #0c0c0c);
 
   /* Type. One stack, sized fluidly so the page reads on a phone and on a laptop
      without a media query for it. */
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text: 1rem;
   --text-small: 0.875rem;
@@ -44,8 +55,9 @@
   --gap-lg: 2.5rem;
   --gap-xl: 4rem;
 
-  --radius: 6px;
-  --radius-lg: 10px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-button: 0.75rem;
   --measure: 68ch;      /* comfortable reading width for prose */
   --page: 1120px;       /* the content column */
 }
@@ -54,6 +66,14 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 html {
@@ -98,14 +118,9 @@ body {
     color: inherit;
     text-decoration: none;
     font-size: var(--text-large);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-
-    /* The bundled mark is a line drawing in currentColor, so it takes the
-       surrounding text colour and needs no second file for a dark header. */
-    > img {
-      display: block;
-    }
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   nav {
@@ -129,11 +144,56 @@ body {
     }
   }
 
+  /* The appearance switch and the sign-out form, which wrap together on a phone. */
+  .tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--gap-sm) var(--gap-md);
+  }
+
   .signout {
     display: flex;
     align-items: center;
     gap: var(--gap-sm);
     font-size: var(--text-small);
+
+    > button {
+      min-block-size: calc(2.5rem + 2px);
+      padding-block: 0;
+    }
+  }
+
+  /* On a phone the header is brand and appearance switch on one row, the links
+     on the next and the account on the last, instead of four rows of one thing
+     each. display: contents lets the switch and sign-out escape their wrapper
+     to be placed individually. */
+  @media (max-width: 40rem) {
+    > .inner {
+      gap: var(--gap-sm) var(--gap);
+    }
+
+    .tools {
+      display: contents;
+    }
+
+    .brand {
+      order: 1;
+    }
+
+    .theme-toggle {
+      order: 2;
+      margin-inline-start: auto;
+    }
+
+    nav {
+      order: 3;
+      flex-basis: 100%;
+    }
+
+    .signout {
+      order: 4;
+    }
   }
 }
 
@@ -143,9 +203,10 @@ body {
   min-width: 1.4em;
   padding: 0 0.35em;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--highlight);
+  color: var(--highlight-ink);
   font-size: 0.75rem;
+  font-weight: 700;
   text-align: center;
   line-height: 1.4;
 }
@@ -273,7 +334,7 @@ pre.raw {
 
   &.problem {
     color: var(--warn);
-    background: color-mix(in oklab, var(--warn) 8%, var(--paper-sunk));
+    background: color-mix(in oklab, var(--warn) 12%, var(--paper-sunk));
   }
 
   &.pending {
@@ -284,13 +345,13 @@ pre.raw {
   /* Over a department limit: needs every level to approve. */
   &.special {
     color: var(--warn);
-    background: color-mix(in oklab, var(--warn) 8%, var(--paper-sunk));
+    background: color-mix(in oklab, var(--warn) 12%, var(--paper-sunk));
   }
 
   /* The state worth noticing in a list: this one completed. */
   &.done {
-    color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 8%, var(--paper-sunk));
+    color: var(--highlight-ink);
+    background: var(--highlight);
   }
 }
 
@@ -312,21 +373,27 @@ label {
   }
 }
 
+::placeholder {
+  /* Chromium's own placeholder grey falls under 4.5:1 on the dark paper. */
+  color: var(--ink-faint);
+  opacity: 1;
+}
+
 input,
 select,
 textarea {
   font: inherit;
   color: inherit;
   background: var(--paper);
-  border: 1px solid var(--rule);
+  /* ink-faint, not rule: a field's edge is what tells you it is a field. */
+  border: 1px solid var(--ink-faint);
   border-radius: var(--radius);
   padding: 0.45rem 0.6rem;
   max-width: 100%;
 
   &:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ink);
     outline-offset: 1px;
-    border-color: var(--accent);
   }
 }
 
@@ -343,10 +410,10 @@ textarea {
 button,
 .button {
   font: inherit;
-  font-weight: 500;
+  font-weight: 700;
   cursor: pointer;
   border: 1px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--radius-button);
   background: var(--accent);
   color: var(--accent-ink);
   padding: 0.5rem 1rem;
@@ -354,9 +421,8 @@ button,
   display: inline-block;
 
   &:hover {
-    /* Derived from the accent rather than a second hardcoded colour, so changing
-       one variable changes the hover too. */
-    background: color-mix(in oklab, var(--accent) 85%, black);
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
   }
 
   &:focus-visible {
@@ -373,7 +439,57 @@ button,
 
     &:hover {
       background: var(--paper-sunk);
+      border-color: var(--rule);
       color: var(--ink);
+    }
+  }
+}
+
+/* The appearance switch: three buttons joined into one segmented control. The
+   chosen one is filled, so the state reads without colour. */
+.theme-toggle {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-button);
+  overflow: hidden;
+
+  > [role="group"] {
+    display: flex;
+  }
+
+  /* 40px tall, a comfortable touch target. Sign out is made as tall as the whole
+     control, border included, so the two sit level. */
+  button {
+    min-block-size: 2.5rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: var(--text-small);
+    font-weight: 500;
+    padding: 0 0.8rem;
+
+    &:hover {
+      background: var(--paper-sunk);
+      color: var(--ink);
+    }
+
+    /* The weight stays put so the control does not change width: the fill alone
+       says which is chosen. */
+    &[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    /* Inside the overflow clip an outset ring would be cut off. */
+    &:focus-visible {
+      outline-offset: -2px;
+    }
+
+    /* On the filled one the ink ring would vanish into the fill. */
+    &[aria-pressed="true"]:focus-visible {
+      outline-color: var(--accent-ink);
+      outline-offset: -4px;
     }
   }
 }
@@ -416,6 +532,21 @@ button,
      needs the gap under it that a trailing one does not. */
   &:not(:last-child) {
     margin-block-end: var(--gap-sm);
+  }
+}
+
+/* A bare fieldset gets the panel's look, so a group of tick boxes is not the one
+   square grooved box among the rounded ones. */
+fieldset {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  margin-inline: 0;
+  padding: var(--gap-md);
+  min-inline-size: 0;
+
+  > legend {
+    font-weight: 600;
+    padding-inline: var(--gap-xs);
   }
 }
 
@@ -523,7 +654,7 @@ button,
 
 .notice {
   border: 1px solid var(--rule);
-  border-inline-start: 3px solid var(--accent);
+  border-inline-start: 3px solid var(--ink);
   border-radius: var(--radius);
   background: var(--paper-sunk);
   padding: var(--gap-sm) var(--gap);
@@ -620,7 +751,7 @@ table {
 /* Something the person has to do, above everything else on the page. */
 .panel.attention {
   border-color: var(--pending);
-  background: color-mix(in oklab, var(--pending) 6%, var(--paper));
+  background: color-mix(in oklab, var(--pending) 8%, var(--paper));
 
   ul {
     margin: 0;
