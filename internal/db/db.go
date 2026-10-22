@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -23,10 +21,7 @@ import (
 // does nothing to a table that already exists, and reports success. While this
 // is greenfield a schema change means `make recreate-db`, not an ALTER on
 // startup -- an ALTER-based helper would leave an old non-strict definition in
-// place and silently diverge from this file. The one exception is
-// migrateBackdating and migrateRecorded, for a database that already holds
-// real requests (the second only adds columns, so it needs no backup); adopt a
-// versioned migration tool if more of those follow.
+// place and silently diverge from this file.
 //
 // Dates (start_date, end_date, holidays.date, cycle_start) are TEXT
 // YYYY-MM-DD: leave is a matter of calendar days in one timezone, and a
@@ -376,14 +371,6 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
-	if err := migrateBackdating(d, path); err != nil {
-		d.Close()
-		return nil, err
-	}
-	if err := migrateRecorded(d); err != nil {
-		d.Close()
-		return nil, err
-	}
 	if _, err := d.Exec(schema); err != nil {
 		d.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -398,8 +385,8 @@ func Open(path string) (*sql.DB, error) {
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
 		"users":       {"ext_id", "long_weekend"},
-		"requests":    {"shutdown_part_id", "escalate", "allow_negative"},
-		"leave_types": {"restricted_rule", "coverage_rule"},
+		"requests":    {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id"},
+		"leave_types": {"restricted_rule", "coverage_rule", "backdate_days"},
 		"settings":    {"team_default_percent"},
 	}
 	for table, cols := range want {
@@ -425,6 +412,20 @@ func checkCurrent(d *sql.DB) error {
 				return fmt.Errorf("the database predates %s.%s: it was created by an older build; "+
 					"back it up and start from a fresh one (make recreate-db locally)", table, c)
 			}
+		}
+	}
+	// Columns an older build had and this one dropped: the database must not
+	// still carry them.
+	for _, g := range []struct{ table, col string }{
+		{"leave_types", "backdate"}, {"settings", "sick_backdate_days"},
+	} {
+		var n int
+		if err := d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, g.table, g.col).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return fmt.Errorf("the database still has %s.%s: it was created by an older build; "+
+				"back it up and start from a fresh one (make recreate-db locally)", g.table, g.col)
 		}
 	}
 	// The draft status lives in a CHECK, which pragma_table_info cannot see.
@@ -459,119 +460,6 @@ func checkCurrent(d *sql.DB) error {
 	}
 	if !strings.Contains(ddl, "'weekend'") {
 		return fmt.Errorf("the database predates weekend-off leave types; start from a fresh one")
-	}
-	return nil
-}
-
-// migrateBackdating moves a database from the old backdating model (a 0/1
-// leave_types.backdate flag plus the global settings.sick_backdate_days) to a
-// per-type leave_types.backdate_days. It is the one in-place migration the
-// app has: the production database predates it and holds real requests.
-//
-// This release is forward-only: the old build refuses the new columns' absence
-// and cannot read the result, so before the first ALTER (and only when there is
-// something to migrate) the database is copied with VACUUM INTO next to the
-// original. If that fails the open fails and nothing has changed. Rolling back
-// means restoring that copy.
-//
-// ADD COLUMN works on a STRICT table, and the new column's NOT NULL, DEFAULT
-// and CHECK are all allowed on it, so the table keeps its STRICT definition
-// (unlike the rebuild the header comment warns about). The default of 92 is
-// the policy for every type, so every existing row gets it without a
-// backfill UPDATE; the old columns are then dropped (SQLite 3.35+, and a
-// column's own CHECK does not block its DROP). It is idempotent: a database
-// already on the new schema, or a fresh one, is left alone.
-func migrateBackdating(d *sql.DB, path string) error {
-	has := func(q interface {
-		QueryRow(string, ...any) *sql.Row
-	}, table, col string) (bool, error) {
-		var n int
-		err := q.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n)
-		return n > 0, err
-	}
-	oldFlag, err := has(d, "leave_types", "backdate")
-	if err != nil {
-		return err
-	}
-	oldSick, err := has(d, "settings", "sick_backdate_days")
-	if err != nil {
-		return err
-	}
-	if !oldFlag && !oldSick {
-		return nil
-	}
-	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
-		slog.Warn("migrating backdating without a backup: the database path is not a plain file", "path", path)
-	} else {
-		backup := fmt.Sprintf("%s.pre-backdate-%s.db", path, time.Now().UTC().Format("20060102T150405Z"))
-		if _, err := d.Exec(`VACUUM INTO ?`, backup); err != nil {
-			return fmt.Errorf("back up the database before migrating backdating: %w", err)
-		}
-		slog.Info("backed up the database before migrating backdating", "backup", backup)
-	}
-	tx, err := d.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if oldFlag {
-		newCol, err := has(tx, "leave_types", "backdate_days")
-		if err != nil {
-			return err
-		}
-		if !newCol {
-			if _, err := tx.Exec(`ALTER TABLE leave_types ADD COLUMN backdate_days INTEGER NOT NULL DEFAULT 92
-				CHECK (backdate_days BETWEEN 0 AND 92)`); err != nil {
-				return fmt.Errorf("migrate backdating: %w", err)
-			}
-		}
-		if _, err := tx.Exec(`ALTER TABLE leave_types DROP COLUMN backdate`); err != nil {
-			return fmt.Errorf("migrate backdating: %w", err)
-		}
-	}
-	if oldSick {
-		if _, err := tx.Exec(`ALTER TABLE settings DROP COLUMN sick_backdate_days`); err != nil {
-			return fmt.Errorf("migrate backdating: %w", err)
-		}
-	}
-	return tx.Commit()
-}
-
-// migrateRecorded adds the columns behind "Record leave" to a requests table
-// that predates them. Purely additive (nullable, no default needed, so STRICT
-// and the table's CHECKs are untouched) and idempotent: a column already there,
-// or no requests table yet (a fresh database; the schema creates it with the
-// columns), is left alone. It runs whether or not migrateBackdating did, and
-// needs no backup because nothing is rewritten or dropped.
-func migrateRecorded(d *sql.DB) error {
-	have := map[string]bool{}
-	rows, err := d.Query(`SELECT name FROM pragma_table_info('requests')`)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			rows.Close()
-			return err
-		}
-		have[n] = true
-	}
-	rows.Close()
-	if len(have) == 0 {
-		return nil
-	}
-	for _, c := range []struct{ name, def string }{
-		{"recorded_by_id", "INTEGER REFERENCES users(id)"},
-		{"removed_by_id", "INTEGER REFERENCES users(id)"},
-		{"removed_at", "TEXT"},
-	} {
-		if have[c.name] {
-			continue
-		}
-		if _, err := d.Exec(`ALTER TABLE requests ADD COLUMN ` + c.name + ` ` + c.def); err != nil {
-			return fmt.Errorf("migrate recorded leave: %w", err)
-		}
 	}
 	return nil
 }

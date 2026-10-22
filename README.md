@@ -328,12 +328,8 @@ One-time setup:
 After that, every deploy is: commit, push, `make deploy`. Logs are at
 `ssh docker-server 'cd ~/leave && docker compose logs -f'`.
 
-The schema has no general migrations. The one exception is the move to per-type
-backdating: on first start it copies the database to
-`/data/leave.db.pre-backdate-<UTC time>.db` (via `VACUUM INTO`), then migrates in place.
-That release is forward-only: the previous build cannot open the migrated database, so
-rolling back means restoring that copy. For any other change, if it refuses to start
-against the old database, the logs say so. Back up the database first (below), then recreate it with
+The schema has no migrations. If the app refuses to start against an old database, the
+logs say so. Back up the database first (below), then recreate it with
 `docker compose down -v && docker compose up -d`.
 
 `make publish` (build on a workstation, push to GHCR, `docker compose pull` on the server)
