@@ -594,6 +594,55 @@ fieldset {
   }
 }
 
+/* The date range picker (a web component with its own shadow DOM, so it takes
+   its look through custom properties). They are mapped onto the tokens above, so
+   it follows light, dark and the data-theme override with the other fields and
+   shares their border, radius and focus ring. */
+date-range-input {
+  --dri-background: var(--paper);
+  --dri-color: var(--ink);
+  --dri-border-color: var(--ink-faint);
+  --dri-border-radius: var(--radius);
+  --dri-focus-ring: 2px solid var(--ink);
+  --dri-accent: var(--accent);
+  --dri-accent-color: var(--accent-ink);
+  --dri-range-background: var(--paper-sunk);
+  --dri-muted: var(--ink-soft);
+  --dri-invalid-color: var(--warn);
+  --dri-popup-background: var(--paper);
+  --dri-popup-shadow: 0 0.5rem 1.5rem color-mix(in oklab, var(--ink) 20%, transparent);
+
+  font-size: var(--text);
+
+  /* Until the script upgrades it (or when it never runs), the element holds the two
+     native date inputs and their labels: lay each label over its input, side by
+     side, as the old field row did. */
+  /* The label matches the other fields' labels. */
+  &::part(form-control-label) {
+    font-size: var(--text-small);
+    font-weight: 500;
+    color: var(--ink);
+    margin-block-end: var(--gap-xs);
+  }
+
+  /* On a phone two months side by side are wider than the screen, so stack them;
+     the popup scrolls if the pair is taller than the space left. */
+  @media (max-width: 40rem) {
+    &::part(calendar-months) {
+      flex-direction: column;
+      gap: var(--gap-sm);
+    }
+  }
+
+  &:not(:defined) {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: auto auto;
+    grid-auto-columns: max-content;
+    gap: 0 var(--gap);
+  }
+}
+
 /* A set of tick boxes read as a list rather than a column of blocks:
    categories on a product, variants on a file. */
 .checks {

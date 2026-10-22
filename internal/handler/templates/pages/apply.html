@@ -1,3 +1,7 @@
+{{define "head"}}
+<script type="module" src="{{asset "cally.js"}}"></script>
+<script type="module" src="{{asset "date-range-input.js"}}"></script>
+{{end}}
 {{define "content"}}
 <h1>Apply for leave</h1>
 {{with .Data}}
@@ -7,6 +11,12 @@
   any change inside the form re-fetches #quote, sending the form's fields as a
   GET query. hx-trigger/hx-get are attributes, not inline script, so the CSP is
   untouched.
+
+  The two dates are one <date-range-input>, which submits start and end like the
+  two native inputs it replaces, so the handlers are unchanged. The component
+  fires one bubbling change per committed range, so the preview refreshes once.
+  The date inputs inside it are the no-JS fallback: the component disables them
+  once it has upgraded.
 
   hx-validate="false": htmx 4 calls reportValidity() before a form's requests, so
   a half-filled form would pop "Please fill in this field" bubbles and steal focus
@@ -28,17 +38,20 @@
     </select>
     {{template "err" index .Errors "type"}}
   </div>
-  <div class="field-row">
-    <div class="field">
+  <div class="field">
+    {{/* Two month grid, one field. A partial range is left out of value: the
+         component treats it as blank, so the native inputs below keep whatever
+         was typed. */}}
+    <date-range-input label="Dates" start-name="start" end-name="end" required
+        months="2" first-day-of-week="1" with-clear
+        {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
       <label for="start">First day</label>
       <input type="date" id="start" name="start" value="{{.Input.Start}}" required>
-      {{template "err" index .Errors "start"}}
-    </div>
-    <div class="field">
       <label for="end">Last day</label>
       <input type="date" id="end" name="end" value="{{.Input.End}}" required>
-      {{template "err" index .Errors "end"}}
-    </div>
+    </date-range-input>
+    {{template "err" index .Errors "start"}}
+    {{template "err" index .Errors "end"}}
   </div>
   <div class="field">
     <label for="note">Note <small>(optional for most types)</small></label>
