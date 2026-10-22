@@ -158,6 +158,21 @@ clients ask the person before calling them.
 | `all_requests` | Administrators only: every request, filtered by status, dates and person |
 | `who_is_away` | Administrators only: who is away in a date range, by department |
 | `outbox_problems` | Administrators only: failing emails and calendar jobs |
+| `person_balances` | Administrators only: a person's balances for the current cycle and every adjustment made for them |
+| `permission_queue` | Administrators only: requests waiting for HR to allow a negative balance (`/admin/permissions`), with the shortfall |
+| `record_leave` | Administrators only: record leave a person already started or took (the **Record leave** form). A note is required; a retired type is allowed; the balance may go below zero and the result says so. The person is emailed |
+| `remove_recorded_leave` | Administrators only: remove leave an administrator recorded; the days return and the person is emailed |
+| `adjust_balance` | Administrators only: add or remove days on one type's balance for a cycle (default the current one), with a required reason. Nobody is emailed |
+| `grant_negative` | Administrators only: allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
+| `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
+| `reassign_request` | Administrators only: move a pending request to another approver, or with none to the leave administrators; the new approver is emailed |
+
+The administrators' tools identify a person by sign-in username (as `all_requests` does),
+email address or exact full name, and refuse a name that matches two people rather than
+guess. They are the website's admin actions through the same service methods, so the same
+rules hold: nobody records their own leave or grants or refuses their own request (another
+administrator does), and a validation message from the service comes back as the tool's
+error naming the field. Tools that change anything are marked, so clients ask first.
 
 **How it works underneath.** `/mcp` is a Streamable HTTP endpoint (stateless, JSON
 responses) in the same binary, using the official Go SDK. The app is its own OAuth 2.1
