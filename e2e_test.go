@@ -405,6 +405,18 @@ func TestEndToEndAdminToolsForAdmins(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("outbox_problems as admin: %v %v", err, res)
 	}
+	// The admin actions run through the real notifier hook and outbox.
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC) // a Thursday; the fixed clock says it is the 5th
+	for tool, args := range map[string]map[string]any{
+		"person_balances":  {"person": "staff1"},
+		"permission_queue": nil,
+		"adjust_balance":   {"person": "staff1@example.test", "type": "annual", "days": 2, "reason": "carry-over"},
+		"record_leave":     {"person": "staff1", "type": "annual", "start": day.Format(time.DateOnly), "note": "agreed"},
+	} {
+		if res, err := call(t, cs, tool, args); err != nil || res.IsError {
+			t.Fatalf("%s as admin: %v %v", tool, err, text(res))
+		}
+	}
 }
 
 // A person disabled in the directory loses the assistants' access at once, on

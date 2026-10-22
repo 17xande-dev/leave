@@ -39,6 +39,12 @@ func (s *Service) balance(ctx context.Context, q querier, userID int64, t Type, 
 	return b, err
 }
 
+// BalanceIn is a person's balance for one type in the cycle starting at cycle,
+// for a cycle that is not the current one (leave recorded for last year).
+func (s *Service) BalanceIn(ctx context.Context, userID int64, t Type, cycle time.Time) (Balance, error) {
+	return s.balance(ctx, s.db, userID, t, cycle)
+}
+
 // Balances is every active type's balance for the cycle containing today.
 func (s *Service) Balances(ctx context.Context, userID int64) ([]Balance, error) {
 	types, err := s.Types(ctx, true)

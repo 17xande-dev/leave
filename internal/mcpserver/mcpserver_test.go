@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ type fixture struct {
 	srv *httptest.Server
 	svc *leave.Service
 	us  *users.Store
+	db  *sql.DB
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -72,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 		ResourceMetadataURL: "http://leave.test/.well-known/oauth-protected-resource", Scopes: []string{"leave"}}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &fixture{t: t, srv: srv, svc: svc, us: us}
+	return &fixture{t: t, srv: srv, svc: svc, us: us, db: d}
 }
 
 type bearer struct{ token string }
@@ -165,8 +167,13 @@ func TestToolAnnotations(t *testing.T) {
 	readOnly := map[string]bool{"my_balances": true, "my_requests": true, "get_request": true, "team_leave": true,
 		"public_holidays": true, "preview_request": true, "approval_queue": true, "all_requests": true,
 		"who_is_away": true, "outbox_problems": true}
-	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true}
-	changing := map[string]bool{"apply_for_leave": true, "submit_draft": true, "request_cancellation": true}
+	for _, n := range []string{"person_balances", "permission_queue"} {
+		readOnly[n] = true
+	}
+	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true,
+		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true}
+	changing := map[string]bool{"apply_for_leave": true, "submit_draft": true, "request_cancellation": true,
+		"record_leave": true, "adjust_balance": true, "grant_negative": true}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true
@@ -492,4 +499,233 @@ func TestTeamCoverageWarningsAreAList(t *testing.T) {
 	if w, _ := item["coverage_warnings"].([]any); len(w) != 1 {
 		t.Fatalf("queue = %v", q.Data)
 	}
+}
+
+// makeAdmin makes a second administrator: the service forbids self-actions,
+// so most admin tools need two to be exercised on a real target.
+func (f *fixture) makeAdmin(username string) {
+	f.t.Helper()
+	if _, err := f.db.Exec(`UPDATE users SET is_admin = 1 WHERE username = ?`, username); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestAdminActionToolsRefuseStaff(t *testing.T) {
+	f := newFixture(t)
+	staff, hr := f.as("staff1"), f.as("hr")
+	r := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
+	calls := map[string]map[string]any{
+		"record_leave":          {"person": "staff2", "type": "annual", "start": "2026-10-01", "note": "x"},
+		"remove_recorded_leave": {"id": id(r)},
+		"person_balances":       {"person": "staff2"},
+		"adjust_balance":        {"person": "staff2", "type": "annual", "days": 1, "reason": "x"},
+		"permission_queue":      nil,
+		"grant_negative":        {"id": id(r)},
+		"refuse_negative":       {"id": id(r), "note": "x"},
+		"reassign_request":      {"id": id(r), "approver": "headkids"},
+	}
+	for tool, args := range calls {
+		f.refused(staff, tool, args, "needs a leave administrator")
+		f.refused(f.as("headops"), tool, args, "needs a leave administrator")
+	}
+	// Nothing happened to the request.
+	if d := f.ok(hr, "get_request", map[string]any{"id": id(r)}); get(d.Data, "request", "approver") != "Olivia Operations" {
+		t.Fatalf("request changed: %v", d.Data)
+	}
+}
+
+func TestPeopleAreFoundByUsernameEmailOrName(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	for _, who := range []string{"staff2", "STAFF2", "staff2@example.test", "Thandi Teacher", " thandi teacher "} {
+		r := f.ok(hr, "person_balances", map[string]any{"person": who})
+		if get(r.Data, "person", "username") != "staff2" {
+			t.Errorf("%q -> %v", who, r.Data)
+		}
+	}
+	f.refused(hr, "person_balances", map[string]any{"person": "ghost"}, `No one matches "ghost"`)
+	f.refused(hr, "person_balances", map[string]any{"person": "  "}, "Say who")
+
+	// Two people with the same name are never guessed between.
+	if _, err := f.db.Exec(`UPDATE users SET name = 'Thandi Teacher' WHERE username = 'staff1'`); err != nil {
+		t.Fatal(err)
+	}
+	f.refused(hr, "person_balances", map[string]any{"person": "Thandi Teacher"}, "matches more than one person: Thandi Teacher (staff1)")
+	f.ok(hr, "person_balances", map[string]any{"person": "staff1"})
+}
+
+func TestRecordAndRemoveLeave(t *testing.T) {
+	f := newFixture(t)
+	hr, staff := f.as("hr"), f.as("staff1")
+	args := map[string]any{"person": "staff1@example.test", "type": "annual", "start": "2026-10-01", "end": "2026-10-02", "note": "Agreed by phone"}
+	r := f.ok(hr, "record_leave", args)
+	if get(r.Data, "request", "status") != "approved" || get(r.Data, "request", "recorded_by") != "Hannah HR" ||
+		get(r.Data, "request", "person") != "Sam Staff" || get(r.Data, "request", "days") != float64(2) ||
+		r.Data["below_zero"] != false || get(r.Data, "balance", "taken") != float64(2) || get(r.Data, "balance", "available") != float64(13) {
+		t.Fatalf("record_leave = %v", r.Data)
+	}
+	// It is real leave: it counts against the balance and overlaps are refused.
+	f.refused(hr, "record_leave", args, "Start date:")
+
+	// The person cannot remove it; an admin can, and the days come back.
+	f.refused(staff, "remove_recorded_leave", map[string]any{"id": id(r)}, "needs a leave administrator")
+	f.refused(hr, "remove_recorded_leave", map[string]any{"id": 99999}, "No such request")
+	rm := f.ok(hr, "remove_recorded_leave", map[string]any{"id": id(r)})
+	if get(rm.Data, "request", "status") != "cancelled" {
+		t.Fatalf("remove = %v", rm.Data)
+	}
+	if b := f.ok(hr, "person_balances", map[string]any{"person": "staff1"}); !strings.Contains(b.Text, `"taken":0`) {
+		t.Fatalf("balances after removal: %s", b.Text)
+	}
+	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(r)}, "That is not possible")
+
+	// Ordinary approved leave is not removable this way.
+	n := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
+	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(n)}, "Only leave an administrator recorded")
+}
+
+func TestRecordLeaveRules(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	base := func() map[string]any {
+		return map[string]any{"person": "staff1", "type": "annual", "start": "2026-10-01", "note": "why"}
+	}
+	with := func(k string, v any) map[string]any { m := base(); m[k] = v; return m }
+
+	f.refused(hr, "record_leave", with("note", "  "), "Note:")
+	f.refused(hr, "record_leave", with("start", "2026-10-20"), "Start date:")
+	f.refused(hr, "record_leave", with("start", "soon"), "Start date:")
+	f.refused(hr, "record_leave", with("type", "nonsense"), "annual (Annual leave)")
+	f.refused(hr, "record_leave", with("person", "ghost"), "No one matches")
+	// A missing required argument is the SDK's own validation.
+	m := base()
+	delete(m, "note")
+	f.refused(hr, "record_leave", m, "validating")
+	// Nobody records their own leave.
+	f.refused(hr, "record_leave", with("person", "hr"), "Person: Another admin records your own leave")
+	f.makeAdmin("headkids")
+	f.ok(f.as("headkids"), "record_leave", with("person", "hr"))
+
+	// Going below zero is allowed and flagged: 15 days a year, 20 working days recorded.
+	r := f.ok(hr, "record_leave", map[string]any{"person": "staff2", "type": "annual", "start": "2026-09-07", "end": "2026-10-02", "note": "Long break"})
+	if r.Data["below_zero"] != true || get(r.Data, "request", "days").(float64) < 16 || !strings.Contains(r.Text, "below zero") {
+		t.Fatalf("record_leave = %v", r.Data)
+	}
+	// A retired type can still be recorded, though a person cannot apply for it.
+	if _, err := f.db.Exec(`UPDATE leave_types SET active = 0 WHERE code = 'annual'`); err != nil {
+		t.Fatal(err)
+	}
+	f.refused(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"}, "is not one of")
+	old := f.ok(hr, "record_leave", map[string]any{"person": "staff1", "type": "annual", "start": "2026-10-01", "note": "From before it was retired"})
+	if get(old.Data, "request", "status") != "approved" || old.Data["balance"] == nil {
+		t.Fatalf("retired type = %v", old.Data)
+	}
+}
+
+func TestAdjustBalanceAndPersonBalances(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	r := f.ok(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 3, "reason": "Carry-over"})
+	if get(r.Data, "balance", "adjustments") != float64(3) || get(r.Data, "balance", "available") != float64(18) ||
+		get(r.Data, "balance", "cycle_start") != "2026-01-01" {
+		t.Fatalf("adjust_balance = %v", r.Data)
+	}
+	f.ok(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "cycle_start": "2026-01-01", "days": -1, "reason": "Correction"})
+	pb := f.ok(hr, "person_balances", map[string]any{"person": "staff1"})
+	adj := pb.Data["adjustments"].([]any)
+	if len(adj) != 2 || get(adj[0].(map[string]any), "by") != "Hannah HR" || len(pb.Data["balances"].([]any)) < 3 {
+		t.Fatalf("person_balances = %v", pb.Data)
+	}
+	// The person sees the same through my_balances.
+	if b := f.ok(f.as("staff1"), "my_balances", nil); !strings.Contains(b.Text, `"adjustments":2`) {
+		t.Fatalf("my_balances = %s", b.Text)
+	}
+
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 0, "reason": "x"}, "Days: Enter a number")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1, "reason": " "}, "Reason: Say why")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1, "reason": "x", "cycle_start": "2026-03-01"}, "Cycle: That is not the start")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1, "reason": "x", "cycle_start": "later"}, "Cycle: Choose a cycle")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "nobody", "type": "annual", "days": 1, "reason": "x"}, "No one matches")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "nonsense", "days": 1, "reason": "x"}, "Leave type")
+}
+
+func TestNegativeBalancePermissions(t *testing.T) {
+	f := newFixture(t)
+	hr, staff := f.as("hr"), f.as("staff1")
+	ask := func(user *mcp.ClientSession) result {
+		return f.ok(user, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2027-01-29", "note": "trip", "ask_hr": true})
+	}
+	a, b := ask(staff), ask(f.as("staff2"))
+	if q := f.ok(hr, "permission_queue", nil); len(q.Data["queue"].([]any)) != 2 ||
+		get(q.Data["queue"].([]any)[0].(map[string]any), "shortfall_days").(float64) <= 0 {
+		t.Fatalf("permission_queue = %v", q.Data)
+	}
+
+	g := f.ok(hr, "grant_negative", map[string]any{"id": id(a)})
+	if get(g.Data, "request", "status") != "draft" || !strings.Contains(g.Text, "emailed") {
+		t.Fatalf("grant = %v", g.Data)
+	}
+	if st := f.ok(staff, "get_request", map[string]any{"id": id(a)}); st.Data["can_submit"] != true {
+		t.Fatalf("not submittable: %v", st.Data)
+	}
+	// A refusal needs a reason.
+	f.refused(hr, "refuse_negative", map[string]any{"id": id(b), "note": " "}, "Note: Say why")
+	rf := f.ok(hr, "refuse_negative", map[string]any{"id": id(b), "note": "Take it unpaid"})
+	if get(rf.Data, "request", "status") != "declined" || get(rf.Data, "request", "decision_note") != "Take it unpaid" {
+		t.Fatalf("refuse = %v", rf.Data)
+	}
+	if q := f.ok(hr, "permission_queue", nil); len(q.Data["queue"].([]any)) != 0 {
+		t.Fatalf("queue should be empty: %v", q.Data)
+	}
+	// Both are decided now.
+	f.refused(hr, "grant_negative", map[string]any{"id": id(b)}, "That is not possible")
+	f.refused(hr, "refuse_negative", map[string]any{"id": id(a), "note": "x"}, "That is not possible")
+	f.refused(hr, "grant_negative", map[string]any{"id": 99999}, "No such request")
+	f.refused(hr, "refuse_negative", map[string]any{"id": 99999, "note": "x"}, "No such request")
+}
+
+func TestNobodyGrantsOrRefusesTheirOwnPermission(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	r := f.ok(hr, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2027-01-29", "note": "trip", "ask_hr": true})
+	f.refused(hr, "grant_negative", map[string]any{"id": id(r)}, "That is not possible")
+	f.refused(hr, "refuse_negative", map[string]any{"id": id(r), "note": "no"}, "That is not possible")
+	// Another administrator can.
+	f.makeAdmin("headkids")
+	f.ok(f.as("headkids"), "grant_negative", map[string]any{"id": id(r), "note": "fine"})
+}
+
+func TestReassignRequest(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	r := f.ok(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
+	for _, who := range []string{"headkids", "headkids@example.test", "Kagiso Kids"} {
+		m := f.ok(hr, "reassign_request", map[string]any{"id": id(r), "approver": who})
+		if get(m.Data, "request", "approver") != "Kagiso Kids" || !strings.Contains(m.Text, "Kagiso Kids") {
+			t.Fatalf("reassign = %v", m.Data)
+		}
+	}
+	// The new approver can now decide it.
+	if q := f.ok(f.as("headkids"), "approval_queue", nil); len(q.Data["queue"].([]any)) != 1 {
+		t.Fatalf("queue = %v", q.Data)
+	}
+	// A blank approver hands it to the administrators.
+	m := f.ok(hr, "reassign_request", map[string]any{"id": id(r)})
+	if get(m.Data, "request", "approver") != nil || !strings.Contains(m.Text, "administrators") {
+		t.Fatalf("reassign to admins = %v", m.Data)
+	}
+
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "ghost"}, "No one matches")
+	f.refused(hr, "reassign_request", map[string]any{"id": 99999, "approver": "headkids"}, "No such request")
+	// Not to the requester themselves: the service refuses.
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff1"}, "That is not possible")
+	// Only pending requests move.
+	f.ok(hr, "decide_request", map[string]any{"id": id(r), "decision": "decline", "note": "no"})
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "headkids"}, "That is not possible")
+	// Nor to someone who cannot sign in.
+	r2 := f.ok(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-19"})
+	if _, err := f.db.Exec(`UPDATE users SET disabled = 1 WHERE username = 'staff2'`); err != nil {
+		t.Fatal(err)
+	}
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r2), "approver": "staff2"}, "Approver: Choose someone who can currently sign in")
 }

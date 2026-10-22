@@ -110,6 +110,12 @@ type BalanceInfo struct {
 	CycleEnd   string `json:"cycle_end"`
 }
 
+func balanceInfo(b leave.Balance) BalanceInfo {
+	return BalanceInfo{Type: b.Type.Name, Code: b.Type.Code, Unit: b.Type.Unit,
+		Allowance: b.Allowance, Adjustment: b.Adjustments, Taken: b.Taken, Pending: b.Pending,
+		Available: b.Available(), CycleStart: b.CycleStart, CycleEnd: b.CycleEnd}
+}
+
 type BalancesOut struct {
 	Balances []BalanceInfo `json:"balances"`
 }
@@ -123,9 +129,7 @@ func (d *deps) myBalances(ctx context.Context, u users.User, _ none) (BalancesOu
 	}
 	out := BalancesOut{Balances: make([]BalanceInfo, 0, len(bs))}
 	for _, b := range bs {
-		out.Balances = append(out.Balances, BalanceInfo{Type: b.Type.Name, Code: b.Type.Code, Unit: b.Type.Unit,
-			Allowance: b.Allowance, Adjustment: b.Adjustments, Taken: b.Taken, Pending: b.Pending,
-			Available: b.Available(), CycleStart: b.CycleStart, CycleEnd: b.CycleEnd})
+		out.Balances = append(out.Balances, balanceInfo(b))
 	}
 	return out, fmt.Sprintf("%d leave types.", len(out.Balances)), nil
 }
@@ -294,7 +298,13 @@ func (d *deps) publicHolidays(ctx context.Context, _ users.User, in HolidaysIn) 
 
 // resolveType finds the active leave type a person means by its code or name.
 func (d *deps) resolveType(ctx context.Context, name string) (leave.Type, error) {
-	ts, err := d.leave.Types(ctx, true)
+	return d.resolveTypeIn(ctx, name, true)
+}
+
+// resolveTypeIn is resolveType, optionally over retired types too (recording
+// leave from before a type was retired).
+func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool) (leave.Type, error) {
+	ts, err := d.leave.Types(ctx, activeOnly)
 	if err != nil {
 		return leave.Type{}, err
 	}

@@ -46,7 +46,7 @@ type Config struct {
 
 const instructions = `This is the staff leave system. Everything you do here is done as the signed-in person, with exactly their permissions.
 Use my_balances to see leave types and what is left, and preview_request before apply_for_leave to see the day count and any rule that would stop the request.
-Never apply for, withdraw, approve or decline leave unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
+Never apply for, withdraw, approve or decline leave, and never record leave, adjust a balance, grant or refuse a negative balance, or reassign a request, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
 
 // New returns the MCP endpoint: Streamable HTTP, behind bearer-token auth.
 //
@@ -117,6 +117,16 @@ func fieldLabel(field string) string {
 		return "Start date: "
 	case "end":
 		return "End date: "
+	case "person":
+		return "Person: "
+	case "approver":
+		return "Approver: "
+	case "cycle":
+		return "Cycle: "
+	case "days":
+		return "Days: "
+	case "reason":
+		return "Reason: "
 	}
 	return ""
 }
@@ -255,4 +265,6 @@ func (d *deps) register(s *mcp.Server) {
 		Description: "Administrators only: who has approved or pending leave in a date range, grouped by department."}, d.whoIsAway)
 	add(d, s, &mcp.Tool{Name: "outbox_problems", Annotations: readOnly("Failing emails and calendar jobs (administrators)"),
 		Description: "Administrators only: notification emails and calendar jobs that are failing or have given up."}, d.outboxProblems)
+
+	d.registerAdminActions(s)
 }
