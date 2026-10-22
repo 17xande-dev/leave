@@ -47,12 +47,6 @@
   </div>
   <div class="field-row">
     <div class="field narrow">
-      <label for="sick_backdate">Sick leave backdating (days)</label>
-      <input id="sick_backdate" name="sick_backdate" inputmode="numeric" size="4" value="{{.Form.SickBackdate}}" required>
-      <span class="hint">How far back sick leave may start. 0 to 365.</span>
-      {{template "err" index .Errors "sick_backdate"}}
-    </div>
-    <div class="field narrow">
       <label for="sick_cycle">Sick-cycle start year</label>
       <input id="sick_cycle" name="sick_cycle" inputmode="numeric" size="6" value="{{.Form.SickCycle}}" required>
       <span class="hint">The year the 36-month sick-leave cycle counts from. 2000 to 2100.</span>

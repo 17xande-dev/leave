@@ -94,6 +94,13 @@ var ErrNotAllowed = errors.New("leave: that is not possible for this request")
 
 func (s *Service) today() time.Time { return Today(s.Now(), s.cfg.Location) }
 
+// EarliestStart is the first day a request of type t may start on, as
+// YYYY-MM-DD: the same cut-off Preview and Submit enforce, so the apply page's
+// date picker can grey out what the server would refuse.
+func (s *Service) EarliestStart(t Type) string {
+	return fmtDate(s.today().AddDate(0, 0, -t.BackdateDays))
+}
+
 // Today is the current date in the organisation's timezone, as midnight UTC.
 func (s *Service) Today() time.Time { return s.today() }
 

@@ -36,10 +36,12 @@ type Type struct {
 	Code string
 	Name string
 	// Allowance is days per cycle; nil means unlimited (unpaid leave).
-	Allowance    *int
-	CycleMonths  int
-	Unit         string
-	Backdate     bool
+	Allowance   *int
+	CycleMonths int
+	Unit        string
+	// BackdateDays is how far into the past a request of this type may
+	// start; 0 means it cannot start before today.
+	BackdateDays int
 	RequiresNote bool
 	Active       bool
 	Sort         int
@@ -54,6 +56,10 @@ type Type struct {
 
 func intp(n int) *int { return &n }
 
+// DefaultBackdateDays is how far back every seeded type may start: about three
+// months, the organisation's policy for all leave. An admin changes it per type.
+const DefaultBackdateDays = 90
+
 // bceaDefaults are the Basic Conditions of Employment Act minimums for a
 // five-day week, seeded into an empty database. An admin edits them from there;
 // the seed never overwrites.
@@ -61,7 +67,7 @@ var bceaDefaults = []Type{
 	{Code: "annual", Name: "Annual leave", Allowance: intp(15), CycleMonths: 12, Unit: UnitWorkdays, CoverageRule: CoverageLimit, Restricted: RestrictMin},
 	// 30 days per 36-month cycle, usable in arrears. Nobody plans being ill
 	// around the restricted day, and neither do the other statutory types.
-	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, Backdate: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
+	{Code: "sick", Name: "Sick leave", Allowance: intp(30), CycleMonths: 36, Unit: UnitWorkdays, CoverageRule: CoverageCount, Restricted: RestrictAny},
 	{Code: "family", Name: "Family responsibility leave", Allowance: intp(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
 	// Four consecutive months, stored as 120 calendar days.
 	{Code: "maternity", Name: "Maternity leave", Allowance: intp(120), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny},
@@ -83,12 +89,12 @@ var bceaDefaults = []Type{
 // ErrNotFound is returned for a missing type or request.
 var ErrNotFound = errors.New("leave: not found")
 
-const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule, coverage_rule`
+const typeCols = `id, code, name, allowance_days, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule`
 
 func scanType(row interface{ Scan(...any) error }) (Type, error) {
 	var t Type
 	var allowance sql.NullInt64
-	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.Backdate, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted, &t.CoverageRule)
+	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.BackdateDays, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted, &t.CoverageRule)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Type{}, ErrNotFound
 	}
@@ -104,7 +110,7 @@ func scanType(row interface{ Scan(...any) error }) (Type, error) {
 // means a default added since the database was created.
 func (s *Service) SeedTypes(ctx context.Context) error {
 	for i, t := range bceaDefaults {
-		t.Active, t.Sort = !t.inactive, i
+		t.Active, t.Sort, t.BackdateDays = !t.inactive, i, DefaultBackdateDays
 		_, err := s.SaveType(ctx, t)
 		var fe FieldErrors
 		if errors.As(err, &fe) && fe["code"] != "" {
@@ -172,6 +178,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	if t.CycleMonths != 12 && t.CycleMonths != 36 {
 		errs["cycle_months"] = "The cycle is 12 or 36 months."
 	}
+	if t.BackdateDays < 0 || t.BackdateDays > 365 {
+		errs["backdate_days"] = "Enter a whole number of days from 0 to 365."
+	}
 	if t.Allowance != nil && *t.Allowance < 0 {
 		errs["allowance"] = "The allowance cannot be negative."
 	}
@@ -184,9 +193,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	}
 	if t.ID == 0 {
 		res, err := s.db.ExecContext(ctx, `INSERT INTO leave_types
-			(code, name, allowance_days, cycle_months, unit, backdate, requires_note, active, sort, restricted_rule, coverage_rule)
+			(code, name, allowance_days, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
-			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.CoverageRule)
+			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.CoverageRule)
 		if err != nil {
 			return 0, err
 		}
@@ -196,9 +205,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 		return res.LastInsertId()
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET code = ?, name = ?, allowance_days = ?,
-		cycle_months = ?, unit = ?, backdate = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?,
+		cycle_months = ?, unit = ?, backdate_days = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?,
 		coverage_rule = ? WHERE id = ?`,
-		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.Backdate, t.RequiresNote, t.Active, t.Sort, t.Restricted,
+		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted,
 		t.CoverageRule, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {

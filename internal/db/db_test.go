@@ -175,3 +175,77 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 		t.Fatalf("old database without the team tables: err = %v", err)
 	}
 }
+
+// A database from before per-type backdating (a 0/1 flag on each type and a
+// global sick setting) opens, keeps its rows and its STRICT tables, gives every
+// existing type the 90-day policy whatever the old flag said, and loses both
+// old columns. Opening it a second time changes nothing.
+func TestMigrateBackdating(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	fresh, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rebuild the two tables as the previous build defined them.
+	for _, stmt := range []string{
+		`DROP TABLE leave_types`,
+		`CREATE TABLE leave_types (
+			id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+			allowance_days INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
+			cycle_months INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
+			unit TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar', 'weekend')),
+			restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
+			backdate INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
+			requires_note INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
+			active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+			sort INTEGER NOT NULL DEFAULT 0,
+			coverage_rule TEXT NOT NULL DEFAULT 'limit' CHECK (coverage_rule IN ('limit', 'count'))
+		) STRICT`,
+		`INSERT INTO leave_types (code, name, cycle_months, unit, backdate) VALUES ('annual', 'Annual', 12, 'workdays', 0), ('sick', 'Sick', 36, 'workdays', 1)`,
+		`ALTER TABLE settings ADD COLUMN sick_backdate_days INTEGER NOT NULL DEFAULT 14`,
+	} {
+		if _, err := fresh.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	fresh.Close()
+
+	for pass := 1; pass <= 2; pass++ {
+		d, err := Open(path)
+		if err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
+		}
+		rows, err := d.Query(`SELECT code, backdate_days FROM leave_types ORDER BY code`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for rows.Next() {
+			var c string
+			var n int
+			rows.Scan(&c, &n)
+			got[c] = n
+		}
+		rows.Close()
+		if len(got) != 2 || got["annual"] != 90 || got["sick"] != 90 {
+			t.Errorf("pass %d: backdate_days = %v, want 90 for both", pass, got)
+		}
+		for _, c := range [][2]string{{"leave_types", "backdate"}, {"settings", "sick_backdate_days"}} {
+			var n int
+			d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, c[0], c[1]).Scan(&n)
+			if n != 0 {
+				t.Errorf("pass %d: %s.%s was not dropped", pass, c[0], c[1])
+			}
+		}
+		var ddl string
+		d.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'leave_types'`).Scan(&ddl)
+		if !strings.HasSuffix(strings.TrimSpace(strings.ToUpper(ddl)), ") STRICT") {
+			t.Errorf("pass %d: leave_types lost STRICT", pass)
+		}
+		// The CHECK came with the column.
+		if _, err := d.Exec(`UPDATE leave_types SET backdate_days = 366`); err == nil {
+			t.Errorf("pass %d: backdate_days 366 accepted", pass)
+		}
+		d.Close()
+	}
+}

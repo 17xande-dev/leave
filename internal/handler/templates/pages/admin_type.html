@@ -58,12 +58,17 @@
       {{template "err" index .Errors "coverage_rule"}}
     </div>
     <div class="field narrow">
+      <label for="backdate_days">Backdating (days)</label>
+      <input id="backdate_days" name="backdate_days" inputmode="numeric" size="4" value="{{.Backdate}}" required>
+      <span class="hint">How far into the past this leave may start. 0 means not at all. 90 is about three months.</span>
+      {{template "err" index .Errors "backdate_days"}}
+    </div>
+    <div class="field narrow">
       <label for="sort">Order</label>
       <input id="sort" name="sort" inputmode="numeric" size="4" value="{{.Type.Sort}}">
     </div>
   </div>
   <div class="checks">
-    <label><input type="checkbox" name="backdate" value="1"{{if .Type.Backdate}} checked{{end}}> May start in the past</label>
     <label><input type="checkbox" name="requires_note" value="1"{{if .Type.RequiresNote}} checked{{end}}> Requires a note</label>
     <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Offered on the apply form</label>
   </div>

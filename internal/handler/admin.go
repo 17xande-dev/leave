@@ -421,12 +421,14 @@ func (h *Handler) AdminTypes(w http.ResponseWriter, r *http.Request) {
 type typeFormData struct {
 	Type      leave.Type
 	Allowance string
-	Errors    leave.FieldErrors
+	// Backdate is the backdating field as typed, so "abc" comes back as typed.
+	Backdate string
+	Errors   leave.FieldErrors
 }
 
 func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
 	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays,
-		Restricted: leave.RestrictMin, CoverageRule: leave.CoverageLimit}}
+		Restricted: leave.RestrictMin, CoverageRule: leave.CoverageLimit, BackdateDays: leave.DefaultBackdateDays}}
 	if r.PathValue("id") != "" {
 		id, ok := pathID(r)
 		if !ok {
@@ -447,6 +449,7 @@ func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
 	if d.Type.Allowance != nil {
 		d.Allowance = strconv.Itoa(*d.Type.Allowance)
 	}
+	d.Backdate = strconv.Itoa(d.Type.BackdateDays)
 	h.render(w, r, http.StatusOK, "admin_type.html", view{Title: "Leave type", Data: d})
 }
 
@@ -456,18 +459,30 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	cycle, _ := strconv.Atoi(f("cycle_months"))
 	sort, _ := strconv.Atoi(f("sort"))
 	t := leave.Type{ID: id, Code: f("code"), Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
-		Backdate: f("backdate") == "1", RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
+		RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
 		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
-	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance"))}
+	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance")), Backdate: strings.TrimSpace(f("backdate_days"))}
+	if n, ok := parseWhole(d.Backdate); ok {
+		t.BackdateDays, d.Type.BackdateDays = n, n
+	} else {
+		d.Errors = leave.FieldErrors{"backdate_days": "Enter a whole number of days from 0 to 365."}
+	}
 	if d.Allowance != "" {
 		n, err := strconv.Atoi(d.Allowance)
 		if err != nil {
-			d.Errors = leave.FieldErrors{"allowance": "Enter a whole number of days, or leave it empty for no limit."}
+			if d.Errors == nil {
+				d.Errors = leave.FieldErrors{}
+			}
+			d.Errors["allowance"] = "Enter a whole number of days, or leave it empty for no limit."
 			h.render(w, r, http.StatusUnprocessableEntity, "admin_type.html", view{Title: "Leave type", Data: d})
 			return
 		}
 		t.Allowance = &n
 		d.Type.Allowance = &n
+	}
+	if d.Errors != nil {
+		h.render(w, r, http.StatusUnprocessableEntity, "admin_type.html", view{Title: "Leave type", Data: d})
+		return
 	}
 	_, err := h.leave.SaveType(r.Context(), t)
 	var fe leave.FieldErrors

@@ -92,7 +92,7 @@ func TestSettingsSavesTeamDefault(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 	form := url.Values{"day": {"mon", "tue", "wed", "thu", "fri"}, "restricted_day": {""}, "restricted_min": {"3"},
-		"sick_backdate": {"14"}, "sick_cycle": {"2025"}, "team_default": {"45"}}
+		"sick_cycle": {"2025"}, "team_default": {"45"}}
 	if res, body := hs.post(hr, "/admin/settings", form); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save: %d\n%s", res.StatusCode, body)
 	}

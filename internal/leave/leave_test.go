@@ -175,13 +175,13 @@ func TestSubmitValidation(t *testing.T) {
 	cases := []struct {
 		name, code, start, end, field string
 	}{
-		{"past", "annual", "2026-10-02", "2026-10-02", "start"},
+		{"past", "annual", "2026-07-06", "2026-07-06", "start"},
 		{"reversed", "annual", "2026-10-09", "2026-10-07", "end"},
 		{"weekend only", "annual", "2026-10-10", "2026-10-11", "end"},
 		{"holiday only", "annual", "2026-12-16", "2026-12-16", "end"},
 		{"over balance", "annual", "2026-10-06", "2026-11-06", "end"},
 		{"typo year", "annual", "2026-10-06", "2062-10-06", "end"},
-		{"sick too far back", "sick", "2026-09-01", "2026-09-01", "start"},
+		{"sick too far back", "sick", "2026-07-06", "2026-07-06", "start"},
 		{"not a date", "annual", "tomorrow", "2026-10-06", "start"},
 	}
 	for _, c := range cases {
@@ -425,5 +425,57 @@ func TestQueueAndCounts(t *testing.T) {
 	team, _ := f.svc.Team(f.ctx, f.people["head"])
 	if len(team) != 3 {
 		t.Errorf("head's team view has %d entries, want 3", len(team))
+	}
+}
+
+// The backdating limit is per type and inclusive: exactly BackdateDays ago is
+// accepted and one day more is refused, on the date the app's own "today"
+// gives (pinned here to Monday 5 October 2026).
+func TestBackdateBoundary(t *testing.T) {
+	f := newFixture(t)
+	staff := f.people["staff"]
+	quote := func(code, day string) error {
+		_, err := f.svc.Preview(f.ctx, staff, Input{TypeID: f.types[code].ID, Start: day, End: day, Note: "n"})
+		return err
+	}
+	setDays := func(code string, n int) {
+		ty := f.types[code]
+		ty.BackdateDays = n
+		if _, err := f.svc.SaveType(f.ctx, ty); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Seeded at 90: Tuesday 7 July is exactly 90 days ago.
+	if err := quote("annual", "2026-07-07"); err != nil {
+		t.Errorf("exactly 90 days ago: %v", err)
+	}
+	err := quote("annual", "2026-07-06")
+	var fe FieldErrors
+	if !errors.As(err, &fe) || fe["start"] != "Annual leave can start at most 90 days ago (no earlier than Tue 7 Jul 2026)." {
+		t.Errorf("91 days ago: %v", err)
+	}
+	if got := f.svc.EarliestStart(f.types["annual"]); got != "2026-07-07" {
+		t.Errorf("EarliestStart = %s", got)
+	}
+
+	// 0 means not at all: today is fine, yesterday is refused with the plain message.
+	setDays("annual", 0)
+	if err := quote("annual", "2026-10-05"); err != nil {
+		t.Errorf("today at 0: %v", err)
+	}
+	if err := quote("annual", "2026-10-02"); !errors.As(err, &fe) || fe["start"] != "Leave cannot start in the past." {
+		t.Errorf("past at 0: %v", err)
+	}
+
+	// The same function guards the real submit.
+	if _, err := f.submit("staff", "annual", "2026-10-02", "2026-10-02"); !fieldErr(err, "start") {
+		t.Errorf("submit in the past at 0: %v", err)
+	}
+
+	// A mandatory (shutdown) request skips the check.
+	in := Input{TypeID: f.types["annual"].ID, Start: "2026-07-06", End: "2026-07-06", Note: "n"}
+	if _, err := f.svc.quote(f.ctx, f.db, staff, in, quoteOpts{mandatory: true}); fieldErr(err, "start") {
+		t.Errorf("mandatory request refused for backdating: %v", err)
 	}
 }

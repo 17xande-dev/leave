@@ -9,7 +9,7 @@ import (
 
 func validSettingsPost(over url.Values) url.Values {
 	v := url.Values{"day": {"mon", "tue", "wed", "thu", "fri"}, "restricted_day": {""}, "restricted_min": {"3"},
-		"final_approver": {""}, "sick_backdate": {"14"}, "sick_cycle": {"2025"}}
+		"final_approver": {""}, "sick_cycle": {"2025"}}
 	for k, val := range over {
 		v[k] = val
 	}
@@ -42,8 +42,6 @@ func TestAdminSettingsValidation(t *testing.T) {
 		"min empty":                 {url.Values{"restricted_min": {""}}, "whole number from 1 to 31"},
 		"min signed":                {url.Values{"restricted_min": {"+5"}}, "whole number from 1 to 31"},
 		"min too big":               {url.Values{"restricted_min": {"32"}}, "whole number from 1 to 31"},
-		"backdate text":             {url.Values{"sick_backdate": {"two weeks"}}, "0 to 365"},
-		"backdate big":              {url.Values{"sick_backdate": {"366"}}, "0 to 365"},
 		"cycle small":               {url.Values{"sick_cycle": {"1999"}}, "2000 to 2100"},
 		"approver missing":          {url.Values{"final_approver": {"9999"}}, "currently enabled"},
 	} {
@@ -54,7 +52,7 @@ func TestAdminSettingsValidation(t *testing.T) {
 	}
 
 	// What was typed comes back, so one bad field does not cost the rest.
-	_, body := hs.post(hr, "/admin/settings", validSettingsPost(url.Values{"sick_backdate": {"two weeks"}, "restricted_min": {"5"}}))
+	_, body := hs.post(hr, "/admin/settings", validSettingsPost(url.Values{"sick_cycle": {"two weeks"}, "restricted_min": {"5"}}))
 	if !strings.Contains(body, `value="two weeks"`) || !strings.Contains(body, `value="5"`) {
 		t.Error("a rejected form did not show what was entered")
 	}
@@ -73,7 +71,7 @@ func TestAdminSettingsSaveApplies(t *testing.T) {
 	}
 
 	res, _ := hs.post(hr, "/admin/settings", validSettingsPost(url.Values{"day": {"tue", "wed", "thu", "fri"},
-		"final_approver": {itoa(pastor.ID)}, "sick_backdate": {"7"}}))
+		"final_approver": {itoa(pastor.ID)}}))
 	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/admin/settings?notice=saved" {
 		t.Fatalf("save: %d %q", res.StatusCode, res.Header.Get("Location"))
 	}

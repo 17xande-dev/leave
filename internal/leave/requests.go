@@ -340,10 +340,13 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
 	case opt.mandatory:
-	case t.Backdate && start.Before(today.AddDate(0, 0, -st.SickBackdateDays)):
-		errs["start"] = fmt.Sprintf("%s can be applied for up to %d days after the fact.", t.Name, st.SickBackdateDays)
-	case !t.Backdate && start.Before(today):
-		errs["start"] = "Leave cannot start in the past."
+	case start.Before(today.AddDate(0, 0, -t.BackdateDays)):
+		if t.BackdateDays == 0 {
+			errs["start"] = "Leave cannot start in the past."
+		} else {
+			errs["start"] = fmt.Sprintf("%s can start at most %d days ago (no earlier than %s).",
+				t.Name, t.BackdateDays, today.AddDate(0, 0, -t.BackdateDays).Format("Mon 2 Jan 2006"))
+		}
 	}
 	if t.RequiresNote && strings.TrimSpace(in.Note) == "" {
 		errs["note"] = "Please add a short note for " + strings.ToLower(t.Name) + "."

@@ -25,10 +25,6 @@ type Settings struct {
 	// approves for anyone with no usable manager; 0 means nobody, and those
 	// people go to the admins' queue.
 	FinalApproverID int64
-	// SickBackdateDays is how far into the past sick leave may start. Sick
-	// leave is usually applied for after the fact; every other type must
-	// start today or later.
-	SickBackdateDays int
 	// SickCycleAnchor is the year the BCEA 36-month sick-leave cycle counts from.
 	SickCycleAnchor int
 	// TeamDefaultPercent is the coverage limit for a volunteer team with no
@@ -114,9 +110,9 @@ func (s *Service) settings(ctx context.Context, q querier) (Settings, error) {
 		approver sql.NullInt64
 	)
 	err := q.QueryRowContext(ctx, `SELECT s.work_days, s.restricted_day, s.restricted_min_days, s.final_approver_id,
-		s.sick_backdate_days, s.sick_cycle_start_year, s.team_default_percent, COALESCE(u.name, ''), s.updated_at
+		s.sick_cycle_start_year, s.team_default_percent, COALESCE(u.name, ''), s.updated_at
 		FROM settings s LEFT JOIN users u ON u.id = s.updated_by_id WHERE s.id = 1`).
-		Scan(&days, &rd, &st.RestrictedMinDays, &approver, &st.SickBackdateDays, &st.SickCycleAnchor,
+		Scan(&days, &rd, &st.RestrictedMinDays, &approver, &st.SickCycleAnchor,
 			&st.TeamDefaultPercent, &st.UpdatedBy, &st.UpdatedAt)
 	if err != nil {
 		return Settings{}, err
@@ -134,7 +130,7 @@ func (s *Service) settings(ctx context.Context, q querier) (Settings, error) {
 
 // SaveSettings validates and stores s on behalf of admin. Validation failures
 // come back as FieldErrors keyed days, restricted_day, restricted_min,
-// final_approver, sick_backdate, sick_cycle and team_default.
+// final_approver, sick_cycle and team_default.
 func (s *Service) SaveSettings(ctx context.Context, admin users.User, in Settings) error {
 	if !admin.Admin {
 		return ErrNotAllowed
@@ -148,9 +144,6 @@ func (s *Service) SaveSettings(ctx context.Context, admin users.User, in Setting
 	}
 	if in.RestrictedMinDays < 1 || in.RestrictedMinDays > 31 {
 		errs["restricted_min"] = "Enter a whole number from 1 to 31."
-	}
-	if in.SickBackdateDays < 0 || in.SickBackdateDays > 365 {
-		errs["sick_backdate"] = "Enter a whole number of days from 0 to 365."
 	}
 	if in.SickCycleAnchor < 2000 || in.SickCycleAnchor > 2100 {
 		errs["sick_cycle"] = "Enter a year from 2000 to 2100."
@@ -173,9 +166,9 @@ func (s *Service) SaveSettings(ctx context.Context, admin users.User, in Setting
 	}
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE settings SET work_days = ?, restricted_day = ?, restricted_min_days = ?,
-			final_approver_id = ?, sick_backdate_days = ?, sick_cycle_start_year = ?, team_default_percent = ?, updated_by_id = ?, updated_at = ?
+			final_approver_id = ?, sick_cycle_start_year = ?, team_default_percent = ?, updated_by_id = ?, updated_at = ?
 			WHERE id = 1`, in.Week.codes(), rd, in.RestrictedMinDays, nullID(in.FinalApproverID),
-			in.SickBackdateDays, in.SickCycleAnchor, in.TeamDefaultPercent, admin.ID, stampNow(s.Now()))
+			in.SickCycleAnchor, in.TeamDefaultPercent, admin.ID, stampNow(s.Now()))
 		return err
 	})
 }

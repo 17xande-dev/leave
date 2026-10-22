@@ -14,7 +14,7 @@
       <td class="num">{{with .Allowance}}{{.}}{{else}}No limit{{end}}</td>
       <td>{{.CycleMonths}} months</td>
       <td>{{if eq .Unit "calendar"}}Calendar days{{else if eq .Unit "weekend"}}Weekends{{else}}Working days{{end}}</td>
-      <td>{{if not .Active}}<span class="badge">inactive</span>{{end}}{{if .Backdate}}<span class="badge">backdatable</span>{{end}}{{if .RequiresNote}}<span class="badge">note required</span>{{end}}{{if eq .Restricted "never"}}<span class="badge">never on the restricted day</span>{{end}}</td>
+      <td>{{if not .Active}}<span class="badge">inactive</span>{{end}}{{if .BackdateDays}}<span class="badge">backdate {{.BackdateDays}} days</span>{{end}}{{if .RequiresNote}}<span class="badge">note required</span>{{end}}{{if eq .Restricted "never"}}<span class="badge">never on the restricted day</span>{{end}}</td>
     </tr>
   {{end}}
   </tbody>

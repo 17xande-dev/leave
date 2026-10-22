@@ -29,7 +29,7 @@ request, so a directory change afterwards cannot strand it. An admin can reassig
 | Type | Allowance |
 |---|---|
 | Annual | 15 working days / year |
-| Sick | 30 working days / 36-month cycle (may be backdated) |
+| Sick | 30 working days / 36-month cycle |
 | Family responsibility | 3 days |
 | Maternity | 120 calendar days |
 | Parental | 10 days |

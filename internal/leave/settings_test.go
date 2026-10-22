@@ -10,7 +10,6 @@ import (
 func TestSaveSettingsRejectsBadInput(t *testing.T) {
 	f := newFixture(t)
 	mon, sat := time.Monday, time.Saturday
-	f.setSettings(func(st *Settings) { st.SickBackdateDays = 20 })
 	f.db.Exec(`UPDATE users SET disabled = 1 WHERE username = 'orphan'`)
 
 	cases := []struct {
@@ -22,8 +21,6 @@ func TestSaveSettingsRejectsBadInput(t *testing.T) {
 		{"restricted day not worked", func(s *Settings) { s.RestrictedDay = &sat }, "restricted_day"},
 		{"restricted min zero", func(s *Settings) { s.RestrictedMinDays = 0 }, "restricted_min"},
 		{"restricted min 32", func(s *Settings) { s.RestrictedMinDays = 32 }, "restricted_min"},
-		{"backdate negative", func(s *Settings) { s.SickBackdateDays = -1 }, "sick_backdate"},
-		{"backdate 366", func(s *Settings) { s.SickBackdateDays = 366 }, "sick_backdate"},
 		{"cycle year 1999", func(s *Settings) { s.SickCycleAnchor = 1999 }, "sick_cycle"},
 		{"cycle year 2101", func(s *Settings) { s.SickCycleAnchor = 2101 }, "sick_cycle"},
 		{"team default 101", func(s *Settings) { s.TeamDefaultPercent = 101 }, "team_default"},
@@ -45,7 +42,7 @@ func TestSaveSettingsRejectsBadInput(t *testing.T) {
 		t.Errorf("restricted Monday on a Monday week: %v", err)
 	}
 	got, _ := f.svc.Settings(f.ctx)
-	if got.SickBackdateDays != 20 || got.FinalApproverID != f.people["pastor"].ID {
+	if got.RestrictedMinDays != 3 || got.FinalApproverID != f.people["pastor"].ID {
 		t.Errorf("a rejected save changed the stored settings: %+v", got)
 	}
 	// Only an admin may save.
@@ -72,13 +69,17 @@ func TestSettingsChangeAppliesImmediately(t *testing.T) {
 		t.Fatalf("Monday after switching back: %d days, %v", q.Days, err)
 	}
 
-	// Sick-leave backdating is read the same way: 10 days back is fine at 14
-	// and refused at 7.
+	// A type's backdating is read the same way: 10 days back is fine at 90
+	// and refused once an admin lowers it to 7.
 	sick := Input{TypeID: f.types["sick"].ID, Start: "2026-09-25", End: "2026-09-25", Note: "n"}
 	if _, err := f.svc.Preview(f.ctx, f.people["staff"], sick); err != nil {
-		t.Fatalf("sick 10 days back at 14: %v", err)
+		t.Fatalf("sick 10 days back at 90: %v", err)
 	}
-	f.setSettings(func(st *Settings) { st.SickBackdateDays = 7 })
+	ty := f.types["sick"]
+	ty.BackdateDays = 7
+	if _, err := f.svc.SaveType(f.ctx, ty); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := f.svc.Preview(f.ctx, f.people["staff"], sick); !fieldErr(err, "start") {
 		t.Fatalf("sick 10 days back at 7: %v", err)
 	}

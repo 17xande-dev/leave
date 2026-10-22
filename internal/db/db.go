@@ -21,8 +21,9 @@ import (
 // does nothing to a table that already exists, and reports success. While this
 // is greenfield a schema change means `make recreate-db`, not an ALTER on
 // startup -- an ALTER-based helper would leave an old non-strict definition in
-// place and silently diverge from this file. Adopt a versioned migration tool
-// once there is production data worth keeping.
+// place and silently diverge from this file. The one exception is
+// migrateBackdating, for a database that already holds real requests; adopt a
+// versioned migration tool if more of those follow.
 //
 // Dates (start_date, end_date, holidays.date, cycle_start) are TEXT
 // YYYY-MM-DD: leave is a matter of calendar days in one timezone, and a
@@ -87,8 +88,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	-- Sunday): any -- no rule; min -- only inside a request of at least
 	-- the settings minimum of working days; never -- not at all.
 	restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
-	-- Sick leave is applied for after the fact; nothing else may start in the past.
-	backdate        INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
+	-- How many days before today a request of this type may start. 0 means it
+	-- may not start in the past; 90 is about three months.
+	backdate_days   INTEGER NOT NULL DEFAULT 90 CHECK (backdate_days BETWEEN 0 AND 365),
 	requires_note   INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
 	active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
 	sort            INTEGER NOT NULL DEFAULT 0,
@@ -145,7 +147,6 @@ CREATE TABLE IF NOT EXISTS settings (
 	restricted_day        TEXT NOT NULL DEFAULT '' CHECK (restricted_day IN ('', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat')),
 	restricted_min_days   INTEGER NOT NULL DEFAULT 3 CHECK (restricted_min_days BETWEEN 1 AND 31),
 	final_approver_id     INTEGER REFERENCES users(id),
-	sick_backdate_days    INTEGER NOT NULL DEFAULT 14 CHECK (sick_backdate_days BETWEEN 0 AND 365),
 	sick_cycle_start_year INTEGER NOT NULL DEFAULT 2025 CHECK (sick_cycle_start_year BETWEEN 2000 AND 2100),
 	-- The default team limit, a percentage; 0 means a team with no rule of its
 	-- own has no limit.
@@ -366,6 +367,10 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
+	if err := migrateBackdating(d); err != nil {
+		d.Close()
+		return nil, err
+	}
 	if _, err := d.Exec(schema); err != nil {
 		d.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -443,4 +448,61 @@ func checkCurrent(d *sql.DB) error {
 		return fmt.Errorf("the database predates weekend-off leave types; start from a fresh one")
 	}
 	return nil
+}
+
+// migrateBackdating moves a database from the old backdating model (a 0/1
+// leave_types.backdate flag plus the global settings.sick_backdate_days) to a
+// per-type leave_types.backdate_days. It is the one in-place migration the
+// app has: the production database predates it and holds real requests.
+//
+// ADD COLUMN works on a STRICT table, and the new column's NOT NULL, DEFAULT
+// and CHECK are all allowed on it, so the table keeps its STRICT definition
+// (unlike the rebuild the header comment warns about). The default of 90 is
+// the policy for every type, so every existing row gets it without a
+// backfill UPDATE; the old columns are then dropped (SQLite 3.35+, and a
+// column's own CHECK does not block its DROP). It is idempotent: a database
+// already on the new schema, or a fresh one, is left alone.
+func migrateBackdating(d *sql.DB) error {
+	has := func(table, col string) (bool, error) {
+		var n int
+		err := d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n)
+		return n > 0, err
+	}
+	oldFlag, err := has("leave_types", "backdate")
+	if err != nil {
+		return err
+	}
+	oldSick, err := has("settings", "sick_backdate_days")
+	if err != nil {
+		return err
+	}
+	if !oldFlag && !oldSick {
+		return nil
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if oldFlag {
+		newCol, err := has("leave_types", "backdate_days")
+		if err != nil {
+			return err
+		}
+		if !newCol {
+			if _, err := tx.Exec(`ALTER TABLE leave_types ADD COLUMN backdate_days INTEGER NOT NULL DEFAULT 90
+				CHECK (backdate_days BETWEEN 0 AND 365)`); err != nil {
+				return fmt.Errorf("migrate backdating: %w", err)
+			}
+		}
+		if _, err := tx.Exec(`ALTER TABLE leave_types DROP COLUMN backdate`); err != nil {
+			return fmt.Errorf("migrate backdating: %w", err)
+		}
+	}
+	if oldSick {
+		if _, err := tx.Exec(`ALTER TABLE settings DROP COLUMN sick_backdate_days`); err != nil {
+			return fmt.Errorf("migrate backdating: %w", err)
+		}
+	}
+	return tx.Commit()
 }
