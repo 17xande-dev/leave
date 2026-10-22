@@ -469,8 +469,11 @@ button,
     background: transparent;
     color: var(--ink-soft);
 
+    /* The general button:hover rule darkens the border, and outranks the one
+       above; keep it the quiet --rule that Sign out has. */
     &:hover {
       background: var(--paper-sunk);
+      border-color: var(--rule);
       color: var(--ink);
     }
   }

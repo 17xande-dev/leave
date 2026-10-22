@@ -360,15 +360,17 @@ func TestThemeRendering(t *testing.T) {
 	// that each carries the right value.
 	buttons := func(body string) []string {
 		var got []string
-		for _, m := range regexp.MustCompile(`<button type="submit" class="(sys-\w+)" name="theme" value="(\w+)"`).FindAllStringSubmatch(body, -1) {
-			got = append(got, m[1]+"="+m[2])
+		// class=value:label, so a label that names the wrong theme for what the
+		// button posts fails too ("system" leads to whichever the system is).
+		for _, m := range regexp.MustCompile(`<button type="submit" class="(sys-\w+)" name="theme" value="(\w+)" aria-label="Switch to (\w+) theme"`).FindAllStringSubmatch(body, -1) {
+			got = append(got, m[1]+"="+m[2]+":"+m[3])
 		}
 		return got
 	}
 	want := map[string][]string{
-		"":      {"sys-light=dark", "sys-dark=light"},
-		"light": {"sys-light=dark", "sys-dark=system"},
-		"dark":  {"sys-light=system", "sys-dark=light"},
+		"":      {"sys-light=dark:dark", "sys-dark=light:light"},
+		"light": {"sys-light=dark:dark", "sys-dark=system:dark"},
+		"dark":  {"sys-light=system:light", "sys-dark=light:light"},
 	}
 	check := func(t *testing.T, name, state, body string) {
 		t.Helper()
