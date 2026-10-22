@@ -483,3 +483,100 @@ func TestMigrateRecordedAddsColumnsOnce(t *testing.T) {
 		t.Errorf("backups = %v, want none", m)
 	}
 }
+
+// A database as it was before BOTH the per-type backdating limit and recorded
+// leave, built from the schema text exactly as commit 6dd59d8 shipped it
+// (testdata/schema-6dd59d8.sql, extracted verbatim, not reconstructed from
+// today's schema). Opening it runs both migrations in order, once, and leaves a
+// database SQLite itself calls healthy: STRICT tables, no corruption, no
+// dangling foreign key.
+func TestMigrateFromBeforeBackdatingAndRecorded(t *testing.T) {
+	schema, err := os.ReadFile("testdata/schema-6dd59d8.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path+"?_foreign_keys=on")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{string(schema),
+		`INSERT INTO users (id, ext_id, dn, username, name, synced_at) VALUES
+			(1, 'a', 'a', 'a', 'Ann', ''), (2, 'b', 'b', 'b', 'Bob', '')`,
+		`INSERT INTO leave_types (id, code, name, cycle_months, unit, backdate) VALUES
+			(1, 'annual', 'Annual', 12, 'workdays', 0), (2, 'sick', 'Sick', 36, 'workdays', 1)`,
+		`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days, cycle_start, status, approver_id, created_at) VALUES
+			(1, 1, 'leave', '2026-01-05', '2026-01-06', 2, '2026-01-01', 'approved', 2, ''),
+			(1, 2, 'leave', '2026-02-02', '2026-02-02', 1, '2025-01-01', 'pending', 2, ''),
+			(2, 1, 'leave', '2026-03-02', '2026-03-02', 1, '2026-01-01', 'draft', NULL, '')`,
+	} {
+		if _, err := old.Exec(q); err != nil {
+			t.Fatalf("setup: %v\n%.200s", err, q)
+		}
+	}
+	old.Close()
+
+	for pass := 1; pass <= 2; pass++ {
+		d, err := Open(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", pass, err)
+		}
+		// Backdating migration ran: the old columns are gone, the new one is there.
+		for _, c := range []struct {
+			table, col string
+			want       int
+		}{
+			{"leave_types", "backdate", 0}, {"settings", "sick_backdate_days", 0}, {"leave_types", "backdate_days", 1},
+			// Recorded-leave migration ran: its three columns exist.
+			{"requests", "recorded_by_id", 1}, {"requests", "removed_by_id", 1}, {"requests", "removed_at", 1},
+		} {
+			var n int
+			d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.col).Scan(&n)
+			if n != c.want {
+				t.Errorf("open %d: %s.%s present = %d, want %d", pass, c.table, c.col, n, c.want)
+			}
+		}
+		var reqs int
+		if err := d.QueryRow(`SELECT count(*) FROM requests WHERE recorded_by_id IS NULL`).Scan(&reqs); err != nil || reqs != 3 {
+			t.Errorf("open %d: %d requests kept, want 3 (%v)", pass, reqs, err)
+		}
+		var annual, sick int
+		d.QueryRow(`SELECT (SELECT backdate_days FROM leave_types WHERE code = 'annual'),
+			(SELECT backdate_days FROM leave_types WHERE code = 'sick')`).Scan(&annual, &sick)
+		if annual != 92 || sick != 92 {
+			t.Errorf("open %d: backdate_days = %d, %d, want 92", pass, annual, sick)
+		}
+		// Every table, including the ones rebuilt or altered, is still STRICT.
+		rows, err := d.Query(`SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tables := 0
+		for rows.Next() {
+			var name, ddl string
+			rows.Scan(&name, &ddl)
+			tables++
+			if !strings.HasSuffix(strings.TrimSpace(strings.ToUpper(ddl)), "STRICT") {
+				t.Errorf("open %d: %s is not STRICT", pass, name)
+			}
+		}
+		rows.Close()
+		if tables < 10 {
+			t.Errorf("open %d: only %d tables", pass, tables)
+		}
+		var check string
+		if err := d.QueryRow(`PRAGMA integrity_check`).Scan(&check); err != nil || check != "ok" {
+			t.Errorf("open %d: integrity_check = %q, %v", pass, check, err)
+		}
+		fk, err := d.Query(`PRAGMA foreign_key_check`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fk.Next() {
+			t.Errorf("open %d: foreign_key_check reports a violation", pass)
+		}
+		fk.Close()
+		d.Close()
+	}
+}
