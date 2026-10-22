@@ -70,9 +70,15 @@ func literalColour(css string) string {
 	hex := regexp.MustCompile(`(?i)#[0-9a-f]{3,8}\b`)
 	fn := regexp.MustCompile(`(?i)\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(`)
 	skip := regexp.MustCompile(`(?i)var\([^)]*\)|url\([^)]*\)`)
-	word := regexp.MustCompile(`[A-Za-z]+`)
-	for _, d := range regexp.MustCompile(`(?s)(?:^|[;{}\s])([a-zA-Z-]+)\s*:\s*([^;{}]+)[;}]`).FindAllStringSubmatch(css, -1) {
-		if strings.HasPrefix(d[1], "--") {
+	// Whole hyphenated words, so background-color is one word and not "background"
+	// and "color". Quoted text (content, grid-template-areas) is not a colour.
+	word := regexp.MustCompile(`[A-Za-z-]+`)
+	quoted := regexp.MustCompile(`"[^"]*"|'[^']*'`)
+	// Properties whose values are names that may look like a colour: the font
+	// shorthand's "menu", an animation or area called "mark", and so on.
+	notColour := regexp.MustCompile(`^(?:font|font-family|content|quotes|will-change|transition(?:-.*)?|animation(?:-.*)?|grid(?:-.*)?|counter-.*|list-style(?:-type)?)$`)
+	for _, d := range regexp.MustCompile(`(?s)(?:^|[;{}\s])([a-zA-Z-]+)\s*:\s*([^;{}]+)[;}]`).FindAllStringSubmatch(quoted.ReplaceAllString(css, `""`), -1) {
+		if strings.HasPrefix(d[1], "--") || notColour.MatchString(strings.ToLower(d[1])) {
 			continue
 		}
 		v := skip.ReplaceAllString(d[2], "")
@@ -92,7 +98,9 @@ func literalColour(css string) string {
 }
 
 // CSS named colours and system colours. transparent and currentcolor are
-// deliberately absent: neither is a literal colour.
+// deliberately absent: neither is a literal colour. The deprecated system colours
+// that are also ordinary words (Background, Menu, Window, Scrollbar) are left out,
+// as they would flag legitimate values.
 var namedColours = func() map[string]bool {
 	m := map[string]bool{}
 	for _, w := range strings.Fields(`aliceblue antiquewhite aqua aquamarine azure beige bisque black
@@ -113,10 +121,10 @@ var namedColours = func() map[string]bool {
 	whitesmoke yellow yellowgreen
 	accentcolor accentcolortext activetext buttonborder buttonface buttontext canvas canvastext field
 	fieldtext graytext highlight highlighttext linktext mark marktext selecteditem selecteditemtext
-	visitedtext activeborder activecaption appworkspace background buttonhighlight buttonshadow
-	captiontext inactiveborder inactivecaption inactivecaptiontext infobackground infotext menu
-	menutext scrollbar threeddarkshadow threedface threedhighlight threedlightshadow threedshadow
-	window windowframe windowtext`) {
+	visitedtext activeborder activecaption appworkspace buttonhighlight buttonshadow
+	captiontext inactiveborder inactivecaption inactivecaptiontext infotext
+	menutext threeddarkshadow threedface threedhighlight threedlightshadow threedshadow
+	windowframe windowtext`) {
 		m[w] = true
 	}
 	return m
@@ -149,6 +157,9 @@ func TestLiteralColourCatchesWhatItShould(t *testing.T) {
 		"a { color: red; }", "a { color: White; }", "a { color: CanvasText }", "a { color: #f00; }",
 		"a { background: rgb(1 2 3); }", "a { background: color-mix(in oklab, var(--x) 8%, white); }",
 		"a { border: 1px solid Tomato; }", "a { outline: 2px solid HIGHLIGHT; }",
+		"a { color: GrayText; }", "a { color: #AbC; }", "a { color: RGB(1 2 3); }",
+		"a { background: color-mix(in oklab, var(--x), Red); }",
+		"@media (min-width: 1px) { a { color: navy } }", "a { background: black }",
 	} {
 		if literalColour(bad) == "" {
 			t.Errorf("not caught: %s", bad)
@@ -158,6 +169,9 @@ func TestLiteralColourCatchesWhatItShould(t *testing.T) {
 		"a { color: var(--highlight); }", "a { background: transparent; border-color: currentcolor; }",
 		"a { background: color-mix(in oklab, var(--warn) 8%, var(--paper-sunk)); }",
 		"a { white-space: nowrap; display: inline-flex; }", "a { border: 0; color: inherit; }",
+		"a { transition: background-color 200ms; }", "a { font: menu; }",
+		`a { grid-template-areas: "menu main"; }`, `a::after { content: "Mark"; }`,
+		"a { transition-property: color, background-color, border-color; }",
 	} {
 		if m := literalColour(ok); m != "" {
 			t.Errorf("false positive %q in: %s", m, ok)

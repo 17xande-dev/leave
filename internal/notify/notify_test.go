@@ -383,4 +383,11 @@ func TestEmailButtonIsATableCell(t *testing.T) {
 	if !strings.Contains(m.HTML, `<td bgcolor="#0c0c0c"`) || !regexp.MustCompile(`<td bgcolor="#0c0c0c"[^>]*><a href="https://leave\.test/[^"]*"`).MatchString(m.HTML) {
 		t.Fatalf("no table-cell button with the link inside:\n%s", m.HTML)
 	}
+	if !strings.Contains(m.HTML, "mso-padding-alt:10px 18px") {
+		t.Fatalf("button cell lacks mso-padding-alt, so Outlook would drop the padding:\n%s", m.HTML)
+	}
+	// Outlook does not inherit the body's font into tables.
+	if !regexp.MustCompile(`<td style="padding:24px 28px;font-family:`).MatchString(m.HTML) {
+		t.Fatalf("content cell lacks its own font-family:\n%s", m.HTML)
+	}
 }
