@@ -111,6 +111,22 @@ day and its minimum, the final approver, and the year the 36-month sick cycle co
 from. They live in the database; the environment keeps
 only wiring and secrets.
 
+**Record leave** (on a person's page under **Admin → People**) writes down leave someone
+has already taken, such as leave from before the system went live or agreed off it. Only
+leave that has already happened can be recorded: its last day must be today or earlier,
+and future days go through an application so approval and coverage cannot be bypassed.
+It is approved at once, with the admin as approver, and counts like any request
+(history, team view, overlap checks, the calendar). What is relaxed is what makes no
+sense after the fact: the backdating limit, department and team coverage limits, the
+restricted-day rule, and a leave type since retired. The balance may go below zero; the
+request is flagged and the form says so. A note saying why is required, and it still
+refuses overlap with the person's other leave. The person is emailed. Nobody records their
+own leave: another admin does. The request page shows who recorded it, and **Remove this
+recorded leave** (another admin, never for oneself) cancels it, so it no longer counts
+against the balance, deletes the calendar event, emails the person, and keeps a
+**Removed by** line with who and when. Ordinary approved leave cannot be removed this
+way. Nobody adjusts their own balance either.
+
 **The admin area** has: All requests (with a CSV export), People (approver overrides,
 balance adjustments, long weekends, their teams), Leave types, Public holidays,
 Shutdowns, Coverage limits, Teams, Permissions, Settings and Outbox.
@@ -138,8 +154,13 @@ ends it at once. Nothing else is needed from an administrator.
 **What an assistant can do** is exactly what the person can do themselves. Every tool
 runs as them through the same code the pages use (the same service methods and
 the same permission checks), so there is no second set of rules. A refusal comes back to the assistant as a
-message it can relay, not an error. Tools that change anything are marked as such, so
-clients ask the person before calling them.
+message it can relay, not an error. Every tool carries an annotation: read-only, additive
+(it changes something without destroying anything, such as applying for leave or recording
+it) or destructive (it cannot be undone or decides something for someone else: withdraw,
+decide, remove recorded leave, grant, refuse, reassign). Whether a client asks the
+person before calling a tool is the client's choice; destructive ones are the ones
+they usually ask about. The server's instructions also tell the assistant never to change
+anything unless the person has asked.
 
 | Tool | What it does |
 |---|---|
@@ -160,19 +181,19 @@ clients ask the person before calling them.
 | `outbox_problems` | Administrators only: failing emails and calendar jobs |
 | `person_balances` | Administrators only: a person's balances for the current cycle and every adjustment made for them |
 | `permission_queue` | Administrators only: requests waiting for HR to allow a negative balance (`/admin/permissions`), with the shortfall |
-| `record_leave` | Administrators only: record leave a person already started or took (the **Record leave** form). A note is required; a retired type is allowed; the balance may go below zero and the result says so. The person is emailed |
-| `remove_recorded_leave` | Administrators only: remove leave an administrator recorded; the days return and the person is emailed |
+| `record_leave` | Administrators only: record leave a person has already taken (the **Record leave** form): its last day must be today or earlier. A note is required; a retired type is allowed; the balance may go below zero and the result says so. The person is emailed |
+| `remove_recorded_leave` | Administrators only: remove leave an administrator recorded; it no longer counts against their balance and the person is emailed |
 | `adjust_balance` | Administrators only: add or remove days on one type's balance for a cycle (default the current one), with a required reason. Nobody is emailed |
-| `grant_negative` | Administrators only: allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
+| `grant_negative` | Administrators only (destructive: it cannot be recalled): allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
 | `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
 | `reassign_request` | Administrators only: move a pending request to another approver, or with none to the leave administrators; the new approver is emailed |
 
 The administrators' tools identify a person by sign-in username (as `all_requests` does),
 email address or exact full name, and refuse a name that matches two people rather than
 guess. They are the website's admin actions through the same service methods, so the same
-rules hold: nobody records their own leave or grants or refuses their own request (another
-administrator does), and a validation message from the service comes back as the tool's
-error naming the field. Tools that change anything are marked, so clients ask first.
+rules hold: nobody records or removes leave recorded for themselves, adjusts their own
+balance, or grants or refuses their own request (another administrator does), and a validation message from the service comes back as the tool's
+error naming the field.
 
 **How it works underneath.** `/mcp` is a Streamable HTTP endpoint (stateless, JSON
 responses) in the same binary, using the official Go SDK. The app is its own OAuth 2.1
