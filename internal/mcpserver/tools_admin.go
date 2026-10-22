@@ -77,8 +77,8 @@ func personInfo(u users.User) PersonInfo {
 type RecordLeaveIn struct {
 	Person string `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
 	Type   string `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
-	Start  string `json:"start" jsonschema:"first day, YYYY-MM-DD; the leave must already have started"`
-	End    string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Start  string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End    string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
 	Note   string `json:"note" jsonschema:"why it is being recorded; required"`
 }
 
