@@ -35,6 +35,40 @@ templates reference assets as `{{asset "htmx.min.js"}}`, which appends a hash of
 file's own contents to the URL, so replacing the file invalidates every cached copy on
 its own.
 
+## Cally 0.9.2
+
+The calendar behind `<date-range-input>`. Loaded by the apply page as its own
+`<script type="module">`; the component does not import it (a relative import would
+bypass the content-hashed URL).
+
+- Source: `https://registry.npmjs.org/cally/-/cally-0.9.2.tgz`, `package/dist/cally.js`
+  (copied from the component repo's `vendor/`, where the tarball hash is recorded)
+- Licence: MIT (`cally.LICENSE`)
+- Size: 38 355 bytes
+- SHA-256: `4dcba6a3b8ec63b66ff2fbfc6cf47b7dee1eb4896eac89fe7487d82e28e15870`
+
+## date-range-input
+
+The `<date-range-input>` web component on the apply page. It is our own, kept in a
+separate repository, which is the source of truth: do not edit the copy here.
+
+- Source: `/home/alex/dev/date-range-input/date-range-input.js`, commit `8e87fe6`
+- Licence: MIT (`date-range-input.LICENSE`)
+- Size: 28 402 bytes
+- SHA-256: `db98157d1ea79630a030e4def5a862c7cc40d74babd40f4265c63410ad81f0fc`
+
+To update, copy from that repo and record the new commit, size and hash above:
+
+```sh
+S=/home/alex/dev/date-range-input
+cp $S/date-range-input.js internal/handler/static/
+cp $S/vendor/cally.js internal/handler/static/      # only if Cally changed
+git -C $S rev-parse --short HEAD
+sha256sum internal/handler/static/date-range-input.js internal/handler/static/cally.js
+```
+
+The `--dri-*` custom properties are mapped onto the theme tokens in `styles.css`.
+
 ## htmx 4 and the CSP
 
 Nothing in `styles.css` or the `<head>` configures htmx. htmx 2 injected its
