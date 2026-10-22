@@ -329,15 +329,23 @@ After that, every deploy is: commit, push, `make deploy`. Logs are at
 `ssh docker-server 'cd ~/leave && docker compose logs -f'`.
 
 The schema has no migrations. If the app refuses to start against an old database, the
-logs say so. Back up the database first (below), then recreate it with
-`docker compose down -v && docker compose up -d`.
+logs say so. Back up the database (below) while the old version is still running -- the
+new one will not start against it, so `exec` will not work after the deploy -- then
+recreate it with `docker compose down -v` and `make deploy`. `down -v` deletes the
+`leave-data` volume and everything in it, so copy the backup out of the volume first.
 
 `make publish` (build on a workstation, push to GHCR, `docker compose pull` on the server)
 is still there for when you'd rather the server never build anything.
 
-The database lives in the `leave-data` volume. Back it up with
-`docker compose exec leave sqlite3 /data/leave.db ".backup /data/backup.db"`. That uses
-SQLite's backup API, because a plain `cp` of a live database can capture a torn state.
+The database lives in the `leave-data` volume. Back it up and copy it out of the volume:
+
+```sh
+docker compose exec leave sqlite3 /data/leave.db ".backup /data/backup.db"
+docker compose cp leave:/data/backup.db ./leave-backup-$(date +%F).db
+```
+
+`.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
+torn state.
 
 The container listens on 8080 and is published only on `127.0.0.1:8082` (`HOST_PORT`), for
 checking from the server itself. Public access goes through the tunnel below.
