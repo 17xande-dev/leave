@@ -77,8 +77,7 @@
 }
 
 html {
-  /* Anchored jumps and hx-boost navigations land below the header rather than
-     under it. */
+  /* Anchored jumps land below the header rather than under it. */
   scroll-padding-block-start: var(--gap-lg);
 }
 

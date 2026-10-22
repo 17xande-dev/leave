@@ -7,9 +7,18 @@
   any change inside the form re-fetches #quote, sending the form's fields as a
   GET query. hx-trigger/hx-get are attributes, not inline script, so the CSP is
   untouched.
+
+  hx-validate="false": htmx 4 calls reportValidity() before a form's requests, so
+  a half-filled form would pop "Please fill in this field" bubbles and steal focus
+  on every change. The preview handles incomplete input itself; the real submit
+  still gets native validation.
+  hx-sync="replace": htmx 4 defaults to "queue first", which captures the form
+  when the change fires and drops later changes, so quick edits could leave a
+  stale preview. Replace aborts the in-flight request and sends the newest.
 */}}
 <form method="post" action="/leave" id="apply"
-      hx-get="/leave/quote" hx-trigger="change" hx-target="#quote" hx-swap="outerHTML">
+      hx-get="/leave/quote" hx-trigger="change" hx-target="#quote" hx-swap="outerHTML"
+      hx-validate="false" hx-sync="replace">
   {{template "csrf" $.CSRF}}
   <div class="field">
     <label for="type">Type of leave</label>

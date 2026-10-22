@@ -45,5 +45,5 @@ installs the same rules as a constructable stylesheet (`adoptedStyleSheets`), wh
 If a page ever uses `hx-indicator`, no CSS is needed.
 
 htmx 4 sends requests with `fetch()` (still governed by `connect-src 'self'`), and it
-swaps 4xx/5xx responses by default (only 204 and 304 are skipped), which is what the
-app's validation messages need.
+swaps 4xx/5xx responses by default (only 204 and 304 are skipped), so a server error
+or an auth response replaces the preview rather than leaving it stale.
