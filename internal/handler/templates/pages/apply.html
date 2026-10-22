@@ -1,6 +1,7 @@
 {{define "head"}}
 <script type="module" src="{{asset "cally.js"}}"></script>
 <script type="module" src="{{asset "date-range-input.js"}}"></script>
+<script type="module" src="{{asset "apply.js"}}"></script>
 {{end}}
 {{define "content"}}
 <h1>Apply for leave</h1>
@@ -34,7 +35,7 @@
     <label for="type">Type of leave</label>
     <select id="type" name="type" required>
       <option value="">Choose…</option>
-      {{range .Types}}<option value="{{.ID}}"{{if eq .ID $.Data.Input.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
+      {{range .Types}}<option value="{{.ID}}" data-min="{{index $.Data.Mins .ID}}"{{if eq .ID $.Data.Input.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
     </select>
     {{template "err" index .Errors "type"}}
   </div>
@@ -44,16 +45,16 @@
          keep whatever was typed. locale="en-GB" puts the day before the month,
          as the server's own dates do ("Mon 2 Jan 2006"). */}}
     <date-range-input label="Dates" start-name="start" end-name="end" required
-        months="2" first-day-of-week="1" with-clear locale="en-GB"
+        months="2" first-day-of-week="1" with-clear locale="en-GB"{{if .MinDate}} min="{{.MinDate}}"{{end}}
         {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
       <div class="field-row">
         <div class="field">
           <label for="start">First day</label>
-          <input type="date" id="start" name="start" value="{{.Input.Start}}" required>
+          <input type="date" id="start" name="start" value="{{.Input.Start}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
         </div>
         <div class="field">
           <label for="end">Last day</label>
-          <input type="date" id="end" name="end" value="{{.Input.End}}" required>
+          <input type="date" id="end" name="end" value="{{.Input.End}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
         </div>
       </div>
     </date-range-input>

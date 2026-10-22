@@ -46,6 +46,12 @@ type applyData struct {
 	Errors   leave.FieldErrors
 	Preview  quoteData
 	Approver string
+	// MinDate is the picker's earliest selectable day: the selected type's
+	// cut-off, or with none chosen the earliest across all offered types.
+	MinDate string
+	// Mins maps a type's ID to its earliest start (YYYY-MM-DD), for the
+	// select's data-min attributes.
+	Mins map[int64]string
 }
 
 func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors) (applyData, error) {
@@ -53,7 +59,20 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	if err != nil {
 		return applyData{}, err
 	}
-	d := applyData{Types: types, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}}
+	d := applyData{Types: types, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}}
+	// The same cut-off the server enforces (Service.EarliestStart), so the
+	// picker greys out exactly what a submit would refuse. YYYY-MM-DD
+	// compares as text.
+	for _, t := range types {
+		m := h.leave.EarliestStart(t)
+		d.Mins[t.ID] = m
+		if d.MinDate == "" || m < d.MinDate {
+			d.MinDate = m
+		}
+	}
+	if m, ok := d.Mins[in.TypeID]; ok {
+		d.MinDate = m
+	}
 	// Re-rendering after a refused submit: show the day count too, so the
 	// form reads the same as it did before the button was pressed. The field
 	// errors are already beside their fields; only the coverage warning, which

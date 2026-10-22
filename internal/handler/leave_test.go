@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/17xande-dev/leave/internal/leave"
 )
 
 func (hs *harness) typeID(code string) string {
@@ -137,7 +139,7 @@ func TestApplyPageDateRange(t *testing.T) {
 
 	// The scripts are loaded as modules from their content-hashed URLs, and
 	// those URLs resolve to JavaScript (a typo would be a silent /missing/ 404).
-	for _, name := range []string{"cally.js", "date-range-input.js"} {
+	for _, name := range []string{"cally.js", "date-range-input.js", "apply.js"} {
 		m := regexp.MustCompile(`<script type="module" src="(/static/` + regexp.QuoteMeta(name) + `\?v=[0-9a-f]+)"`).FindStringSubmatch(body)
 		if m == nil {
 			t.Errorf("apply page does not load %s as a module", name)
@@ -217,4 +219,65 @@ func TestCancellationThroughPages(t *testing.T) {
 	if _, body := hs.get(staff, path); !strings.Contains(body, "cancelled") {
 		t.Fatal("original not cancelled after approval")
 	}
+}
+
+// The picker's earliest day mirrors the server's backdating limit: every
+// option carries its type's cut-off, the picker and the no-JS inputs carry the
+// earliest across the types, and a re-render after a refusal carries the chosen
+// type's own. "Today" is pinned to 5 October 2026, so 90 days back is 7 July.
+func TestApplyPageCarriesBackdateMin(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.signIn("staff1")
+	ts, _ := hs.svc.Types(context.Background(), true)
+	annual, _ := hs.svc.Type(context.Background(), mustAtoi(t, hs.typeID("annual")))
+	sick, _ := hs.svc.Type(context.Background(), mustAtoi(t, hs.typeID("sick")))
+	annual.BackdateDays, sick.BackdateDays = 10, 90
+	for _, ty := range []leave.Type{annual, sick} {
+		if _, err := hs.svc.SaveType(context.Background(), ty); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, body := hs.get(c, "/leave/new")
+	n := 0
+	for _, ty := range ts {
+		want := map[string]string{"annual": "2026-09-25", "sick": "2026-07-07"}[ty.Code]
+		if want == "" {
+			want = "2026-07-07" // the other seeded types
+		}
+		if !strings.Contains(body, `<option value="`+strconv.FormatInt(ty.ID, 10)+`" data-min="`+want+`"`) {
+			t.Errorf("option for %s lacks data-min=%s", ty.Code, want)
+		}
+		n++
+	}
+	if n < 4 {
+		t.Fatalf("checked only %d options", n)
+	}
+	// Nothing chosen: the earliest of the offered types.
+	if !strings.Contains(body, `months="2" first-day-of-week="1" with-clear locale="en-GB" min="2026-07-07"`) {
+		t.Errorf("picker lacks the earliest min:\n%s", body)
+	}
+	for _, id := range []string{"start", "end"} {
+		if !regexp.MustCompile(`<input type="date" id="` + id + `"[^>]* min="2026-07-07"`).MatchString(body) {
+			t.Errorf("fallback input %s lacks min", id)
+		}
+	}
+
+	// A refused submit re-renders with the chosen type's own limit.
+	res, body := hs.post(c, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-09-01"}, "end": {"2026-09-01"}, "note": {"n"}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "Annual leave can start at most 10 days ago (no earlier than Fri 25 Sep 2026).") {
+		t.Fatalf("backdated beyond the limit: %d", res.StatusCode)
+	}
+	if !strings.Contains(body, `locale="en-GB" min="2026-09-25"`) || !strings.Contains(body, `id="start" name="start" value="2026-09-01" min="2026-09-25"`) {
+		t.Error("re-render did not use the selected type's min")
+	}
+}
+
+func mustAtoi(t *testing.T, s string) int64 {
+	t.Helper()
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
