@@ -40,6 +40,8 @@ type RequestInfo struct {
 	DecidedBy         string `json:"decided_by,omitempty"`
 	DecisionNote      string `json:"decision_note,omitempty"`
 	CreatedAt         string `json:"created_at"`
+	RemovedBy         string `json:"removed_by,omitempty" jsonschema:"for recorded leave an administrator later removed: who removed it"`
+	RemovedAt         string `json:"removed_at,omitempty"`
 	CancelsRequestID  int64  `json:"cancels_request_id,omitempty"`
 	Shutdown          string `json:"shutdown,omitempty" jsonschema:"set when the request was made for a company shutdown"`
 	SpecialPermission bool   `json:"special_permission,omitempty" jsonschema:"over a department or team coverage limit, so every approval level must approve"`
@@ -49,7 +51,7 @@ func requestInfo(r leave.Request) RequestInfo {
 	return RequestInfo{ID: r.ID, Kind: r.Kind, Person: r.UserName, Department: r.Department,
 		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Days: r.Days, Status: r.Status,
 		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
-		CreatedAt: r.CreatedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
+		CreatedAt: r.CreatedAt, RemovedBy: r.RemovedBy, RemovedAt: r.RemovedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
 		SpecialPermission: r.Escalate}
 }
 

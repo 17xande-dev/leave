@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,55 +18,58 @@ import (
 
 const personDoc = "the person's sign-in username (as in all_requests), their email address, or their exact full name"
 
-// resolvePerson finds one person by username, then email, then exact name.
+// resolvePerson finds one person by sign-in username, email address or full
+// name. Every field is compared whole (case-insensitively), and the candidates
+// from all three are pooled: if they are not all the same person the question
+// is refused, never guessed at. The username is deliberately not normalised the
+// way a sign-in is (users.ByUsername strips "@domain" and "DOMAIN\"), which
+// would make "staff2@elsewhere.org" mean staff2 even when it is someone
+// else's exact email; anything with an "@" or a backslash is not a username.
 // Disabled people are found too: an administrator may need to correct a
-// leaver's records. Anything that matches more than one row is refused rather
-// than guessed at.
+// leaver's records.
 func (d *deps) resolvePerson(ctx context.Context, who string) (users.User, error) {
 	want := strings.TrimSpace(who)
 	if want == "" {
 		return users.User{}, userError("Say who: a username, email address or full name.")
 	}
-	if u, err := d.users.ByUsername(ctx, want); err == nil {
-		return u, nil
-	}
 	all, err := d.users.All(ctx)
 	if err != nil {
 		return users.User{}, err
 	}
-	for _, field := range []func(users.User) string{
-		func(u users.User) string { return u.Email },
-		func(u users.User) string { return u.Name },
-	} {
-		var hits []users.User
-		for _, u := range all {
-			if v := field(u); v != "" && strings.EqualFold(v, want) {
-				hits = append(hits, u)
-			}
-		}
-		switch len(hits) {
-		case 0:
-		case 1:
-			return hits[0], nil
-		default:
-			names := make([]string, 0, len(hits))
-			for _, u := range hits {
-				names = append(names, fmt.Sprintf("%s (%s)", u.Name, u.Username))
-			}
-			return users.User{}, userErrorf("%q matches more than one person: %s. Use a username.", who, strings.Join(names, ", "))
+	mayBeUsername := !strings.ContainsAny(want, `@\`)
+	var hits []users.User
+	for _, u := range all {
+		if (mayBeUsername && strings.EqualFold(u.Username, want)) ||
+			(u.Email != "" && strings.EqualFold(u.Email, want)) || strings.EqualFold(u.Name, want) {
+			hits = append(hits, u)
 		}
 	}
-	return users.User{}, userErrorf("No one matches %q. Use a sign-in username, email address or full name.", who)
+	switch len(hits) {
+	case 0:
+		return users.User{}, userErrorf("No one matches %q. Use a sign-in username, email address or full name.", who)
+	case 1:
+		return hits[0], nil
+	}
+	names := make([]string, 0, len(hits))
+	for _, u := range hits {
+		n := fmt.Sprintf("%s (%s)", u.Name, u.Username)
+		if u.Disabled {
+			n = fmt.Sprintf("%s (%s, disabled)", u.Name, u.Username)
+		}
+		names = append(names, n)
+	}
+	return users.User{}, userErrorf("%q matches more than one person: %s. Use a username.", who, strings.Join(names, ", "))
 }
 
 type PersonInfo struct {
 	Name     string `json:"name"`
 	Username string `json:"username"`
 	Email    string `json:"email,omitempty"`
+	Disabled bool   `json:"disabled,omitempty" jsonschema:"true when the person can no longer sign in"`
 }
 
 func personInfo(u users.User) PersonInfo {
-	return PersonInfo{Name: u.Name, Username: u.Username, Email: u.Email}
+	return PersonInfo{Name: u.Name, Username: u.Username, Email: u.Email, Disabled: u.Disabled}
 }
 
 // --- Recorded leave ---------------------------------------------------------
@@ -106,22 +110,32 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 		return RecordedOut{}, "", err
 	}
 	out := RecordedOut{Request: requestInfo(req), BelowZero: req.AllowNegative}
-	cycle, err := leave.ParseDate(req.CycleStart)
-	if err != nil {
-		return out, "", err
+	// The leave is recorded and the person told. A balance that cannot be read
+	// afterwards is left out of the answer rather than reported as a failure.
+	if bi, err := d.balanceFor(ctx, who.ID, t, req.CycleStart); err != nil {
+		slog.Error("mcp tool: balance after recording", "tool", "record_leave", "request", req.ID, "err", err)
+	} else {
+		out.Balance = &bi
 	}
-	b, err := d.leave.BalanceIn(ctx, who.ID, t, cycle)
-	if err != nil {
-		return out, "", err
-	}
-	bi := balanceInfo(b)
-	out.Balance = &bi
 	out.Message = fmt.Sprintf("Recorded %d %s of %s for %s. They have been emailed and it is on the shared calendar.",
 		req.Days, plural(req.Days, "day", "days"), req.TypeName, req.UserName)
 	if out.BelowZero {
 		out.Message += " Their balance is now below zero."
 	}
 	return out, out.Message, nil
+}
+
+// balanceFor is a person's balance for a type in the cycle starting on cycle.
+func (d *deps) balanceFor(ctx context.Context, userID int64, t leave.Type, cycle string) (BalanceInfo, error) {
+	c, err := leave.ParseDate(cycle)
+	if err != nil {
+		return BalanceInfo{}, err
+	}
+	b, err := d.leave.BalanceIn(ctx, userID, t, c)
+	if err != nil {
+		return BalanceInfo{}, err
+	}
+	return balanceInfo(b), nil
 }
 
 func (d *deps) removeRecorded(ctx context.Context, u users.User, in IDIn) (RequestOut, string, error) {
@@ -132,13 +146,13 @@ func (d *deps) removeRecorded(ctx context.Context, u users.User, in IDIn) (Reque
 	if err != nil {
 		return RequestOut{}, "", err
 	}
-	if req.RecordedBy == "" {
+	if !req.IsRecorded() {
 		return RequestOut{}, "", userError("Only leave an administrator recorded can be removed this way; ordinary leave is cancelled through approval.")
 	}
 	if _, err := d.leave.Unrecord(ctx, u, req.ID); err != nil {
 		return RequestOut{}, "", err
 	}
-	return d.after(ctx, req.ID, "Recorded leave removed. The days are back in the balance and the person has been emailed.")
+	return d.after(ctx, req.ID, "Recorded leave removed. It no longer counts against their balance, and the person has been emailed.")
 }
 
 // --- Balances ---------------------------------------------------------------
@@ -233,15 +247,14 @@ func (d *deps) adjustBalance(ctx context.Context, u users.User, in AdjustIn) (Ad
 		}
 	}
 	a := leave.Adjustment{UserID: who.ID, TypeID: t.ID, CycleStart: cycle, Days: in.Days, Reason: in.Reason}
-	if err := d.leave.AddAdjustment(ctx, u.ID, a); err != nil {
+	if err := d.leave.AddAdjustment(ctx, u, a); err != nil {
 		return AdjustOut{}, "", err
 	}
 	out := AdjustOut{Person: personInfo(who)}
-	if c, err := leave.ParseDate(cycle); err == nil {
-		if b, err := d.leave.BalanceIn(ctx, who.ID, t, c); err == nil {
-			bi := balanceInfo(b)
-			out.Balance = &bi
-		}
+	if bi, err := d.balanceFor(ctx, who.ID, t, cycle); err != nil {
+		slog.Error("mcp tool: balance after adjusting", "tool", "adjust_balance", "err", err)
+	} else {
+		out.Balance = &bi
 	}
 	as, err := d.leave.Adjustments(ctx, who.ID)
 	if err != nil {
@@ -363,19 +376,19 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 
 	add(d, s, &mcp.Tool{Name: "record_leave", Annotations: additive("Record leave a person took (administrators)"),
 		Description: "Administrators only: write down leave a person has already started or taken, stored as approved. The person is emailed and it goes on the shared calendar. " +
-			"A note saying why is required. Leave that has not started is refused; a retired type is allowed; the balance may go below zero (reported as below_zero). " +
-			"You cannot record your own leave; another administrator does that."}, d.recordLeave)
+			"A note saying why is required. Leave whose last day is still to come is refused (future days go through an application); a retired type is allowed; the balance may go below zero (reported as below_zero). " +
+			"You cannot record your own leave; another administrator does that. Only when the person has told you to."}, d.recordLeave)
 	add(d, s, &mcp.Tool{Name: "remove_recorded_leave", Annotations: destructive("Remove recorded leave (administrators)"),
-		Description: "Administrators only: remove leave an administrator recorded (not ordinary approved leave). The days return to the balance, the calendar event goes and the person is emailed. Cannot be undone."}, d.removeRecorded)
+		Description: "Administrators only: remove leave an administrator recorded (not ordinary approved leave). It no longer counts against their balance, the calendar event goes and the person is emailed. Cannot be undone. You cannot remove leave recorded for you. Only when the person has told you to."}, d.removeRecorded)
 	add(d, s, &mcp.Tool{Name: "adjust_balance", Annotations: additive("Adjust a balance (administrators)"),
 		Description: "Administrators only: add or remove days on a person's balance for one leave type and cycle (carry-over, pro-rata, correction). A reason is required. " +
-			"The cycle defaults to the current one. Nobody is emailed. An adjustment cannot be edited or deleted afterwards, only offset with another."}, d.adjustBalance)
-	add(d, s, &mcp.Tool{Name: "grant_negative", Annotations: additive("Allow a negative balance (administrators)"),
+			"The cycle defaults to the current one. Nobody is emailed. You cannot adjust your own balance. An adjustment cannot be edited or deleted afterwards, only offset with another. Only when the person has told you to."}, d.adjustBalance)
+	add(d, s, &mcp.Tool{Name: "grant_negative", Annotations: destructive("Allow a negative balance (administrators)"),
 		Description: "Administrators only: allow a request waiting for HR to take the balance below zero. It returns to the person as a draft for them to submit, and they are emailed with your note. " +
 			"You cannot grant your own request. Only when the person has told you to."}, d.grantNegative)
 	add(d, s, &mcp.Tool{Name: "refuse_negative", Annotations: destructive("Refuse a negative balance (administrators)"),
 		Description: "Administrators only: refuse a request waiting for HR. It ends as declined, the person is emailed your note, and it cannot be undone. A note saying why is required. " +
 			"You cannot refuse your own request. Only when the person has told you to."}, d.refuseNegative)
 	add(d, s, &mcp.Tool{Name: "reassign_request", Annotations: destructive("Reassign a request (administrators)"),
-		Description: "Administrators only: move a pending request to another approver (or, with a blank approver, to the leave administrators). The new approver is emailed. Only for requests still pending."}, d.reassign)
+		Description: "Administrators only: move a pending request to another approver (or, with a blank approver, to the leave administrators). The new approver is emailed. Only for requests still pending. Only when the person has told you to."}, d.reassign)
 }

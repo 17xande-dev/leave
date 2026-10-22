@@ -46,7 +46,7 @@ type Config struct {
 
 const instructions = `This is the staff leave system. Everything you do here is done as the signed-in person, with exactly their permissions.
 Use my_balances to see leave types and what is left, and preview_request before apply_for_leave to see the day count and any rule that would stop the request.
-Never apply for, withdraw, approve or decline leave, and never record leave, adjust a balance, grant or refuse a negative balance, or reassign a request, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
+Never apply for, withdraw, approve or decline leave, and never record or remove recorded leave, adjust a balance, grant or refuse a negative balance, or reassign a request, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
 
 // New returns the MCP endpoint: Streamable HTTP, behind bearer-token auth.
 //

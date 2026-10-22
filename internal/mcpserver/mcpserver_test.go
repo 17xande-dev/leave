@@ -170,10 +170,12 @@ func TestToolAnnotations(t *testing.T) {
 	for _, n := range []string{"person_balances", "permission_queue"} {
 		readOnly[n] = true
 	}
+	// grant_negative commits the person to a decision that cannot be recalled
+	// (the request is a draft they may submit), so clients are told to ask first.
 	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true,
-		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true}
+		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true, "grant_negative": true}
 	changing := map[string]bool{"apply_for_leave": true, "submit_draft": true, "request_cancellation": true,
-		"record_leave": true, "adjust_balance": true, "grant_negative": true}
+		"record_leave": true, "adjust_balance": true}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true
@@ -577,7 +579,11 @@ func TestRecordAndRemoveLeave(t *testing.T) {
 	if b := f.ok(hr, "person_balances", map[string]any{"person": "staff1"}); !strings.Contains(b.Text, `"taken":0`) {
 		t.Fatalf("balances after removal: %s", b.Text)
 	}
-	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(r)}, "That is not possible")
+	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(r)}, "That recorded leave was already removed.")
+	if g := f.ok(hr, "get_request", map[string]any{"id": id(r)}); get(g.Data, "request", "removed_by") != "Hannah HR" ||
+		get(g.Data, "request", "removed_at") == nil || !strings.Contains(rm.Text, "no longer counts against their balance") {
+		t.Fatalf("removal audit = %v / %s", g.Data, rm.Text)
+	}
 
 	// Ordinary approved leave is not removable this way.
 	n := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
@@ -593,7 +599,11 @@ func TestRecordLeaveRules(t *testing.T) {
 	with := func(k string, v any) map[string]any { m := base(); m[k] = v; return m }
 
 	f.refused(hr, "record_leave", with("note", "  "), "Note:")
-	f.refused(hr, "record_leave", with("start", "2026-10-20"), "Start date:")
+	// The last day must be over: tomorrow is refused, today is fine, and so is
+	// leave that began earlier and ends today.
+	f.refused(hr, "record_leave", with("start", "2026-10-20"), "End date: Only leave that has already happened")
+	f.refused(hr, "record_leave", map[string]any{"person": "staff1", "type": "annual", "start": "2026-10-05", "end": "2026-10-06", "note": "why"}, "End date: Only leave that has already happened")
+	f.ok(hr, "record_leave", map[string]any{"person": "staff1", "type": "annual", "start": "2026-10-05", "note": "today"})
 	f.refused(hr, "record_leave", with("start", "soon"), "Start date:")
 	f.refused(hr, "record_leave", with("type", "nonsense"), "annual (Annual leave)")
 	f.refused(hr, "record_leave", with("person", "ghost"), "No one matches")
@@ -718,7 +728,7 @@ func TestReassignRequest(t *testing.T) {
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "ghost"}, "No one matches")
 	f.refused(hr, "reassign_request", map[string]any{"id": 99999, "approver": "headkids"}, "No such request")
 	// Not to the requester themselves: the service refuses.
-	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff1"}, "That is not possible")
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff1"}, "Approver: Not the person whose request it is.")
 	// Only pending requests move.
 	f.ok(hr, "decide_request", map[string]any{"id": id(r), "decision": "decline", "note": "no"})
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "headkids"}, "That is not possible")
@@ -728,4 +738,48 @@ func TestReassignRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r2), "approver": "staff2"}, "Approver: Choose someone who can currently sign in")
+}
+
+// A sign-in normalises "user@domain" and "DOMAIN\user" to the username, but a
+// person named by email must be the one with that email, never a username
+// that merely shares its local part.
+func TestPersonLookupNeverMistakesAnEmailForAUsername(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	if _, err := f.db.Exec(`UPDATE users SET email = 'staff2@elsewhere.org' WHERE username = 'staff1'`); err != nil {
+		t.Fatal(err)
+	}
+	if r := f.ok(hr, "person_balances", map[string]any{"person": "staff2@elsewhere.org"}); get(r.Data, "person", "username") != "staff1" {
+		t.Fatalf("email -> %v", r.Data)
+	}
+	// Someone else's local part with a domain nobody has is no one.
+	f.refused(hr, "person_balances", map[string]any{"person": "staff2@nowhere.org"}, "No one matches")
+	f.refused(hr, "person_balances", map[string]any{"person": `EXAMPLE\staff2`}, "No one matches")
+	f.refused(hr, "record_leave", map[string]any{"person": "hr@example.test.evil", "type": "annual", "start": "2026-10-01", "note": "x"}, "No one matches")
+
+	// A username that is also another person's name is ambiguous, and the
+	// list says who is who.
+	if _, err := f.db.Exec(`UPDATE users SET name = 'staff2', disabled = 1 WHERE username = 'staff1'`); err != nil {
+		t.Fatal(err)
+	}
+	f.refused(hr, "person_balances", map[string]any{"person": "staff2"}, "staff2 (staff1, disabled)")
+	f.refused(hr, "person_balances", map[string]any{"person": "staff2"}, "Thandi Teacher (staff2)")
+	// The disabled person still answers to what is unambiguous, with the flag shown.
+	if r := f.ok(hr, "person_balances", map[string]any{"person": "staff1"}); get(r.Data, "person", "disabled") != true {
+		t.Fatalf("disabled flag = %v", r.Data)
+	}
+}
+
+func TestNobodyAdjustsOrUnrecordsTheirOwn(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	f.refused(hr, "adjust_balance", map[string]any{"person": "hr", "type": "annual", "days": 1, "reason": "x"}, "Person: Another admin adjusts your own balance.")
+	f.makeAdmin("headkids")
+	other := f.as("headkids")
+	f.ok(other, "adjust_balance", map[string]any{"person": "hr", "type": "annual", "days": 1, "reason": "x"})
+
+	// Leave recorded for an admin is removed by another admin, not by them.
+	r := f.ok(other, "record_leave", map[string]any{"person": "hr", "type": "annual", "start": "2026-10-01", "note": "x"})
+	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(r)}, "Person: Another admin removes leave recorded for you.")
+	f.ok(other, "remove_recorded_leave", map[string]any{"id": id(r)})
 }

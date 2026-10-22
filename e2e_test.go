@@ -25,6 +25,7 @@ import (
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/handler"
 	"github.com/17xande-dev/leave/internal/leave"
+	"github.com/17xande-dev/leave/internal/notify"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
@@ -70,6 +71,7 @@ func newE2E(t *testing.T) *e2e {
 	srv := httptest.NewUnstartedServer(nil)
 	cfg := config.Config{CookieSecure: false, SessionTTL: time.Hour, Location: time.UTC,
 		BaseURL: "http://" + srv.Listener.Addr().String()}
+	svc.OnEvent(notify.New(cfg.BaseURL).Hook) // as main wires it, so actions leave their mail and calendar jobs
 	jobs := outbox.NewStore(d)
 	oa, mcpHandler := assistant(cfg, d, us, svc, jobs)
 	app, err := newApp(cfg, handler.Deps{Users: us, Sessions: auths.NewSessions(d, time.Hour), Directory: dir,
@@ -406,16 +408,39 @@ func TestEndToEndAdminToolsForAdmins(t *testing.T) {
 		t.Fatalf("outbox_problems as admin: %v %v", err, res)
 	}
 	// The admin actions run through the real notifier hook and outbox.
-	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC) // a Thursday; the fixed clock says it is the 5th
 	for tool, args := range map[string]map[string]any{
 		"person_balances":  {"person": "staff1"},
 		"permission_queue": nil,
 		"adjust_balance":   {"person": "staff1@example.test", "type": "annual", "days": 2, "reason": "carry-over"},
-		"record_leave":     {"person": "staff1", "type": "annual", "start": day.Format(time.DateOnly), "note": "agreed"},
 	} {
 		if res, err := call(t, cs, tool, args); err != nil || res.IsError {
 			t.Fatalf("%s as admin: %v %v", tool, err, text(res))
 		}
+	}
+
+	// Recording leave tells the person and queues the calendar event; removing
+	// it tells them again and queues the event's deletion.
+	jobs := func(kind string) (n int) {
+		e.db.QueryRow(`SELECT count(*) FROM outbox WHERE kind = ? AND payload LIKE '%' || ? || '%'`, kind, "staff1@example.test").Scan(&n)
+		if kind != "email" {
+			e.db.QueryRow(`SELECT count(*) FROM outbox WHERE kind = ?`, kind).Scan(&n)
+		}
+		return n
+	}
+	res, err = call(t, cs, "record_leave", map[string]any{"person": "staff1", "type": "annual", "start": "2026-10-01", "note": "agreed"})
+	if err != nil || res.IsError {
+		t.Fatalf("record_leave as admin: %v %v", err, text(res))
+	}
+	if jobs("email") != 1 || jobs("calendar_create") != 1 || jobs("calendar_delete") != 0 {
+		t.Fatalf("after record_leave: %d emails to staff1, %d calendar creates, %d deletes",
+			jobs("email"), jobs("calendar_create"), jobs("calendar_delete"))
+	}
+	rid := res.StructuredContent.(map[string]any)["request"].(map[string]any)["id"]
+	if res, err = call(t, cs, "remove_recorded_leave", map[string]any{"id": rid}); err != nil || res.IsError {
+		t.Fatalf("remove_recorded_leave as admin: %v %v", err, text(res))
+	}
+	if jobs("email") != 2 || jobs("calendar_delete") != 1 {
+		t.Fatalf("after removal: %d emails, %d calendar deletes", jobs("email"), jobs("calendar_delete"))
 	}
 }
 
