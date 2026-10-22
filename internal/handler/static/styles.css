@@ -444,51 +444,46 @@ button,
   }
 }
 
-/* The appearance switch: three buttons joined into one segmented control. The
-   chosen one is filled, so the state reads without colour. */
+/* The appearance toggle: one square icon button. The partial renders a button
+   for each system preference and exactly one is shown, because the server
+   cannot know which the system prefers. display: none keeps the other out of the
+   accessibility tree and the tab order. Without the media feature the light
+   system's button shows. */
 .theme-toggle {
   display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-button);
-  overflow: hidden;
 
-  > [role="group"] {
-    display: flex;
-  }
-
-  /* 40px tall, a comfortable touch target. Sign out is made as tall as the whole
-     control, border included, so the two sit level. */
+  /* 40px plus the border, a comfortable touch target, the same height as Sign
+     out so the two sit level. */
   button {
-    min-block-size: 2.5rem;
-    border: 0;
-    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    inline-size: calc(2.5rem + 2px);
+    block-size: calc(2.5rem + 2px);
+    padding: 0;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-button);
     background: transparent;
     color: var(--ink-soft);
-    font-size: var(--text-small);
-    font-weight: 500;
-    padding: 0 0.8rem;
 
     &:hover {
       background: var(--paper-sunk);
       color: var(--ink);
     }
+  }
 
-    /* The weight stays put so the control does not change width: the fill alone
-       says which is chosen. */
-    &[aria-pressed="true"] {
-      background: var(--accent);
-      color: var(--accent-ink);
+  .sys-dark {
+    display: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .sys-light {
+      display: none;
     }
 
-    /* Inside the overflow clip an outset ring would be cut off. */
-    &:focus-visible {
-      outline-offset: -2px;
-    }
-
-    /* On the filled one the ink ring would vanish into the fill. */
-    &[aria-pressed="true"]:focus-visible {
-      outline-color: var(--accent-ink);
-      outline-offset: -4px;
+    .sys-dark {
+      display: inline-flex;
     }
   }
 }

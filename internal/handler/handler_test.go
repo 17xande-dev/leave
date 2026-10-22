@@ -355,8 +355,26 @@ func TestThemeRendering(t *testing.T) {
 		u, _ := url.Parse(hs.srv.URL)
 		c.Jar.SetCookies(u, []*http.Cookie{{Name: "theme", Value: v, Path: "/"}})
 	}
-	pressed := func(body, value string) bool {
-		return regexp.MustCompile(`name="theme" value="` + value + `" aria-pressed="true"`).MatchString(body)
+	// buttons is the theme buttons on the page, as "class=value" pairs. The toggle
+	// renders one per system preference and CSS shows one, so what matters is
+	// that each carries the right value.
+	buttons := func(body string) []string {
+		var got []string
+		for _, m := range regexp.MustCompile(`<button type="submit" class="(sys-\w+)" name="theme" value="(\w+)"`).FindAllStringSubmatch(body, -1) {
+			got = append(got, m[1]+"="+m[2])
+		}
+		return got
+	}
+	want := map[string][]string{
+		"":      {"sys-light=dark", "sys-dark=light"},
+		"light": {"sys-light=dark", "sys-dark=system"},
+		"dark":  {"sys-light=system", "sys-dark=light"},
+	}
+	check := func(t *testing.T, name, state, body string) {
+		t.Helper()
+		if got := buttons(body); strings.Join(got, " ") != strings.Join(want[state], " ") {
+			t.Errorf("%s with cookie %q: buttons %v, want %v", name, state, got, want[state])
+		}
 	}
 
 	// Plain layout (sign-in) and app layout (home), each in every state.
@@ -371,9 +389,10 @@ func TestThemeRendering(t *testing.T) {
 		}
 		c := newClient()
 		_, body := hs.get(c, page.path)
-		if strings.Contains(body, "data-theme") || !pressed(body, "system") {
-			t.Errorf("%s without a cookie: forced theme or Auto not pressed", page.name)
+		if strings.Contains(body, "data-theme") {
+			t.Errorf("%s without a cookie: forced theme", page.name)
 		}
+		check(t, page.name, "", body)
 		if !strings.Contains(body, `action="/theme"`) || !regexp.MustCompile(`action="/theme"[\s\S]*?name="csrf_token"`).MatchString(body) {
 			t.Errorf("%s: no theme toggle with a CSRF field", page.name)
 		}
@@ -385,17 +404,19 @@ func TestThemeRendering(t *testing.T) {
 			c := newClient()
 			withCookie(c, v)
 			_, body := hs.get(c, page.path)
-			if !strings.Contains(body, `<html lang="en" data-theme="`+v+`">`) || !pressed(body, v) || pressed(body, "system") {
-				t.Errorf("%s with cookie %s: wrong theme or pressed button", page.name, v)
+			if !strings.Contains(body, `<html lang="en" data-theme="`+v+`">`) {
+				t.Errorf("%s with cookie %s: wrong theme", page.name, v)
 			}
+			check(t, page.name, v, body)
 		}
 
 		c = newClient()
 		withCookie(c, `"><script>`)
 		_, body = hs.get(c, page.path)
-		if strings.Contains(body, "data-theme") || strings.Contains(body, "<script>") || !pressed(body, "system") {
+		if strings.Contains(body, "data-theme") || strings.Contains(body, "<script>") {
 			t.Errorf("%s: a junk cookie was not ignored", page.name)
 		}
+		check(t, page.name, "", body)
 	}
 
 	// A re-rendered POST has no GET URL to go back to.

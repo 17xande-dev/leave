@@ -20,8 +20,10 @@ func themeFrom(r *http.Request) string {
 	return c.Value
 }
 
-// SetTheme is public, because the sign-in page has the switch too, but it is
-// still under the CSRF layer like every other form.
+// SetTheme is public, because the sign-in page has the toggle too, but it is
+// still under the CSRF layer like every other form. The toggle posts "light" or
+// "dark" to force a theme, or "system" when flipping lands back on what the
+// system already prefers, so the cookie is dropped and the page follows it again.
 func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad request.", http.StatusBadRequest)
