@@ -11,9 +11,9 @@ import (
 // embedded in the binary, so there is no CDN to allow -- and no template carries
 // a style="…" attribute or an on*= handler, so 'unsafe-inline' is never needed.
 //
-// connect-src is 'self' because htmx swaps are XHR: script-src covers loading
-// htmx, not letting it fetch, and without connect-src an hx-get renders fine,
-// passes every handler test and is refused by the browser.
+// connect-src is 'self' because htmx swaps are fetch() requests: script-src covers
+// loading htmx, not letting it fetch, and without connect-src an hx-get renders
+// fine, passes every handler test and is refused by the browser.
 const CSP = "default-src 'none'; style-src 'self'; script-src 'self'; " +
 	"connect-src 'self'; img-src 'self'; form-action 'self'; " +
 	"base-uri 'none'; frame-ancestors 'none'"

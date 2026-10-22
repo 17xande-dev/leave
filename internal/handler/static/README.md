@@ -7,21 +7,22 @@ no allowance beyond `'self'`.
 `.md` is deliberately absent from the content-type allowlist in `static.go`, so this
 file is embedded but not reachable over HTTP.
 
-## htmx 2.0.10
+## htmx 4.0.0
 
-- Source: `https://registry.npmjs.org/htmx.org/-/htmx.org-2.0.10.tgz`, `package/dist/htmx.min.js`
+- Source: `https://registry.npmjs.org/htmx.org/-/htmx.org-4.0.0.tgz`, `package/dist/htmx.min.js`
+  (the classic-script build; `htmx.esm.min.js` is the module build and is not used)
 - Licence: Zero-Clause BSD (`htmx.LICENSE`)
-- Size: 51 238 bytes
-- SHA-256: `71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de`
+- Size: 36 716 bytes
+- SHA-256: `e484d9171a9db30a39c8f16e3d709d4137f3211c659f8e6125816635033d593f`
 
 The bytes were checked against the npm tarball's published `integrity` hash
-(`sha512-kdeJe7ZVwaS6QMz/…`) rather than taken from a CDN on trust.
+(`sha512-T/171FUY93Kdfp8t…`) rather than taken from a CDN on trust.
 
 To upgrade, verify the same way — the point of vendoring is lost if the replacement
 arrives unchecked:
 
 ```sh
-V=2.0.11
+V=4.0.0   # pin it: the npm `latest` tag may still point at 2.x
 curl -sSO "https://registry.npmjs.org/htmx.org/-/htmx.org-$V.tgz"
 # compare sha512 of the tarball against .dist.integrity from
 #   https://registry.npmjs.org/htmx.org/$V
@@ -34,13 +35,15 @@ templates reference assets as `{{asset "htmx.min.js"}}`, which appends a hash of
 file's own contents to the URL, so replacing the file invalidates every cached copy on
 its own.
 
-## The htmx indicator rules live in styles.css
+## htmx 4 and the CSP
 
-htmx injects three `.htmx-indicator` rules as a `<style>` block as soon as it loads,
-which `style-src 'self'` blocks — silently, apart from a console warning, and it fails
-*open*: the rule that hides an indicator never applies, so a spinner sits there
-permanently visible.
+Nothing in `styles.css` or the `<head>` configures htmx. htmx 2 injected its
+`.htmx-indicator` rules as a `<style>` block, which `style-src 'self'` blocked, so
+the rules were copied into `styles.css` and the injection switched off. htmx 4
+installs the same rules as a constructable stylesheet (`adoptedStyleSheets`), which
+`style-src` does not govern, so the copy and the `htmx-config` meta tag are gone.
+If a page ever uses `hx-indicator`, no CSS is needed.
 
-So the injection is turned off (`{"includeIndicatorStyles":false}` in the
-`htmx-config` meta tag in `templates/partials/document.html`) and the rules live at the
-bottom of `styles.css` instead. The two go together: keep both, or drop both.
+htmx 4 sends requests with `fetch()` (still governed by `connect-src 'self'`), and it
+swaps 4xx/5xx responses by default (only 204 and 304 are skipped), which is what the
+app's validation messages need.
