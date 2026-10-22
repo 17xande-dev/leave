@@ -368,10 +368,11 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
 	case opt.mandatory:
 	case opt.record:
-		// Only what has happened: future leave must go through an application,
-		// or recording would bypass approval and coverage.
-		if start.After(today) {
-			errs["start"] = "Only leave that has already started can be recorded; future leave goes through an application."
+		// Only what has happened: future days must go through an application,
+		// or recording would bypass approval and coverage. The last day counts,
+		// so leave still running cannot be recorded until it is over.
+		if end.After(today) {
+			errs["end"] = MsgRecordFuture
 		}
 	case start.Before(today.AddDate(0, 0, -t.BackdateDays)):
 		if t.BackdateDays == 0 {

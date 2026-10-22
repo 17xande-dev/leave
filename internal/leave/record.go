@@ -8,17 +8,31 @@ import (
 	"github.com/17xande-dev/leave/internal/users"
 )
 
+// MsgRecordFuture is the refusal for leave whose last day is still to come.
+const MsgRecordFuture = "Only leave that has already happened can be recorded; future days go through an application."
+
+// MsgReassignOwner and the like are the admin refusals the pages and the
+// assistant both name; the service returns them as FieldErrors.
+const (
+	MsgReassignOwner   = "Not the person whose request it is."
+	MsgReassignDormant = "Choose someone who can currently sign in."
+	MsgUnrecordOwn     = "Another admin removes leave recorded for you."
+	MsgUnrecordGone    = "That recorded leave was already removed."
+	MsgRecordOwn       = "Another admin records your own leave."
+	MsgAdjustOwn       = "Another admin adjusts your own balance."
+)
+
 // RecordLeave lets an admin write down leave a person has already taken (it
-// must have started), so it shows in their history, the team view, overlap
+// must be over by today), so it shows in their history, the team view, overlap
 // checks and the calendar like any approved request.
 //
 // Days are counted exactly as for a request (quote does the work). What is
 // relaxed is what makes no sense after the fact: the backdating limit, the
 // department and team coverage limits, the balance -- recording what happened
 // may take it below zero, which is flagged on the request (AllowNegative) --
-// and a type since retired or a restricted-day rule since changed. Leave that
-// has not started is refused: it would sidestep approval and coverage. The
-// person's own overlapping leave still refuses, and a reason is required.
+// and a type since retired or a restricted-day rule since changed. Leave whose
+// last day is still to come is refused: it would sidestep approval and
+// coverage. The person's own overlapping leave still refuses, and a reason is required.
 //
 // The request is stored approved, with the admin as approver and decider. The
 // requests table forbids approver = owner, so nobody records their own leave,
@@ -28,7 +42,7 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 		return Request{}, ErrNotAllowed
 	}
 	if admin.ID == userID {
-		return Request{}, FieldErrors{"person": "Another admin records your own leave."}
+		return Request{}, FieldErrors{"person": MsgRecordOwn}
 	}
 	u, err := s.users.ByID(ctx, userID)
 	if err != nil {
@@ -66,7 +80,7 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 // Unrecord lets an admin remove leave that was recorded (not any approved
 // leave: ordinary leave is cancelled through the approval flow). The person's
 // own cancellation flow cannot help here, because recorded leave has usually
-// started already. The days return to the balance and the calendar event goes;
+// started already. It no longer counts against the balance and the calendar event goes;
 // who removed it, and when, stays on the row.
 //
 // The guard is in the UPDATE itself: recorded_by_id is set only by RecordLeave,
@@ -81,8 +95,14 @@ func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Req
 		if err != nil {
 			return err
 		}
-		if r.UserID == admin.ID {
+		if !r.IsRecorded() {
 			return ErrNotAllowed
+		}
+		if r.UserID == admin.ID {
+			return FieldErrors{"person": MsgUnrecordOwn}
+		}
+		if r.RemovedByID != 0 {
+			return FieldErrors{"request": MsgUnrecordGone}
 		}
 		now := stampNow(s.Now())
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = 'cancelled', removed_by_id = ?, removed_at = ?

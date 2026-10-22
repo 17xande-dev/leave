@@ -195,7 +195,7 @@ var notices = map[string]string{
 	"reassigned":         "Request reassigned.",
 	"recorded":           "Leave recorded. It is approved, and they have been emailed.",
 	"recorded-negative":  "Leave recorded, and it takes their balance below zero. They have been emailed.",
-	"unrecorded":         "Recorded leave removed. The days are back in the balance.",
+	"unrecorded":         "Recorded leave removed. It no longer counts against their balance.",
 	"holidays-generated": "Public holidays generated.",
 	"retried":            "Queued for another attempt.",
 	"shutdown-created":   "Shutdown created, and everyone has been sent their pre-filled requests.",
@@ -210,6 +210,10 @@ var notices = map[string]string{
 	"team-saved":         "Team limit saved.",
 	"team-default-saved": "Default team limit saved.",
 	"app-revoked":        "App disconnected. It can no longer act for you.",
+	"unrecord-own":       "Another admin removes leave recorded for you.",
+	"unrecord-gone":      "That recorded leave was already removed.",
+	"reassign-owner":     "That is the person whose request it is. Choose someone else.",
+	"reassign-dormant":   "Choose someone who can currently sign in.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }
 

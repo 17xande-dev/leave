@@ -118,7 +118,7 @@ func TestSubmitDraftFollowsTheChain(t *testing.T) {
 // blocking the submit.
 func TestShutdownMayTakeBalanceNegative(t *testing.T) {
 	f := newFixture(t)
-	f.svc.AddAdjustment(f.ctx, f.people["hr"].ID, Adjustment{UserID: f.people["staff"].ID,
+	f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
 		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: -12, Reason: "taken earlier"})
 	f.december(false)
 	if _, err := f.svc.SubmitDraft(f.ctx, f.people["staff"], f.drafts("staff")[0].ID, ""); err != nil {

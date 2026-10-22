@@ -110,8 +110,8 @@
 <form method="post" action="/admin/requests/{{.Request.ID}}/unrecord" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Remove this recorded leave <small>(admin)</small></h2>
-  <p class="hint">Recorded leave has no approver to cancel it. Removing it returns the days to the balance, takes it off the calendar and emails {{.Request.UserName}}.</p>
-  <div class="actions"><button type="submit" class="quiet">Remove this recorded leave and return the days</button></div>
+  <p class="hint">Recorded leave has no approver to cancel it. Removing it means it no longer counts against their balance, takes it off the calendar and emails {{.Request.UserName}}.</p>
+  <div class="actions"><button type="submit" class="quiet">Remove this recorded leave</button></div>
 </form>
 {{end}}
 

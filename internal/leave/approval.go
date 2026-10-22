@@ -480,11 +480,16 @@ func (s *Service) Reassign(ctx context.Context, admin users.User, id, approverID
 	if approverID != 0 {
 		a, err := s.users.ByID(ctx, approverID)
 		if err != nil || a.Disabled {
-			return Request{}, FieldErrors{"approver": "Choose someone who can currently sign in."}
+			return Request{}, FieldErrors{"approver": MsgReassignDormant}
 		}
 	}
 	var out Request
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		if r, err := s.get(ctx, tx, id); err != nil {
+			return err
+		} else if approverID != 0 && r.UserID == approverID && r.Status == StatusPending {
+			return FieldErrors{"approver": MsgReassignOwner}
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET approver_id = ?
 			WHERE id = ? AND status = 'pending' AND user_id <> ?`, nullID(approverID), id, approverID)
 		if err != nil {

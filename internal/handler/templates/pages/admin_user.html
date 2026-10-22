@@ -83,6 +83,7 @@
     <input id="reason" name="reason" value="{{.Adj.Reason}}">
     {{template "err" index .Errors "reason"}}
   </div>
+  {{template "err" index .Errors "person"}}
   <div class="actions"><button type="submit">Add adjustment</button></div>
 </form>
 
@@ -99,7 +100,7 @@
 <form method="post" action="/admin/users/{{.User.ID}}/leave#record" class="panel" id="record">
   {{template "csrf" $.CSRF}}
   <h2>Record leave</h2>
-  <p class="hint">For leave {{.User.Name}} has already started or taken, such as leave from before the system went live. It is approved at once and counted like any request, on any past date and for a retired type if need be. Department limits do not apply and the balance may go below zero, but it cannot overlap their other leave. Future leave goes through an application. They are emailed.</p>
+  <p class="hint">For leave {{.User.Name}} has already taken, such as leave from before the system went live: its last day must be today or earlier. It is approved at once and counted like any request, on any past date and for a retired type if need be. Department limits and the restricted-day rule do not apply and the balance may go below zero, but it cannot overlap their other leave. Future days go through an application. They are emailed.</p>
   {{template "err" index .RecErrors "person"}}
   <div class="field">
     <label for="rec-type">Type of leave</label>

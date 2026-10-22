@@ -56,17 +56,17 @@ func TestRecordLeaveRules(t *testing.T) {
 	if _, err := f.record("hr", "staff", "annual", "2026-01-01", "2026-12-31", "x"); !fieldErr(err, "end") {
 		t.Fatalf("over the max span: %v", err)
 	}
-	// Leave that has not started would bypass approval and coverage: it goes
-	// through an application. Starting today is fine (today is 5 October).
-	if _, err := f.record("hr", "staff", "annual", "2026-12-07", "2026-12-07", "x"); !fieldErr(err, "start") ||
-		!strings.Contains(err.(FieldErrors)["start"], "already started") {
-		t.Fatalf("future: %v", err)
-	}
-	if _, err := f.record("hr", "staff", "annual", "2026-10-06", "2026-10-06", "x"); !fieldErr(err, "start") {
-		t.Fatalf("tomorrow: %v", err)
+	// Days still to come would bypass approval and coverage: they go through an
+	// application, so the last day must not be after today (5 October), even
+	// when the leave began earlier.
+	for _, c := range [][2]string{{"2026-12-07", "2026-12-07"}, {"2026-10-06", "2026-10-06"}, {"2026-10-05", "2026-10-06"}} {
+		if _, err := f.record("hr", "staff", "annual", c[0], c[1], "x"); !fieldErr(err, "end") ||
+			err.(FieldErrors)["end"] != MsgRecordFuture {
+			t.Fatalf("%v: %v", c, err)
+		}
 	}
 	if _, err := f.record("hr", "staff", "annual", "2026-10-05", "2026-10-05", "x"); err != nil {
-		t.Fatalf("today: %v", err)
+		t.Fatalf("ending today: %v", err)
 	}
 
 	// A reason is required, for a type that does not ask for one too.
@@ -164,7 +164,8 @@ func TestUnrecord(t *testing.T) {
 	if len(f.events) != 1 || f.events[0].Kind != EventRevoked {
 		t.Fatalf("events = %+v", f.events)
 	}
-	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], past.ID); !errors.Is(err, ErrNotAllowed) {
+	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], past.ID); !fieldErr(err, "request") ||
+		err.(FieldErrors)["request"] != MsgUnrecordGone {
 		t.Fatalf("removing twice: %v", err)
 	}
 	if got := f.available("staff", "annual"); got != 14 { // only the ordinary day remains
@@ -255,5 +256,30 @@ func TestRecordWeekendOff(t *testing.T) {
 	}
 	if got := f.available("staff", "weekend"); got != 3 {
 		t.Fatalf("weekends left = %d, want 3", got)
+	}
+}
+
+// Nobody adjusts their own balance, and only an admin adjusts anyone's: the same
+// rule as recording leave.
+func TestAdjustmentIsAnotherAdminsJob(t *testing.T) {
+	f := newFixture(t)
+	adj := func(who string) Adjustment {
+		return Adjustment{UserID: f.people[who].ID, TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: 1, Reason: "x"}
+	}
+	if err := f.svc.AddAdjustment(f.ctx, f.people["hr"], adj("hr")); !fieldErr(err, "person") ||
+		err.(FieldErrors)["person"] != MsgAdjustOwn {
+		t.Fatalf("own balance: %v", err)
+	}
+	if err := f.svc.AddAdjustment(f.ctx, f.people["staff"], adj("staff")); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("non-admin: %v", err)
+	}
+	if err := f.svc.AddAdjustment(f.ctx, f.people["head"], adj("staff")); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("non-admin on someone else: %v", err)
+	}
+	if as, _ := f.svc.Adjustments(f.ctx, f.people["hr"].ID); len(as) != 0 {
+		t.Fatalf("adjustments = %v", as)
+	}
+	if err := f.svc.AddAdjustment(f.ctx, f.people["hr"], adj("staff")); err != nil {
+		t.Fatal(err)
 	}
 }

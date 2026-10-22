@@ -100,6 +100,32 @@ func TestReassign(t *testing.T) {
 	if _, body := hs.get(hs.signIn("pastor"), "/approvals"); !strings.Contains(body, "Sam Staff") {
 		t.Fatal("reassigned request not in the new approver's queue")
 	}
+	// Not to the person whose request it is: a notice that says so.
+	res, _ = hs.post(hr, "/admin/requests"+strings.TrimPrefix(path, "/leave")+"/reassign", url.Values{"approver": {itoa(hs.staffID("staff1"))}})
+	if !strings.HasSuffix(res.Header.Get("Location"), "?notice=reassign-owner") {
+		t.Fatalf("reassign to the owner: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	if _, body := hs.get(hr, res.Header.Get("Location")); !strings.Contains(body, "Choose someone else") {
+		t.Fatal("the notice is not shown")
+	}
+}
+
+// An admin does not adjust their own balance; the form says so, and a
+// non-admin is refused outright.
+func TestAdminCannotAdjustOwnBalance(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	form := url.Values{"target": {hs.typeID("annual") + ":2026-01-01"}, "days": {"2"}, "reason": {"x"}}
+	res, body := hs.post(hr, "/admin/users/"+itoa(hs.staffID("hr"))+"/adjustments", form)
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "Another admin adjusts your own balance.") {
+		t.Fatalf("own balance: %d\n%s", res.StatusCode, body)
+	}
+	if res, _ = hs.post(hr, "/admin/users/"+itoa(hs.staffID("staff1"))+"/adjustments", form); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("someone else's: %d", res.StatusCode)
+	}
+	if res, _ = hs.post(hs.signIn("staff1"), "/admin/users/"+itoa(hs.staffID("staff1"))+"/adjustments", form); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("staff: %d", res.StatusCode)
+	}
 }
 
 func TestTypeAndHolidayAdmin(t *testing.T) {
@@ -362,7 +388,7 @@ func TestAdminRecordLeave(t *testing.T) {
 	}
 	// Leave that has not started goes through an application.
 	res, body = hs.post(hr, page+"/leave", form("2026-12-07", "2026-12-07", "x"))
-	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already started") {
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already happened") {
 		t.Fatalf("future: %d\n%s", res.StatusCode, body)
 	}
 	// An unknown person is a 404.
@@ -389,7 +415,7 @@ func TestAdminUnrecord(t *testing.T) {
 	}
 	_, body = hs.get(hr, m[1])
 	if !strings.Contains(body, "Recorded by") || !strings.Contains(body, "Why it was recorded") ||
-		!strings.Contains(body, "Remove this recorded leave and return the days") || strings.Contains(body, "<th>Approver</th>") {
+		!strings.Contains(body, "Remove this recorded leave</button>") || strings.Contains(body, "<th>Approver</th>") {
 		t.Fatalf("request page for an admin:\n%s", body)
 	}
 	// The owner sees who recorded it but has no remove button.
@@ -411,7 +437,7 @@ func TestAdminUnrecord(t *testing.T) {
 		!strings.Contains(body, "cancelled") || strings.Contains(body, "Remove this recorded leave") {
 		t.Fatalf("after removal:\n%s", body)
 	}
-	if res, _ = hs.post(hr, "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil); res.Header.Get("Location") != m[1]+"?notice=not-possible" {
+	if res, _ = hs.post(hr, "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil); res.Header.Get("Location") != m[1]+"?notice=unrecord-gone" {
 		t.Fatalf("removing twice: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
 }

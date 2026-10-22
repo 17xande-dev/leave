@@ -349,7 +349,7 @@ func TestHookFailureRollsBack(t *testing.T) {
 
 func TestAdjustmentsAndSickCycle(t *testing.T) {
 	f := newFixture(t)
-	err := f.svc.AddAdjustment(f.ctx, f.people["hr"].ID, Adjustment{UserID: f.people["staff"].ID,
+	err := f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
 		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: 5, Reason: "carry-over from 2025"})
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestAdjustmentsAndSickCycle(t *testing.T) {
 		t.Fatalf("available with carry-over = %d, want 20", got)
 	}
 	// The sick cycle started 2025-01-01, so an adjustment dated 2026 is refused.
-	err = f.svc.AddAdjustment(f.ctx, f.people["hr"].ID, Adjustment{UserID: f.people["staff"].ID,
+	err = f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
 		TypeID: f.types["sick"].ID, CycleStart: "2026-01-01", Days: 1, Reason: "x"})
 	if !fieldErr(err, "cycle") {
 		t.Fatalf("adjustment to a non-cycle start: %v", err)

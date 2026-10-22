@@ -196,7 +196,17 @@ func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
 	_, err = h.leave.Reassign(r.Context(), currentUser(r), id, approver)
 	var fe leave.FieldErrors
 	switch {
-	case errors.As(err, &fe), errors.Is(err, leave.ErrNotAllowed):
+	case errors.As(err, &fe):
+		notice := "not-possible"
+		switch fe["approver"] {
+		case leave.MsgReassignOwner:
+			notice = "reassign-owner"
+		case leave.MsgReassignDormant:
+			notice = "reassign-dormant"
+		}
+		http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", id, notice), http.StatusSeeOther)
+		return
+	case errors.Is(err, leave.ErrNotAllowed):
 		notPossible(w, r, id)
 		return
 	case err != nil:
@@ -400,7 +410,7 @@ func (h *Handler) AdminAddAdjustment(w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(strings.TrimSpace(r.PostFormValue("days")))
 	a := leave.Adjustment{UserID: id, TypeID: typeID, CycleStart: cycle,
 		Days: days, Reason: r.PostFormValue("reason")}
-	err := h.leave.AddAdjustment(r.Context(), currentUser(r).ID, a)
+	err := h.leave.AddAdjustment(r.Context(), currentUser(r), a)
 	var fe leave.FieldErrors
 	if errors.As(err, &fe) {
 		d, derr := h.adminUserData(r, id)
@@ -419,8 +429,7 @@ func (h *Handler) AdminAddAdjustment(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=saved", id), http.StatusSeeOther)
 }
 
-// AdminRecordLeave records leave a person already took, or agreed off the
-// system. See leave.Service.RecordLeave for what it relaxes.
+// AdminRecordLeave records leave a person already took. See leave.Service.RecordLeave for what it relaxes.
 func (h *Handler) AdminRecordLeave(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
@@ -464,12 +473,24 @@ func (h *Handler) AdminUnrecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, err := h.leave.Unrecord(r.Context(), currentUser(r), id)
+	var fe leave.FieldErrors
 	switch {
 	case errors.Is(err, leave.ErrNotFound):
 		http.NotFound(w, r)
 		return
 	case errors.Is(err, leave.ErrNotAllowed):
 		notPossible(w, r, id)
+		return
+	case errors.As(err, &fe):
+		// The same words the assistant is given, from the fixed notice map.
+		notice := "not-possible"
+		switch {
+		case fe["person"] != "":
+			notice = "unrecord-own"
+		case fe["request"] != "":
+			notice = "unrecord-gone"
+		}
+		http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", id, notice), http.StatusSeeOther)
 		return
 	case err != nil:
 		h.serverError(w, r, err)

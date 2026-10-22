@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/17xande-dev/leave/internal/users"
 )
 
 // Balance is one leave type's position in one cycle.
@@ -81,7 +83,15 @@ type Adjustment struct {
 	CreatedAt  string
 }
 
-func (s *Service) AddAdjustment(ctx context.Context, by int64, a Adjustment) error {
+// AddAdjustment records a correction to a balance. Only an admin may, and not
+// on their own balance: another admin does that, as for recorded leave.
+func (s *Service) AddAdjustment(ctx context.Context, admin users.User, a Adjustment) error {
+	if !admin.Admin || admin.Disabled {
+		return ErrNotAllowed
+	}
+	if a.UserID == admin.ID {
+		return FieldErrors{"person": MsgAdjustOwn}
+	}
 	errs := FieldErrors{}
 	t, err := s.Type(ctx, a.TypeID)
 	if err != nil {
@@ -108,7 +118,7 @@ func (s *Service) AddAdjustment(ctx context.Context, by int64, a Adjustment) err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO balance_adjustments
 		(user_id, type_id, cycle_start, days, reason, by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		a.UserID, a.TypeID, a.CycleStart, a.Days, strings.TrimSpace(a.Reason), by, stampNow(s.Now()))
+		a.UserID, a.TypeID, a.CycleStart, a.Days, strings.TrimSpace(a.Reason), admin.ID, stampNow(s.Now()))
 	return err
 }
 
