@@ -59,6 +59,12 @@ const (
 	// EventNegativeGranted: HR allowed it; the request is a draft for the
 	// person to submit.
 	EventNegativeGranted EventKind = "negative_granted"
+	// EventRecorded: an admin recorded leave the person already took, or
+	// agreed off the system. It is approved from the start.
+	EventRecorded EventKind = "recorded"
+	// EventRevoked: an admin removed leave they had recorded. Request is the
+	// now-cancelled leave.
+	EventRevoked EventKind = "revoked"
 )
 
 type Event struct {

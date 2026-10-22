@@ -60,6 +60,16 @@ type Request struct {
 	ShutdownName string
 }
 
+// RecordedPrefix starts the decision note of leave an admin recorded.
+const RecordedPrefix = "Recorded by "
+
+// IsRecorded reports whether an admin recorded r (see RecordLeave) rather than
+// it going through approval. The decision note is the marker: it needs no
+// schema of its own, and it is what the request page shows.
+func (r Request) IsRecorded() bool {
+	return r.Kind == KindLeave && r.Status == StatusApproved && strings.HasPrefix(r.DecisionNote, RecordedPrefix)
+}
+
 func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 
 // IsShutdown reports whether r was generated for a company shutdown: its type
@@ -287,6 +297,10 @@ type quoteOpts struct {
 	override      bool
 	allowNegative bool
 	excludeID     int64
+	// record is an admin writing down leave already taken or agreed off the
+	// system: any date, no coverage limits, any balance, but a reason is
+	// always required and the overlap check still protects the person.
+	record bool
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -339,7 +353,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
-	case opt.mandatory:
+	case opt.mandatory || opt.record:
 	case start.Before(today.AddDate(0, 0, -t.BackdateDays)):
 		if t.BackdateDays == 0 {
 			errs["start"] = "Leave cannot start in the past."
@@ -348,7 +362,9 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 				t.Name, t.BackdateDays, today.AddDate(0, 0, -t.BackdateDays).Format("Mon 2 Jan 2006"))
 		}
 	}
-	if t.RequiresNote && strings.TrimSpace(in.Note) == "" {
+	if opt.record && strings.TrimSpace(in.Note) == "" {
+		errs["note"] = "Say why this is being recorded, for whoever reads it later."
+	} else if t.RequiresNote && strings.TrimSpace(in.Note) == "" {
 		errs["note"] = "Please add a short note for " + strings.ToLower(t.Name) + "."
 	}
 	if len(errs) > 0 {
@@ -387,9 +403,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 	if overlap > 0 {
 		errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
+		if opt.record {
+			errs["start"] = "They already have leave booked, waiting for approval or waiting to be submitted on some of these days."
+		}
 	}
 
-	if !opt.mandatory {
+	if !opt.mandatory && !opt.record {
 		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, start, end, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
@@ -411,7 +430,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		if after < 0 {
 			qt.Shortfall = -after
 		}
-		if after < 0 && !opt.mandatory && !opt.allowNegative {
+		if after < 0 && !opt.mandatory && !opt.record && !opt.allowNegative {
 			errs["end"] = fmt.Sprintf("This is %d %s, but you have %d left for this cycle.",
 				qt.Days, plural(qt.Days, "day", "days"), *avail)
 		}

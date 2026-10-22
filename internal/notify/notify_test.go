@@ -391,3 +391,48 @@ func TestEmailButtonIsATableCell(t *testing.T) {
 		t.Fatalf("content cell lacks its own font-family:\n%s", m.HTML)
 	}
 }
+
+// Recorded leave is approved from the start: the person is told, nobody is
+// asked to approve it, and the calendar gets an event; removing it undoes both.
+func TestRecordedLeaveNotifications(t *testing.T) {
+	e := setup(t)
+	r, err := e.svc.RecordLeave(e.ctx, e.people["hr"], e.people["staff"].ID,
+		leave.Input{TypeID: e.annual, Start: "2026-06-15", End: "2026-06-19", Note: "Taken before go-live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	if len(jobs) != 2 || jobs[0].kind != "email" || jobs[1].kind != "calendar_create" {
+		t.Fatalf("record jobs = %+v", jobs)
+	}
+	m := email(t, jobs[0])
+	if m.To[0] != "staff@x.test" || !strings.Contains(m.Subject, "Leave recorded for you") ||
+		!strings.Contains(m.Text, "Hannah HR recorded annual leave for you") || !strings.Contains(m.Text, "4 working days") ||
+		!strings.Contains(m.Text, "Taken before go-live") || strings.Contains(m.Text, "below zero") ||
+		!strings.Contains(m.Text, "https://leave.test/leave/"+itoa(r.ID)) {
+		t.Fatalf("recorded email:\n%s\n%s", m.Subject, m.Text)
+	}
+
+	// Going below zero is said in the email.
+	r2, err := e.svc.RecordLeave(e.ctx, e.people["hr"], e.people["staff"].ID,
+		leave.Input{TypeID: e.annual, Start: "2026-08-03", End: "2026-08-31", Note: "x"})
+	if err != nil || !r2.AllowNegative {
+		t.Fatalf("record: %+v, %v", r2, err)
+	}
+	if m := email(t, e.drain(t)[0]); !strings.Contains(m.Text, "below zero") {
+		t.Fatalf("negative recorded email:\n%s", m.Text)
+	}
+
+	if _, err := e.svc.Unrecord(e.ctx, e.people["hr"], r.ID); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	want := `{"request_id":` + itoa(r.ID) + `}`
+	if len(jobs) != 2 || jobs[1].kind != "calendar_delete" || jobs[1].payload != want {
+		t.Fatalf("unrecord jobs = %+v", jobs)
+	}
+	if m := email(t, jobs[0]); m.To[0] != "staff@x.test" || !strings.Contains(m.Text, "Hannah HR removed") ||
+		!strings.Contains(m.Text, "back in your balance") {
+		t.Fatalf("revoked email:\n%s", m.Text)
+	}
+}

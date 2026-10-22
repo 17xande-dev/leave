@@ -1,0 +1,4 @@
+{{define "subject"}}Recorded leave removed: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Actor}} removed the {{lower .Request.TypeName}} that was recorded for you for {{.Dates}}. The {{.Days}} are back in your balance.{{end}}

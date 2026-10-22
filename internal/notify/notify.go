@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -92,6 +92,24 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 	case leave.EventNegativeGranted:
 		if err := n.send(ctx, tx, "granted", []recipient{{r.UserName, r.UserEmail}}, r, false, "Submit your leave", "",
 			func(d *msgData) { d.Note = e.Note }); err != nil {
+			return err
+		}
+	case leave.EventRecorded:
+		// Approved from the start: no approver to tell, but the person hears
+		// of it, and it goes on the shared calendar like approved leave.
+		if err := n.send(ctx, tx, "recorded", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the leave", "",
+			func(d *msgData) { d.Shortfall = daysOf(e.Shortfall, r.TypeUnit) }); err != nil {
+			return err
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
+			return err
+		}
+	case leave.EventRevoked:
+		if err := n.send(ctx, tx, "revoked", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the leave", "",
+			func(d *msgData) { d.Actor = e.Actor.Name }); err != nil {
+			return err
+		}
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{r.ID}); err != nil {
 			return err
 		}
 	case leave.EventWithdrawn:
@@ -164,6 +182,8 @@ type msgData struct {
 	// Shortfall is the days below zero asked for ("3 working days").
 	Shortfall string
 	Note      string
+	// Actor is who made the change, where it is not on the request.
+	Actor string
 }
 
 // special fills in what a special-permission message says: why, and who has

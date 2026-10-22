@@ -1,0 +1,10 @@
+{{define "subject"}}Leave recorded for you: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Request.DecidedBy}} recorded {{lower .Request.TypeName}} for you for {{.Dates}} ({{.Days}}). It is approved and counts against your balance like any other leave.
+{{with .Request.Note}}
+Their note: {{.}}
+{{end}}{{if .Request.AllowNegative}}
+This takes your balance for this leave type {{.Shortfall}} below zero.
+{{end}}
+If this does not look right, speak to {{.Request.DecidedBy}}.{{end}}
