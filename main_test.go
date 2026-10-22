@@ -78,7 +78,8 @@ func TestCSRFExemptions(t *testing.T) {
 	}
 	// Everything a browser form posts keeps the check, the consent form first of all.
 	for _, p := range []string{"/oauth/authorize", "/oauth/authorize/", "/oauth/tokens", "/mcp/x", "/login", "/logout",
-		"/leave", "/leave/1/decide", "/apps/abc/revoke", "/admin/settings"} {
+		"/leave", "/leave/1/decide", "/apps/abc/revoke", "/admin/settings",
+		"/admin/users/1/leave", "/admin/requests/1/unrecord"} {
 		if code := post(p); code != http.StatusForbidden {
 			t.Errorf("POST %s without a token: %d, want 403", p, code)
 		}

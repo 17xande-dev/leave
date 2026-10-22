@@ -292,3 +292,112 @@ func TestSettingsPageHasNoSickBackdate(t *testing.T) {
 		t.Error("the settings page lost the sick-cycle field it should keep")
 	}
 }
+
+func (hs *harness) staffID(username string) int64 {
+	hs.t.Helper()
+	u, err := hs.h.users.ByUsername(context.Background(), username)
+	if err != nil {
+		hs.t.Fatal(err)
+	}
+	return u.ID
+}
+
+func TestAdminRecordLeave(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	staffID := hs.staffID("staff1")
+	page := "/admin/users/" + itoa(staffID)
+	form := func(start, end, note string) url.Values {
+		return url.Values{"type": {hs.typeID("annual")}, "start": {start}, "end": {end}, "note": {note}}
+	}
+
+	// The form is on the person's page, with the date picker's scripts.
+	_, body := hs.get(hr, page)
+	for _, want := range []string{`action="` + page + `/leave"`, `<date-range-input`, "date-range-input.js", `name="note"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("admin page lacks %q", want)
+		}
+	}
+
+	// A missing reason re-renders with what was typed (422), and the other
+	// form's errors stay clear.
+	res, body := hs.post(hr, page+"/leave", form("2026-06-15", "2026-06-19", ""))
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "Say why this is being recorded") ||
+		!strings.Contains(body, `value="2026-06-15"`) {
+		t.Fatalf("no note: %d\n%s", res.StatusCode, body)
+	}
+
+	// 120 days before the pinned "today" works; redirect with a notice.
+	res, _ = hs.post(hr, page+"/leave", form("2026-06-15", "2026-06-19", "Taken before go-live"))
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != page+"?notice=recorded" {
+		t.Fatalf("record: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	_, body = hs.get(hr, page+"?notice=recorded")
+	if !strings.Contains(body, "Leave recorded.") || !strings.Contains(body, "Mon 15 Jun") || !strings.Contains(body, "approved") {
+		t.Fatalf("page after recording:\n%s", body)
+	}
+
+	// The person sees it on their own page, and the request page says who.
+	_, body = hs.get(hs.signIn("staff1"), "/")
+	if !strings.Contains(body, "approved") {
+		t.Fatalf("staff home lacks the recorded leave:\n%s", body)
+	}
+
+	// Overlap is refused with a message.
+	res, body = hs.post(hr, page+"/leave", form("2026-06-17", "2026-06-17", "again"))
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already have leave booked") {
+		t.Fatalf("overlap: %d\n%s", res.StatusCode, body)
+	}
+
+	// Nobody records their own leave.
+	res, body = hs.post(hr, "/admin/users/"+itoa(hs.staffID("hr"))+"/leave", form("2026-06-22", "2026-06-22", "x"))
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "Another admin records your own leave.") {
+		t.Fatalf("self: %d\n%s", res.StatusCode, body)
+	}
+	// An unknown person is a 404.
+	if res, _ = hs.post(hr, "/admin/users/9999/leave", form("2026-06-22", "2026-06-22", "x")); res.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown person: %d", res.StatusCode)
+	}
+}
+
+func TestAdminUnrecord(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	staffID := hs.staffID("staff1")
+	page := "/admin/users/" + itoa(staffID)
+	res, _ := hs.post(hr, page+"/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-06-15"},
+		"end": {"2026-06-19"}, "note": {"x"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("record: %d", res.StatusCode)
+	}
+	// Find the request page from the admin page.
+	_, body := hs.get(hr, page)
+	m := regexp.MustCompile(`href="(/leave/\d+)"`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no request link:\n%s", body)
+	}
+	_, body = hs.get(hr, m[1])
+	if !strings.Contains(body, "Recorded by") || !strings.Contains(body, "Remove recorded leave") {
+		t.Fatalf("request page for an admin:\n%s", body)
+	}
+	// The owner sees who recorded it but has no remove button.
+	_, body = hs.get(hs.signIn("staff1"), m[1])
+	if !strings.Contains(body, "Recorded by") || strings.Contains(body, "Remove recorded leave") {
+		t.Fatalf("request page for the owner:\n%s", body)
+	}
+	res, _ = hs.post(hs.signIn("staff1"), "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("staff removing: %d", res.StatusCode)
+	}
+	res, _ = hs.post(hr, "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil)
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != page+"?notice=unrecorded" {
+		t.Fatalf("unrecord: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	_, body = hs.get(hr, m[1])
+	if !strings.Contains(body, "cancelled") {
+		t.Fatalf("after removal:\n%s", body)
+	}
+	if res, _ = hs.post(hr, "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil); res.Header.Get("Location") != m[1]+"?notice=not-possible" {
+		t.Fatalf("removing twice: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+}

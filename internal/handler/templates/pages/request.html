@@ -11,8 +11,10 @@
   <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}</td></tr>
   {{with .Note}}<tr><th>Note</th><td>{{.}}</td></tr>{{end}}
   <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
+  {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.DecidedBy}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
+  {{else}}
   {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}
-  {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}
+  {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}{{end}}
 </table>
 {{end}}
 
@@ -100,6 +102,15 @@
 <form method="post" action="/leave/{{.Request.ID}}/withdraw" class="actions">
   {{template "csrf" $.CSRF}}
   <button type="submit" class="quiet">Withdraw this request</button>
+</form>
+{{end}}
+
+{{if .CanUnrecord}}
+<form method="post" action="/admin/requests/{{.Request.ID}}/unrecord" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Remove this recorded leave <small>(admin)</small></h2>
+  <p class="hint">Recorded leave has no approver to cancel it. Removing it returns the days to the balance, takes it off the calendar and emails {{.Request.UserName}}.</p>
+  <div class="actions"><button type="submit" class="quiet">Remove recorded leave</button></div>
 </form>
 {{end}}
 

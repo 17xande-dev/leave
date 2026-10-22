@@ -1,3 +1,7 @@
+{{define "head"}}
+<script type="module" src="{{asset "cally.js"}}"></script>
+<script type="module" src="{{asset "date-range-input.js"}}"></script>
+{{end}}
 {{define "content"}}
 {{template "adminnav"}}
 {{with .Data}}
@@ -91,6 +95,45 @@
 </table>
 </div>
 {{end}}
+
+<form method="post" action="/admin/users/{{.User.ID}}/leave" class="panel" id="record">
+  {{template "csrf" $.CSRF}}
+  <h2>Record leave</h2>
+  <p class="hint">For leave {{.User.Name}} has already taken, or agreed off the system. It is approved at once, counted like any request, and may be on any date. Department limits do not apply and the balance may go below zero, but it cannot overlap their other leave. They are emailed.</p>
+  {{template "err" index .RecErrors "person"}}
+  <div class="field">
+    <label for="rec-type">Type of leave</label>
+    <select id="rec-type" name="type" required>
+      <option value="">Choose…</option>
+      {{range .Types}}<option value="{{.ID}}"{{if eq .ID $.Data.Rec.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    {{template "err" index .RecErrors "type"}}
+  </div>
+  <div class="field">
+    <date-range-input label="Dates" start-name="start" end-name="end" required
+        months="2" first-day-of-week="1" with-clear locale="en-GB"
+        {{- if and .Rec.Start .Rec.End}} value="{{.Rec.Start}}/{{.Rec.End}}"{{end}}>
+      <div class="field-row">
+        <div class="field">
+          <label for="rec-start">First day</label>
+          <input type="date" id="rec-start" name="start" value="{{.Rec.Start}}" required>
+        </div>
+        <div class="field">
+          <label for="rec-end">Last day</label>
+          <input type="date" id="rec-end" name="end" value="{{.Rec.End}}" required>
+        </div>
+      </div>
+    </date-range-input>
+    {{template "err" index .RecErrors "start"}}
+    {{template "err" index .RecErrors "end"}}
+  </div>
+  <div class="field">
+    <label for="rec-note">Why it is being recorded</label>
+    <textarea id="rec-note" name="note" rows="2" required>{{.Rec.Note}}</textarea>
+    {{template "err" index .RecErrors "note"}}
+  </div>
+  <div class="actions"><button type="submit">Record leave</button></div>
+</form>
 
 <h2>Requests</h2>
 {{if .Requests}}{{template "requests" .Requests}}{{else}}<p class="muted">None yet.</p>{{end}}

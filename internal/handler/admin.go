@@ -27,6 +27,8 @@ func (h *Handler) adminRoutes() []route {
 		a("POST /admin/users/{id}/approver", h.AdminSetApprover),
 		a("POST /admin/users/{id}/adjustments", h.AdminAddAdjustment),
 		a("POST /admin/users/{id}/long-weekend", h.AdminSetLongWeekend),
+		a("POST /admin/users/{id}/leave", h.AdminRecordLeave),
+		a("POST /admin/requests/{id}/unrecord", h.AdminUnrecord),
 		a("GET /admin/types", h.AdminTypes),
 		a("GET /admin/types/new", h.AdminTypeForm),
 		a("GET /admin/types/{id}", h.AdminTypeForm),
@@ -261,6 +263,12 @@ type adminUserData struct {
 	Requests    []leave.Request
 	Errors      leave.FieldErrors
 	Adj         leave.Adjustment
+	// Types and Rec are the "Record leave" form: the active types, and what
+	// was typed when it was refused.
+	Types []leave.Type
+	Rec   leave.Input
+	// RecErrors are kept apart from Errors: both forms have a "type" field.
+	RecErrors leave.FieldErrors
 	// Teams are read-only here: the directory is the source of truth.
 	Teams []leave.Team
 }
@@ -296,6 +304,9 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 		return d, err
 	}
 	if d.Adjustments, err = h.leave.Adjustments(ctx, u.ID); err != nil {
+		return d, err
+	}
+	if d.Types, err = h.leave.Types(ctx, true); err != nil {
 		return d, err
 	}
 	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {
@@ -405,6 +416,65 @@ func (h *Handler) AdminAddAdjustment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=saved", id), http.StatusSeeOther)
+}
+
+// AdminRecordLeave records leave a person already took, or agreed off the
+// system. See leave.Service.RecordLeave for what it relaxes.
+func (h *Handler) AdminRecordLeave(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	typeID, _ := strconv.ParseInt(r.PostFormValue("type"), 10, 64)
+	in := leave.Input{TypeID: typeID, Start: r.PostFormValue("start"), End: r.PostFormValue("end"),
+		Note: r.PostFormValue("note")}
+	rec, err := h.leave.RecordLeave(r.Context(), currentUser(r), id, in)
+	var fe leave.FieldErrors
+	switch {
+	case errors.Is(err, users.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case errors.As(err, &fe):
+		d, derr := h.adminUserData(r, id)
+		if derr != nil {
+			h.serverError(w, r, derr)
+			return
+		}
+		d.RecErrors, d.Rec = fe, in
+		h.render(w, r, http.StatusUnprocessableEntity, "admin_user.html", view{Title: d.User.Name, Data: d})
+		return
+	case err != nil:
+		h.serverError(w, r, err)
+		return
+	}
+	notice := "recorded"
+	if rec.AllowNegative {
+		notice = "recorded-negative"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=%s", id, notice), http.StatusSeeOther)
+}
+
+// AdminUnrecord removes leave an admin recorded.
+func (h *Handler) AdminUnrecord(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	rec, err := h.leave.Unrecord(r.Context(), currentUser(r), id)
+	switch {
+	case errors.Is(err, leave.ErrNotFound):
+		http.NotFound(w, r)
+		return
+	case errors.Is(err, leave.ErrNotAllowed):
+		notPossible(w, r, id)
+		return
+	case err != nil:
+		h.serverError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=unrecorded", rec.UserID), http.StatusSeeOther)
 }
 
 // --- Leave types ---------------------------------------------------------
