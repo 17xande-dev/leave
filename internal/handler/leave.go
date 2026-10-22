@@ -241,7 +241,7 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		CanWithdraw: leave.CanWithdraw(u, req),
 		CanCancel:   h.leave.CanRequestCancellation(u, req),
 		CanDecide:   leave.CanDecide(u, req),
-		CanUnrecord: u.Admin && req.IsRecorded() && req.UserID != u.ID,
+		CanUnrecord: u.Admin && req.IsRecorded() && req.Status == leave.StatusApproved && req.UserID != u.ID,
 		CanSubmit:   req.UserID == u.ID && req.Status == leave.StatusDraft,
 	}
 	if u.Admin && req.Status == leave.StatusPending {

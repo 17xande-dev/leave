@@ -58,17 +58,24 @@ type Request struct {
 	ApproverName string
 	DecidedBy    string
 	ShutdownName string
+	// RecordedBy is the admin who wrote this leave down after the fact
+	// (RecordedByID 0: it went through approval); RemovedBy, with RemovedAt,
+	// the admin who later took it back out.
+	RecordedByID int64
+	RecordedBy   string
+	RemovedByID  int64
+	RemovedBy    string
+	RemovedAt    string
 }
 
-// RecordedPrefix starts the decision note of leave an admin recorded.
+// RecordedPrefix starts the decision note RecordLeave writes, for display
+// only: the decision note is free text an approver may word the same way, so
+// nothing decides on it.
 const RecordedPrefix = "Recorded by "
 
 // IsRecorded reports whether an admin recorded r (see RecordLeave) rather than
-// it going through approval. The decision note is the marker: it needs no
-// schema of its own, and it is what the request page shows.
-func (r Request) IsRecorded() bool {
-	return r.Kind == KindLeave && r.Status == StatusApproved && strings.HasPrefix(r.DecisionNote, RecordedPrefix)
-}
+// it going through approval, whatever has become of it since.
+func (r Request) IsRecorded() bool { return r.RecordedByID != 0 }
 
 func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 
@@ -81,21 +88,26 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
 	COALESCE(r.shutdown_part_id, 0), r.escalate, r.allow_negative,
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
-	COALESCE(sd.name, '')
+	COALESCE(sd.name, ''),
+	COALESCE(r.recorded_by_id, 0), COALESCE(rb.name, ''), COALESCE(r.removed_by_id, 0), COALESCE(rm.name, ''),
+	COALESCE(r.removed_at, '')
 	FROM requests r
 	JOIN users u ON u.id = r.user_id
 	JOIN leave_types t ON t.id = r.type_id
 	LEFT JOIN users a ON a.id = r.approver_id
 	LEFT JOIN users dby ON dby.id = r.decided_by_id
 	LEFT JOIN shutdown_parts sp ON sp.id = r.shutdown_part_id
-	LEFT JOIN shutdowns sd ON sd.id = sp.shutdown_id`
+	LEFT JOIN shutdowns sd ON sd.id = sp.shutdown_id
+	LEFT JOIN users rb ON rb.id = r.recorded_by_id
+	LEFT JOIN users rm ON rm.id = r.removed_by_id`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
 	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.CycleStart,
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
-		&r.ApproverName, &r.DecidedBy, &r.ShutdownName)
+		&r.ApproverName, &r.DecidedBy, &r.ShutdownName, &r.RecordedByID, &r.RecordedBy, &r.RemovedByID, &r.RemovedBy,
+		&r.RemovedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
 	}
@@ -297,9 +309,10 @@ type quoteOpts struct {
 	override      bool
 	allowNegative bool
 	excludeID     int64
-	// record is an admin writing down leave already taken or agreed off the
-	// system: any date, no coverage limits, any balance, but a reason is
-	// always required and the overlap check still protects the person.
+	// record is an admin writing down leave that has already started: any past
+	// date, and the type may since have been retired and the restricted-day
+	// rule changed, so neither applies; no coverage limits; any balance. A
+	// reason is always required and the overlap check still protects the person.
 	record bool
 }
 
@@ -327,7 +340,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, in.TypeID))
 	switch {
-	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory):
+	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory && !opt.record):
 		errs["type"] = "Choose a type of leave."
 	case err != nil:
 		return Quote{}, err
@@ -353,7 +366,13 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
-	case opt.mandatory || opt.record:
+	case opt.mandatory:
+	case opt.record:
+		// Only what has happened: future leave must go through an application,
+		// or recording would bypass approval and coverage.
+		if start.After(today) {
+			errs["start"] = "Only leave that has already started can be recorded; future leave goes through an application."
+		}
 	case start.Before(today.AddDate(0, 0, -t.BackdateDays)):
 		if t.BackdateDays == 0 {
 			errs["start"] = "Leave cannot start in the past."
@@ -387,7 +406,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs
 		}
-		if msg := restrictedDayRule(st, t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory {
+		if msg := restrictedDayRule(st, t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory && !opt.record {
 			errs["start"] = msg
 			return qt, errs
 		}

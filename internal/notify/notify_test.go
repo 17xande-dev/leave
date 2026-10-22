@@ -432,7 +432,7 @@ func TestRecordedLeaveNotifications(t *testing.T) {
 		t.Fatalf("unrecord jobs = %+v", jobs)
 	}
 	if m := email(t, jobs[0]); m.To[0] != "staff@x.test" || !strings.Contains(m.Text, "Hannah HR removed") ||
-		!strings.Contains(m.Text, "back in your balance") {
+		!strings.Contains(m.Text, "no longer counts against your annual leave balance") {
 		t.Fatalf("revoked email:\n%s", m.Text)
 	}
 }

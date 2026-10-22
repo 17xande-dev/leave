@@ -24,7 +24,8 @@ import (
 // is greenfield a schema change means `make recreate-db`, not an ALTER on
 // startup -- an ALTER-based helper would leave an old non-strict definition in
 // place and silently diverge from this file. The one exception is
-// migrateBackdating, for a database that already holds real requests; adopt a
+// migrateBackdating and migrateRecorded, for a database that already holds
+// real requests (the second only adds columns, so it needs no backup); adopt a
 // versioned migration tool if more of those follow.
 //
 // Dates (start_date, end_date, holidays.date, cycle_start) are TEXT
@@ -242,6 +243,12 @@ CREATE TABLE IF NOT EXISTS requests (
 	decided_at          TEXT,
 	decision_note       TEXT NOT NULL DEFAULT '',
 	calendar_event_id   TEXT NOT NULL DEFAULT '',
+	-- Leave an admin wrote down after the fact (Record leave): who, set once.
+	-- A real column, not a convention in decision_note, which an approver
+	-- may word as they like. removed_* is the audit of taking it back out.
+	recorded_by_id      INTEGER REFERENCES users(id),
+	removed_by_id       INTEGER REFERENCES users(id),
+	removed_at          TEXT,
 	created_at          TEXT NOT NULL,
 	CHECK (end_date >= start_date),
 	CHECK ((kind = 'leave') = (cancels_request_id IS NULL)),
@@ -370,6 +377,10 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := migrateBackdating(d, path); err != nil {
+		d.Close()
+		return nil, err
+	}
+	if err := migrateRecorded(d); err != nil {
 		d.Close()
 		return nil, err
 	}
@@ -524,4 +535,43 @@ func migrateBackdating(d *sql.DB, path string) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// migrateRecorded adds the columns behind "Record leave" to a requests table
+// that predates them. Purely additive (nullable, no default needed, so STRICT
+// and the table's CHECKs are untouched) and idempotent: a column already there,
+// or no requests table yet (a fresh database; the schema creates it with the
+// columns), is left alone. It runs whether or not migrateBackdating did, and
+// needs no backup because nothing is rewritten or dropped.
+func migrateRecorded(d *sql.DB) error {
+	have := map[string]bool{}
+	rows, err := d.Query(`SELECT name FROM pragma_table_info('requests')`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		have[n] = true
+	}
+	rows.Close()
+	if len(have) == 0 {
+		return nil
+	}
+	for _, c := range []struct{ name, def string }{
+		{"recorded_by_id", "INTEGER REFERENCES users(id)"},
+		{"removed_by_id", "INTEGER REFERENCES users(id)"},
+		{"removed_at", "TEXT"},
+	} {
+		if have[c.name] {
+			continue
+		}
+		if _, err := d.Exec(`ALTER TABLE requests ADD COLUMN ` + c.name + ` ` + c.def); err != nil {
+			return fmt.Errorf("migrate recorded leave: %w", err)
+		}
+	}
+	return nil
 }

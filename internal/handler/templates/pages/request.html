@@ -9,10 +9,11 @@
   <tr><th>Who</th><td>{{.UserName}}{{with .Department}} <small>{{.}}</small>{{end}}</td></tr>
   <tr><th>Dates</th><td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td></tr>
   <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}</td></tr>
-  {{with .Note}}<tr><th>Note</th><td>{{.}}</td></tr>{{end}}
-  <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
-  {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.DecidedBy}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
+  {{with .Note}}<tr><th>{{if $.Data.Request.IsRecorded}}Why it was recorded{{else}}Note{{end}}</th><td>{{.}}</td></tr>{{end}}
+  {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.RecordedBy}}{{with .DecidedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
+  {{with .RemovedBy}}<tr><th>Removed by</th><td>{{.}}{{with $.Data.Request.RemovedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}</td></tr>{{end}}
   {{else}}
+  <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
   {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}
   {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}{{end}}
 </table>
@@ -110,7 +111,7 @@
   {{template "csrf" $.CSRF}}
   <h2>Remove this recorded leave <small>(admin)</small></h2>
   <p class="hint">Recorded leave has no approver to cancel it. Removing it returns the days to the balance, takes it off the calendar and emails {{.Request.UserName}}.</p>
-  <div class="actions"><button type="submit" class="quiet">Remove recorded leave</button></div>
+  <div class="actions"><button type="submit" class="quiet">Remove this recorded leave and return the days</button></div>
 </form>
 {{end}}
 

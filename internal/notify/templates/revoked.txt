@@ -1,4 +1,4 @@
 {{define "subject"}}Recorded leave removed: {{.Dates}}{{end}}
 {{define "body"}}Hi {{.To}},
 
-{{.Actor}} removed the {{lower .Request.TypeName}} that was recorded for you for {{.Dates}}. The {{.Days}} are back in your balance.{{end}}
+{{.Actor}} removed the {{lower .Request.TypeName}} that was recorded for you for {{.Dates}}. It no longer counts against your {{lower .Request.TypeName}} balance.{{end}}

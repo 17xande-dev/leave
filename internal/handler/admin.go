@@ -154,12 +154,12 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	cw := csv.NewWriter(&buf)
 	cw.Write([]string{"id", "name", "department", "type", "kind", "start", "end", "days", "status",
-		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at"})
+		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at", "recorded_by"})
 	for _, q := range rs {
 		cw.Write([]string{strconv.FormatInt(q.ID, 10), csvText(q.UserName), csvText(q.Department),
 			csvText(q.TypeName), q.Kind, q.Start, q.End, strconv.Itoa(q.Days), q.Status,
 			csvText(q.ApproverName), csvText(q.DecidedBy), q.DecidedAt, csvText(q.Note),
-			csvText(q.DecisionNote), q.CreatedAt})
+			csvText(q.DecisionNote), q.CreatedAt, csvText(q.RecordedBy)})
 	}
 	cw.Flush()
 	if err := cw.Error(); err != nil {
@@ -263,7 +263,8 @@ type adminUserData struct {
 	Requests    []leave.Request
 	Errors      leave.FieldErrors
 	Adj         leave.Adjustment
-	// Types and Rec are the "Record leave" form: the active types, and what
+	// Types and Rec are the "Record leave" form: every type (a retired one may
+	// still be what the leave was), and what
 	// was typed when it was refused.
 	Types []leave.Type
 	Rec   leave.Input
@@ -306,7 +307,7 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 	if d.Adjustments, err = h.leave.Adjustments(ctx, u.ID); err != nil {
 		return d, err
 	}
-	if d.Types, err = h.leave.Types(ctx, true); err != nil {
+	if d.Types, err = h.leave.Types(ctx, false); err != nil {
 		return d, err
 	}
 	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {

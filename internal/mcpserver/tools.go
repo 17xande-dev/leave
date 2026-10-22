@@ -32,7 +32,9 @@ type RequestInfo struct {
 	End        string `json:"end" jsonschema:"last day, YYYY-MM-DD"`
 	Days       int    `json:"days"`
 	Status     string `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
-	Note       string `json:"note,omitempty"`
+	Note       string `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
+	// RecordedBy is set when an administrator wrote the leave down after the fact.
+	RecordedBy string `json:"recorded_by,omitempty" jsonschema:"set when an administrator recorded this leave after the fact instead of it being requested"`
 	// Approver is who must decide it while it is pending; empty means any administrator.
 	Approver          string `json:"approver,omitempty"`
 	DecidedBy         string `json:"decided_by,omitempty"`
@@ -46,7 +48,7 @@ type RequestInfo struct {
 func requestInfo(r leave.Request) RequestInfo {
 	return RequestInfo{ID: r.ID, Kind: r.Kind, Person: r.UserName, Department: r.Department,
 		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Days: r.Days, Status: r.Status,
-		Note: r.Note, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
+		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
 		CreatedAt: r.CreatedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
 		SpecialPermission: r.Escalate}
 }

@@ -2,6 +2,7 @@ package leave
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -55,9 +56,17 @@ func TestRecordLeaveRules(t *testing.T) {
 	if _, err := f.record("hr", "staff", "annual", "2026-01-01", "2026-12-31", "x"); !fieldErr(err, "end") {
 		t.Fatalf("over the max span: %v", err)
 	}
-	// Even a future date works (agreed off the system).
-	if _, err := f.record("hr", "staff", "annual", "2026-12-07", "2026-12-07", "x"); err != nil {
+	// Leave that has not started would bypass approval and coverage: it goes
+	// through an application. Starting today is fine (today is 5 October).
+	if _, err := f.record("hr", "staff", "annual", "2026-12-07", "2026-12-07", "x"); !fieldErr(err, "start") ||
+		!strings.Contains(err.(FieldErrors)["start"], "already started") {
 		t.Fatalf("future: %v", err)
+	}
+	if _, err := f.record("hr", "staff", "annual", "2026-10-06", "2026-10-06", "x"); !fieldErr(err, "start") {
+		t.Fatalf("tomorrow: %v", err)
+	}
+	if _, err := f.record("hr", "staff", "annual", "2026-10-05", "2026-10-05", "x"); err != nil {
+		t.Fatalf("today: %v", err)
 	}
 
 	// A reason is required, for a type that does not ask for one too.
@@ -73,8 +82,9 @@ func TestRecordLeaveRules(t *testing.T) {
 	}
 
 	// Overlap with their own leave of any live status is refused.
-	f.mustSubmit("staff", "annual", "2026-10-19", "2026-10-20")
-	if _, err := f.record("hr", "staff", "sick", "2026-10-20", "2026-10-21", "x"); !fieldErr(err, "start") {
+	f.mustSubmit("staff", "annual", "2026-09-14", "2026-09-15")
+	if _, err := f.record("hr", "staff", "sick", "2026-09-15", "2026-09-16", "x"); !fieldErr(err, "start") ||
+		!strings.Contains(err.(FieldErrors)["start"], "already have leave") {
 		t.Fatalf("overlap with pending: %v", err)
 	}
 	f.mustRecord("staff", "annual", "2026-03-02", "2026-03-02")
@@ -96,13 +106,13 @@ func TestRecordLeaveIgnoresCoverage(t *testing.T) {
 	f := newFixture(t)
 	f.dept("Ops", "staff", "hr", "head", "orphan")
 	f.rule("Ops", 50)
-	f.insertAway("hr", "annual", "2026-10-12", "2026-10-14", "approved")
-	f.insertAway("head", "annual", "2026-10-12", "2026-10-14", "approved")
-	f.insertAway("orphan", "annual", "2026-10-12", "2026-10-14", "approved")
-	if _, err := f.submit("staff", "annual", "2026-10-12", "2026-10-14"); !fieldErr(err, "coverage") {
+	f.insertAway("hr", "annual", "2026-09-14", "2026-09-16", "approved")
+	f.insertAway("head", "annual", "2026-09-14", "2026-09-16", "approved")
+	f.insertAway("orphan", "annual", "2026-09-14", "2026-09-16", "approved")
+	if _, err := f.submit("staff", "annual", "2026-09-14", "2026-09-16"); !fieldErr(err, "coverage") {
 		t.Fatalf("setup: an ordinary request should be over the limit: %v", err)
 	}
-	r, err := f.record("hr", "staff", "annual", "2026-10-12", "2026-10-14", "x")
+	r, err := f.record("hr", "staff", "annual", "2026-09-14", "2026-09-16", "x")
 	if err != nil || r.Escalate {
 		t.Fatalf("record over the limit: %+v, %v", r, err)
 	}
@@ -121,27 +131,9 @@ func TestRecordLeaveMayGoNegative(t *testing.T) {
 	}
 }
 
-// Recorded leave for the future can be cancelled by its owner the ordinary way.
-func TestRecordedFutureLeaveCancelsLikeAnyLeave(t *testing.T) {
-	f := newFixture(t)
-	r := f.mustRecord("staff", "annual", "2026-10-12", "2026-10-16")
-	c, err := f.svc.RequestCancellation(f.ctx, f.people["staff"], r.ID, "plans changed")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.svc.Decide(f.ctx, f.people["head"], c.ID, true, ""); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := f.svc.Get(f.ctx, r.ID); got.Status != StatusCancelled {
-		t.Fatalf("status = %s", got.Status)
-	}
-	if got := f.available("staff", "annual"); got != 15 {
-		t.Fatalf("available = %d, want 15", got)
-	}
-}
-
-// Leave that has started cannot go through the owner's cancellation, so an
-// admin removes it: days back, event fired, a waiting cancellation closed.
+// Recorded leave has started, so the owner's cancellation flow (future leave
+// only) cannot reach it; an admin removes it: days back, event fired, and who
+// and when kept for the audit.
 func TestUnrecord(t *testing.T) {
 	f := newFixture(t)
 	past := f.mustRecord("staff", "annual", "2026-06-15", "2026-06-19")
@@ -154,22 +146,20 @@ func TestUnrecord(t *testing.T) {
 	if _, err := f.svc.Unrecord(f.ctx, f.people["head"], past.ID); !errors.Is(err, ErrNotAllowed) {
 		t.Fatalf("non-admin removing: %v", err)
 	}
-	// Ordinary approved leave is not removable this way.
 	n := f.mustSubmit("staff", "annual", "2026-11-02", "2026-11-02")
 	f.svc.Decide(f.ctx, f.people["head"], n.ID, true, "")
 	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], n.ID); !errors.Is(err, ErrNotAllowed) {
 		t.Fatalf("removing ordinary leave: %v", err)
 	}
 
-	future := f.mustRecord("staff", "annual", "2026-10-12", "2026-10-12")
-	c, err := f.svc.RequestCancellation(f.ctx, f.people["staff"], future.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	f.events = nil
 	got, err := f.svc.Unrecord(f.ctx, f.people["hr"], past.ID)
 	if err != nil || got.Status != StatusCancelled {
 		t.Fatalf("unrecord = %+v, %v", got, err)
+	}
+	if got.RemovedByID != f.people["hr"].ID || got.RemovedBy != "hr" || got.RemovedAt == "" ||
+		got.RecordedBy != "hr" || !got.IsRecorded() {
+		t.Fatalf("audit lost: %+v", got)
 	}
 	if len(f.events) != 1 || f.events[0].Kind != EventRevoked {
 		t.Fatalf("events = %+v", f.events)
@@ -177,13 +167,93 @@ func TestUnrecord(t *testing.T) {
 	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], past.ID); !errors.Is(err, ErrNotAllowed) {
 		t.Fatalf("removing twice: %v", err)
 	}
-	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], future.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := f.svc.Get(f.ctx, c.ID); got.Status != StatusWithdrawn {
-		t.Fatalf("pending cancellation is %s, want withdrawn", got.Status)
-	}
 	if got := f.available("staff", "annual"); got != 14 { // only the ordinary day remains
 		t.Fatalf("available = %d, want 14", got)
+	}
+}
+
+// An approver's decision note is free text. One that reads "Recorded by ..."
+// must not make ordinary leave look recorded or let an admin remove it.
+func TestApprovalNoteCannotImpersonateRecording(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmit("staff", "annual", "2026-11-02", "2026-11-02")
+	r, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, "Recorded by me in the team diary too")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.IsRecorded() {
+		t.Fatal("an approval with a lookalike note is recorded")
+	}
+	if _, err := f.svc.Unrecord(f.ctx, f.people["hr"], r.ID); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("unrecord: %v", err)
+	}
+	if got, _ := f.svc.Get(f.ctx, r.ID); got.Status != StatusApproved {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+// What happened was decided under the rules of the day: a type since retired
+// and a restricted-day rule since introduced do not apply, though days are
+// still counted the same way.
+func TestRecordLeaveIgnoresRetiredTypeAndRestrictedDay(t *testing.T) {
+	f := newSundayWeek(t)
+	// Sunday alone is refused for a request...
+	if _, err := f.submit("staff", "annual", "2026-09-27", "2026-09-27"); !fieldErr(err, "start") {
+		t.Fatalf("setup: %v", err)
+	}
+	// ...but may be recorded.
+	r, err := f.record("hr", "staff", "annual", "2026-09-27", "2026-09-27", "x")
+	if err != nil || r.Days != 1 {
+		t.Fatalf("restricted day: %+v, %v", r, err)
+	}
+	// Retire a type: requests refuse it, recording does not.
+	if _, err := f.db.Exec(`UPDATE leave_types SET active = 0 WHERE id = ?`, f.types["parental"].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.submit("staff", "parental", "2026-09-15", "2026-09-15"); !fieldErr(err, "type") {
+		t.Fatalf("setup: retired type accepted: %v", err)
+	}
+	if r, err := f.record("hr", "staff", "parental", "2026-09-15", "2026-09-15", "x"); err != nil || r.TypeName == "" {
+		t.Fatalf("retired type: %+v, %v", r, err)
+	}
+}
+
+// Leave from an earlier cycle is charged to that cycle, and flagged against
+// it: this year's balance is untouched.
+func TestRecordLeaveInPreviousCycle(t *testing.T) {
+	f := newFixture(t)
+	f.events = nil
+	// 3 to 28 Feb 2025 is 20 working days against an allowance of 15.
+	r, err := f.record("hr", "staff", "annual", "2025-02-03", "2025-02-28", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.CycleStart != "2025-01-01" || r.Days != 20 || !r.AllowNegative {
+		t.Fatalf("recorded = %+v", r)
+	}
+	cycle, _ := ParseDate("2025-01-01")
+	b, err := f.svc.balance(f.ctx, f.db, f.people["staff"].ID, f.types["annual"], cycle)
+	if err != nil || *b.Available() != -5 {
+		t.Fatalf("2025 balance = %+v, %v", b, err)
+	}
+	if got := f.available("staff", "annual"); got != 15 {
+		t.Fatalf("this year's balance = %d, want 15", got)
+	}
+	if len(f.events) != 1 || f.events[0].Shortfall != 5 {
+		t.Fatalf("events = %+v, want a shortfall of 5", f.events)
+	}
+}
+
+func TestRecordWeekendOff(t *testing.T) {
+	f := newSundayWeek(t)
+	r, err := f.record("hr", "staff", "weekend", "2026-09-12", "2026-09-13", "x")
+	if err != nil || r.Days != 1 || r.Status != StatusApproved {
+		t.Fatalf("weekend off: %+v, %v", r, err)
+	}
+	if _, err := f.record("hr", "staff", "weekend", "2026-09-12", "2026-09-14", "x"); !fieldErr(err, "start") {
+		t.Fatalf("badly shaped weekend: %v", err)
+	}
+	if got := f.available("staff", "weekend"); got != 3 {
+		t.Fatalf("weekends left = %d, want 3", got)
 	}
 }

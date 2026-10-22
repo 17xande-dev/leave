@@ -368,3 +368,118 @@ func TestMigrateBackdatingNeedsItsBackup(t *testing.T) {
 		t.Error("the database was migrated without its backup")
 	}
 }
+
+// oldRecordedDB builds a database as the previous build left it: today's schema
+// with the three recorded-leave columns removed from requests, and one request
+// in it that must survive the migration.
+func oldRecordedDB(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	fresh, err := Open(filepath.Join(dir, "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := fresh.Query(`SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
+		ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, rowid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ddl []string
+	for rows.Next() {
+		var name, q string
+		if err := rows.Scan(&name, &q); err != nil {
+			t.Fatal(err)
+		}
+		if name == "requests" {
+			for _, col := range []string{"recorded_by_id", "removed_by_id", "removed_at"} {
+				var kept []string
+				for _, line := range strings.Split(q, "\n") {
+					if !strings.Contains(line, col+" ") {
+						kept = append(kept, line)
+					}
+				}
+				q = strings.Join(kept, "\n")
+			}
+		}
+		ddl = append(ddl, q)
+	}
+	rows.Close()
+	fresh.Close()
+
+	path := filepath.Join(dir, "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	for _, q := range ddl {
+		if _, err := old.Exec(q); err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+	}
+	if _, err := old.Exec(`INSERT INTO users (id, ext_id, dn, username, name, synced_at) VALUES (1, 'a', 'a', 'a', 'A', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO leave_types (id, code, name, cycle_months, unit) VALUES (1, 'annual', 'Annual', 12, 'workdays')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days, cycle_start, status, created_at)
+		VALUES (1, 1, 'leave', '2026-01-05', '2026-01-05', 1, '2026-01-01', 'approved', '')`); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func requestColumns(t *testing.T, d *sql.DB) map[string]bool {
+	t.Helper()
+	rows, err := d.Query(`SELECT name FROM pragma_table_info('requests')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var n string
+		rows.Scan(&n)
+		cols[n] = true
+	}
+	return cols
+}
+
+// A database from before "Record leave" gains its columns on open, keeps its
+// rows, and a second open changes nothing.
+func TestMigrateRecordedAddsColumnsOnce(t *testing.T) {
+	path := oldRecordedDB(t)
+	probe, _ := sql.Open("sqlite3", "file:"+path)
+	if requestColumns(t, probe)["recorded_by_id"] {
+		t.Fatal("setup: the old database already has the column")
+	}
+	probe.Close()
+
+	for i := 0; i < 2; i++ {
+		d, err := Open(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i+1, err)
+		}
+		cols := requestColumns(t, d)
+		for _, c := range []string{"recorded_by_id", "removed_by_id", "removed_at"} {
+			if !cols[c] {
+				t.Errorf("open %d: no %s column", i+1, c)
+			}
+		}
+		var n int
+		var by sql.NullInt64
+		if err := d.QueryRow(`SELECT count(*), max(recorded_by_id) FROM requests`).Scan(&n, &by); err != nil || n != 1 || by.Valid {
+			t.Errorf("open %d: %d rows, recorded_by %v, %v", i+1, n, by, err)
+		}
+		// The foreign key is enforced on the added column too.
+		if _, err := d.Exec(`UPDATE requests SET recorded_by_id = 999`); err == nil {
+			t.Errorf("open %d: recorded_by_id accepted a missing user", i+1)
+		}
+		d.Close()
+	}
+	// Additive: no backup copy is made for it.
+	if m, _ := filepath.Glob(path + ".pre-*"); len(m) != 0 {
+		t.Errorf("backups = %v, want none", m)
+	}
+}

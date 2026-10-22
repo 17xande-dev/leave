@@ -96,16 +96,16 @@
 </div>
 {{end}}
 
-<form method="post" action="/admin/users/{{.User.ID}}/leave" class="panel" id="record">
+<form method="post" action="/admin/users/{{.User.ID}}/leave#record" class="panel" id="record">
   {{template "csrf" $.CSRF}}
   <h2>Record leave</h2>
-  <p class="hint">For leave {{.User.Name}} has already taken, or agreed off the system. It is approved at once, counted like any request, and may be on any date. Department limits do not apply and the balance may go below zero, but it cannot overlap their other leave. They are emailed.</p>
+  <p class="hint">For leave {{.User.Name}} has already started or taken, such as leave from before the system went live. It is approved at once and counted like any request, on any past date and for a retired type if need be. Department limits do not apply and the balance may go below zero, but it cannot overlap their other leave. Future leave goes through an application. They are emailed.</p>
   {{template "err" index .RecErrors "person"}}
   <div class="field">
     <label for="rec-type">Type of leave</label>
     <select id="rec-type" name="type" required>
       <option value="">Choose…</option>
-      {{range .Types}}<option value="{{.ID}}"{{if eq .ID $.Data.Rec.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
+      {{range .Types}}<option value="{{.ID}}"{{if eq .ID $.Data.Rec.TypeID}} selected{{end}}>{{.Name}}{{if not .Active}} (inactive){{end}}</option>{{end}}
     </select>
     {{template "err" index .RecErrors "type"}}
   </div>

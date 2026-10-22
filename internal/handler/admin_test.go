@@ -313,7 +313,7 @@ func TestAdminRecordLeave(t *testing.T) {
 
 	// The form is on the person's page, with the date picker's scripts.
 	_, body := hs.get(hr, page)
-	for _, want := range []string{`action="` + page + `/leave"`, `<date-range-input`, "date-range-input.js", `name="note"`} {
+	for _, want := range []string{`action="` + page + `/leave#record"`, `id="record"`, `<date-range-input`, "date-range-input.js", `name="note"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("admin page lacks %q", want)
 		}
@@ -326,6 +326,11 @@ func TestAdminRecordLeave(t *testing.T) {
 		!strings.Contains(body, `value="2026-06-15"`) {
 		t.Fatalf("no note: %d\n%s", res.StatusCode, body)
 	}
+	for _, leaked := range []string{"Say why, for whoever reads this later", "Enter a number of days", "Choose a leave type.", "Choose a cycle."} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("the adjustment form shows %q for a refused record", leaked)
+		}
+	}
 
 	// 120 days before the pinned "today" works; redirect with a notice.
 	res, _ = hs.post(hr, page+"/leave", form("2026-06-15", "2026-06-19", "Taken before go-live"))
@@ -333,19 +338,20 @@ func TestAdminRecordLeave(t *testing.T) {
 		t.Fatalf("record: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
 	_, body = hs.get(hr, page+"?notice=recorded")
-	if !strings.Contains(body, "Leave recorded.") || !strings.Contains(body, "Mon 15 Jun") || !strings.Contains(body, "approved") {
+	if !strings.Contains(body, "Leave recorded.") ||
+		!regexp.MustCompile(`Mon 15 Jun 2026 – Fri 19 Jun 2026</a></td>\s*<td>Annual leave</td>\s*<td class="num">4</td>\s*<td><span class="badge[^"]*">approved</span>\s*<span class="badge">recorded</span>`).MatchString(body) {
 		t.Fatalf("page after recording:\n%s", body)
 	}
 
 	// The person sees it on their own page, and the request page says who.
 	_, body = hs.get(hs.signIn("staff1"), "/")
-	if !strings.Contains(body, "approved") {
+	if !strings.Contains(body, "Mon 15 Jun 2026 – Fri 19 Jun 2026") || !strings.Contains(body, "approved") {
 		t.Fatalf("staff home lacks the recorded leave:\n%s", body)
 	}
 
 	// Overlap is refused with a message.
 	res, body = hs.post(hr, page+"/leave", form("2026-06-17", "2026-06-17", "again"))
-	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already have leave booked") {
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "They already have leave booked") {
 		t.Fatalf("overlap: %d\n%s", res.StatusCode, body)
 	}
 
@@ -353,6 +359,11 @@ func TestAdminRecordLeave(t *testing.T) {
 	res, body = hs.post(hr, "/admin/users/"+itoa(hs.staffID("hr"))+"/leave", form("2026-06-22", "2026-06-22", "x"))
 	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "Another admin records your own leave.") {
 		t.Fatalf("self: %d\n%s", res.StatusCode, body)
+	}
+	// Leave that has not started goes through an application.
+	res, body = hs.post(hr, page+"/leave", form("2026-12-07", "2026-12-07", "x"))
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already started") {
+		t.Fatalf("future: %d\n%s", res.StatusCode, body)
 	}
 	// An unknown person is a 404.
 	if res, _ = hs.post(hr, "/admin/users/9999/leave", form("2026-06-22", "2026-06-22", "x")); res.StatusCode != http.StatusNotFound {
@@ -377,12 +388,13 @@ func TestAdminUnrecord(t *testing.T) {
 		t.Fatalf("no request link:\n%s", body)
 	}
 	_, body = hs.get(hr, m[1])
-	if !strings.Contains(body, "Recorded by") || !strings.Contains(body, "Remove recorded leave") {
+	if !strings.Contains(body, "Recorded by") || !strings.Contains(body, "Why it was recorded") ||
+		!strings.Contains(body, "Remove this recorded leave and return the days") || strings.Contains(body, "<th>Approver</th>") {
 		t.Fatalf("request page for an admin:\n%s", body)
 	}
 	// The owner sees who recorded it but has no remove button.
 	_, body = hs.get(hs.signIn("staff1"), m[1])
-	if !strings.Contains(body, "Recorded by") || strings.Contains(body, "Remove recorded leave") {
+	if !strings.Contains(body, "Recorded by") || strings.Contains(body, "Remove this recorded leave") {
 		t.Fatalf("request page for the owner:\n%s", body)
 	}
 	res, _ = hs.post(hs.signIn("staff1"), "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil)
@@ -394,10 +406,44 @@ func TestAdminUnrecord(t *testing.T) {
 		t.Fatalf("unrecord: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
 	_, body = hs.get(hr, m[1])
-	if !strings.Contains(body, "cancelled") {
+	if !regexp.MustCompile(`Recorded by</th><td>Hannah HR <small>on \w{3} \d+ \w{3} \d{4}</small>`).MatchString(body) ||
+		!regexp.MustCompile(`Removed by</th><td>Hannah HR <small>on \w{3} \d+ \w{3} \d{4}</small>`).MatchString(body) ||
+		!strings.Contains(body, "cancelled") || strings.Contains(body, "Remove this recorded leave") {
 		t.Fatalf("after removal:\n%s", body)
 	}
 	if res, _ = hs.post(hr, "/admin/requests/"+strings.TrimPrefix(m[1], "/leave/")+"/unrecord", nil); res.Header.Get("Location") != m[1]+"?notice=not-possible" {
 		t.Fatalf("removing twice: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+}
+
+// An approver's note that reads "Recorded by ..." is just a reason: the request
+// page still shows it as one and offers no way to remove the leave.
+func TestApprovalNoteDoesNotLookRecorded(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-12")
+	id := strings.TrimPrefix(path, "/leave/")
+	hs.post(hs.signIn("headops"), "/leave/"+id+"/decide", url.Values{"decision": {"approve"}, "note": {"Recorded by me in the team diary too"}})
+	_, body := hs.get(hs.signIn("hr"), path)
+	if !strings.Contains(body, "Recorded by me in the team diary too") || !strings.Contains(body, "<th>Reason</th>") ||
+		strings.Contains(body, "<th>Recorded by</th>") || strings.Contains(body, "Remove this recorded leave") {
+		t.Fatalf("request page:\n%s", body)
+	}
+}
+
+// A retired type may still be what past leave was, so the form lists it, marked.
+func TestRecordFormListsInactiveTypes(t *testing.T) {
+	hs := newHarness(t)
+	ts, _ := hs.svc.Types(context.Background(), true)
+	for _, ty := range ts {
+		if ty.Code == "parental" {
+			ty.Active = false
+			if _, err := hs.svc.SaveType(context.Background(), ty); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	_, body := hs.get(hs.signIn("hr"), "/admin/users/"+itoa(hs.staffID("staff1")))
+	if !strings.Contains(body, "Parental leave (inactive)") || strings.Contains(body, "Annual leave (inactive)") {
+		t.Fatalf("record form types:\n%s", body)
 	}
 }
