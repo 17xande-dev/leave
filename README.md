@@ -54,6 +54,11 @@ Each leave type sets its own rule on
 - sick, family, maternity and parental leave: no rule, since none of them can be planned;
 - floating holidays: never.
 
+Each type also sets how far back its leave may start (**Backdating (days)**, 0 to 92;
+every type defaults to 92, about three months, the most the policy allows). 0 means it
+cannot start in the past. The apply form's date picker greys out earlier days, and the
+server refuses them whichever way a request arrives.
+
 **Weekends off** are the way to have the restricted day off by itself. A weekend off
 runs Saturday to Sunday and costs one weekend from the yearly allowance. An admin can
 give someone **long weekends** (on their page under **Admin → People**), which run
@@ -102,8 +107,8 @@ withdrawn.
 
 **Settings** (**Admin → Settings**) hold the policy an admin may change without a
 deploy, and each change applies to the next request: the working days, the restricted
-day and its minimum, the final approver, how far back sick leave may start, and the year
-the 36-month sick cycle counts from. They live in the database; the environment keeps
+day and its minimum, the final approver, and the year the 36-month sick cycle counts
+from. They live in the database; the environment keeps
 only wiring and secrets.
 
 **The admin area** has: All requests (with a CSV export), People (approver overrides,
@@ -287,8 +292,12 @@ One-time setup:
 After that, every deploy is: commit, push, `make deploy`. Logs are at
 `ssh docker-server 'cd ~/leave && docker compose logs -f'`.
 
-The schema has no migrations yet. If a change refuses to start against the old database,
-the logs say so. Back up the database first (below), then recreate it with
+The schema has no general migrations. The one exception is the move to per-type
+backdating: on first start it copies the database to
+`/data/leave.db.pre-backdate-<UTC time>.db` (via `VACUUM INTO`), then migrates in place.
+That release is forward-only: the previous build cannot open the migrated database, so
+rolling back means restoring that copy. For any other change, if it refuses to start
+against the old database, the logs say so. Back up the database first (below), then recreate it with
 `docker compose down -v && docker compose up -d`.
 
 `make publish` (build on a workstation, push to GHCR, `docker compose pull` on the server)

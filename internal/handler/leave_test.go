@@ -224,14 +224,14 @@ func TestCancellationThroughPages(t *testing.T) {
 // The picker's earliest day mirrors the server's backdating limit: every
 // option carries its type's cut-off, the picker and the no-JS inputs carry the
 // earliest across the types, and a re-render after a refusal carries the chosen
-// type's own. "Today" is pinned to 5 October 2026, so 90 days back is 7 July.
+// type's own. "Today" is pinned to 5 October 2026, so 92 days back is 5 July.
 func TestApplyPageCarriesBackdateMin(t *testing.T) {
 	hs := newHarness(t)
 	c := hs.signIn("staff1")
 	ts, _ := hs.svc.Types(context.Background(), true)
 	annual, _ := hs.svc.Type(context.Background(), mustAtoi(t, hs.typeID("annual")))
 	sick, _ := hs.svc.Type(context.Background(), mustAtoi(t, hs.typeID("sick")))
-	annual.BackdateDays, sick.BackdateDays = 10, 90
+	annual.BackdateDays, sick.BackdateDays = 10, 92
 	for _, ty := range []leave.Type{annual, sick} {
 		if _, err := hs.svc.SaveType(context.Background(), ty); err != nil {
 			t.Fatal(err)
@@ -241,9 +241,9 @@ func TestApplyPageCarriesBackdateMin(t *testing.T) {
 	_, body := hs.get(c, "/leave/new")
 	n := 0
 	for _, ty := range ts {
-		want := map[string]string{"annual": "2026-09-25", "sick": "2026-07-07"}[ty.Code]
+		want := map[string]string{"annual": "2026-09-25", "sick": "2026-07-05"}[ty.Code]
 		if want == "" {
-			want = "2026-07-07" // the other seeded types
+			want = "2026-07-05" // the other seeded types
 		}
 		if !strings.Contains(body, `<option value="`+strconv.FormatInt(ty.ID, 10)+`" data-min="`+want+`"`) {
 			t.Errorf("option for %s lacks data-min=%s", ty.Code, want)
@@ -254,11 +254,11 @@ func TestApplyPageCarriesBackdateMin(t *testing.T) {
 		t.Fatalf("checked only %d options", n)
 	}
 	// Nothing chosen: the earliest of the offered types.
-	if !strings.Contains(body, `months="2" first-day-of-week="1" with-clear locale="en-GB" min="2026-07-07"`) {
+	if !strings.Contains(body, `months="2" first-day-of-week="1" with-clear locale="en-GB" min="2026-07-05"`) {
 		t.Errorf("picker lacks the earliest min:\n%s", body)
 	}
 	for _, id := range []string{"start", "end"} {
-		if !regexp.MustCompile(`<input type="date" id="` + id + `"[^>]* min="2026-07-07"`).MatchString(body) {
+		if !regexp.MustCompile(`<input type="date" id="` + id + `"[^>]* min="2026-07-05"`).MatchString(body) {
 			t.Errorf("fallback input %s lacks min", id)
 		}
 	}

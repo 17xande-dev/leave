@@ -56,9 +56,13 @@ type Type struct {
 
 func intp(n int) *int { return &n }
 
-// DefaultBackdateDays is how far back every seeded type may start: about three
-// months, the organisation's policy for all leave. An admin changes it per type.
-const DefaultBackdateDays = 90
+// MaxBackdateDays is the most a type may allow, and DefaultBackdateDays what
+// every seeded type does: the policy is "no more than three months", and three
+// calendar months are at most 92 days. An admin may lower it per type.
+const (
+	MaxBackdateDays     = 92
+	DefaultBackdateDays = 92
+)
 
 // bceaDefaults are the Basic Conditions of Employment Act minimums for a
 // five-day week, seeded into an empty database. An admin edits them from there;
@@ -149,8 +153,13 @@ func (s *Service) Type(ctx context.Context, id int64) (Type, error) {
 	return scanType(s.db.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, id))
 }
 
-// SaveType inserts (ID 0) or updates a type.
-func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
+// BackdateMessage is the error for a backdating limit outside 0 to MaxBackdateDays.
+var BackdateMessage = fmt.Sprintf("Enter a whole number of days from 0 to %d.", MaxBackdateDays)
+
+// ValidateType checks t as SaveType does (after it trims the code and name),
+// so a form with a field that did not even parse can still report every other
+// problem in one pass. It fills in the default rules like SaveType.
+func ValidateType(t *Type) FieldErrors {
 	t.Code = strings.TrimSpace(strings.ToLower(t.Code))
 	t.Name = strings.TrimSpace(t.Name)
 	errs := FieldErrors{}
@@ -178,12 +187,18 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	if t.CycleMonths != 12 && t.CycleMonths != 36 {
 		errs["cycle_months"] = "The cycle is 12 or 36 months."
 	}
-	if t.BackdateDays < 0 || t.BackdateDays > 365 {
-		errs["backdate_days"] = "Enter a whole number of days from 0 to 365."
+	if t.BackdateDays < 0 || t.BackdateDays > MaxBackdateDays {
+		errs["backdate_days"] = BackdateMessage
 	}
 	if t.Allowance != nil && *t.Allowance < 0 {
 		errs["allowance"] = "The allowance cannot be negative."
 	}
+	return errs
+}
+
+// SaveType inserts (ID 0) or updates a type.
+func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
+	errs := ValidateType(&t)
 	if len(errs) > 0 {
 		return 0, errs
 	}

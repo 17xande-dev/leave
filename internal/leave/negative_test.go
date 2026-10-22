@@ -237,7 +237,7 @@ func TestNegativeDraftPastDatesRefused(t *testing.T) {
 	f.exhaustAnnual()
 	r, _ := f.negative("staff", "annual", "2026-10-06", "2026-10-06", "wedding")
 	r, _ = f.svc.GrantNegative(f.ctx, f.people["hr"], r.ID, "")
-	// Past the 90-day backdating window, not just past.
+	// Past the 92-day backdating window, not just past.
 	f.svc.Now = func() time.Time { return time.Date(2027, 2, 20, 8, 0, 0, 0, time.UTC) }
 	if _, err := f.svc.SubmitDraft(f.ctx, f.people["staff"], r.ID, ""); !fieldErr(err, "start") {
 		t.Fatalf("a granted draft is not mandatory, so a past date is refused: %v", err)

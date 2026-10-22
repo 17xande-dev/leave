@@ -69,11 +69,11 @@ func TestSettingsChangeAppliesImmediately(t *testing.T) {
 		t.Fatalf("Monday after switching back: %d days, %v", q.Days, err)
 	}
 
-	// A type's backdating is read the same way: 10 days back is fine at 90
+	// A type's backdating is read the same way: 10 days back is fine at 92
 	// and refused once an admin lowers it to 7.
 	sick := Input{TypeID: f.types["sick"].ID, Start: "2026-09-25", End: "2026-09-25", Note: "n"}
 	if _, err := f.svc.Preview(f.ctx, f.people["staff"], sick); err != nil {
-		t.Fatalf("sick 10 days back at 90: %v", err)
+		t.Fatalf("sick 10 days back at 92: %v", err)
 	}
 	ty := f.types["sick"]
 	ty.BackdateDays = 7

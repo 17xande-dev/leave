@@ -286,7 +286,7 @@ func TestDomainRefusalsAreToolErrors(t *testing.T) {
 	staff := f.as("staff1")
 	f.refused(staff, "apply_for_leave", map[string]any{"type": "nonsense", "start": "2026-10-12"}, "annual (Annual leave)")
 	f.refused(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "not a date"}, "Start date: Enter the first day")
-	f.refused(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-06-01"}, "can start at most 90 days ago")
+	f.refused(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-06-01"}, "can start at most 92 days ago")
 	f.refused(staff, "apply_for_leave", map[string]any{"type": "family", "start": "2026-10-13"}, "Note: Please add a short note")
 	// A missing required argument is the SDK's own validation, also a tool error.
 	f.refused(staff, "apply_for_leave", map[string]any{"start": "2026-10-13"}, "validating")

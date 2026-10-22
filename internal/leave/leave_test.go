@@ -175,13 +175,13 @@ func TestSubmitValidation(t *testing.T) {
 	cases := []struct {
 		name, code, start, end, field string
 	}{
-		{"past", "annual", "2026-07-06", "2026-07-06", "start"},
+		{"past", "annual", "2026-07-04", "2026-07-04", "start"},
 		{"reversed", "annual", "2026-10-09", "2026-10-07", "end"},
 		{"weekend only", "annual", "2026-10-10", "2026-10-11", "end"},
 		{"holiday only", "annual", "2026-12-16", "2026-12-16", "end"},
 		{"over balance", "annual", "2026-10-06", "2026-11-06", "end"},
 		{"typo year", "annual", "2026-10-06", "2062-10-06", "end"},
-		{"sick too far back", "sick", "2026-07-06", "2026-07-06", "start"},
+		{"sick too far back", "sick", "2026-07-04", "2026-07-04", "start"},
 		{"not a date", "annual", "tomorrow", "2026-10-06", "start"},
 	}
 	for _, c := range cases {
@@ -446,16 +446,17 @@ func TestBackdateBoundary(t *testing.T) {
 		}
 	}
 
-	// Seeded at 90: Tuesday 7 July is exactly 90 days ago.
-	if err := quote("annual", "2026-07-07"); err != nil {
-		t.Errorf("exactly 90 days ago: %v", err)
+	// Seeded at 92 (the cap): Sunday 5 July is exactly 92 days ago. It is not a
+	// working day, so the quote may complain about the end, never the start.
+	if err := quote("annual", "2026-07-05"); fieldErr(err, "start") {
+		t.Errorf("exactly 92 days ago: %v", err)
 	}
-	err := quote("annual", "2026-07-06")
+	err := quote("annual", "2026-07-04")
 	var fe FieldErrors
-	if !errors.As(err, &fe) || fe["start"] != "Annual leave can start at most 90 days ago (no earlier than Tue 7 Jul 2026)." {
+	if !errors.As(err, &fe) || fe["start"] != "Annual leave can start at most 92 days ago (no earlier than Sun 5 Jul 2026)." {
 		t.Errorf("91 days ago: %v", err)
 	}
-	if got := f.svc.EarliestStart(f.types["annual"]); got != "2026-07-07" {
+	if got := f.svc.EarliestStart(f.types["annual"]); got != "2026-07-05" {
 		t.Errorf("EarliestStart = %s", got)
 	}
 
@@ -474,7 +475,7 @@ func TestBackdateBoundary(t *testing.T) {
 	}
 
 	// A mandatory (shutdown) request skips the check.
-	in := Input{TypeID: f.types["annual"].ID, Start: "2026-07-06", End: "2026-07-06", Note: "n"}
+	in := Input{TypeID: f.types["annual"].ID, Start: "2026-07-04", End: "2026-07-04", Note: "n"}
 	if _, err := f.svc.quote(f.ctx, f.db, staff, in, quoteOpts{mandatory: true}); fieldErr(err, "start") {
 		t.Errorf("mandatory request refused for backdating: %v", err)
 	}

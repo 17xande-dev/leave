@@ -223,7 +223,7 @@ func TestTypeFormSavesCoverageRule(t *testing.T) {
 	if _, body := hs.get(hr, "/admin/types/new"); !strings.Contains(body, "Never blocked (still counts as away)") {
 		t.Fatalf("type form lacks the coverage select:\n%s", body)
 	}
-	res, _ := hs.post(hr, "/admin/types", url.Values{"name": {"Study leave"}, "code": {"study"}, "cycle_months": {"12"}, "backdate_days": {"90"},
+	res, _ := hs.post(hr, "/admin/types", url.Values{"name": {"Study leave"}, "code": {"study"}, "cycle_months": {"12"}, "backdate_days": {"92"},
 		"unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"count"}, "active": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save type: %d", res.StatusCode)
@@ -234,7 +234,7 @@ func TestTypeFormSavesCoverageRule(t *testing.T) {
 			t.Fatalf("coverage rule = %q", ty.CoverageRule)
 		}
 	}
-	res, _ = hs.post(hr, "/admin/types", url.Values{"name": {"Bad"}, "code": {"bad"}, "cycle_months": {"12"}, "backdate_days": {"90"},
+	res, _ = hs.post(hr, "/admin/types", url.Values{"name": {"Bad"}, "code": {"bad"}, "cycle_months": {"12"}, "backdate_days": {"92"},
 		"unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"sometimes"}})
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("bad coverage rule: %d", res.StatusCode)

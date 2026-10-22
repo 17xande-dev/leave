@@ -583,6 +583,7 @@ fieldset {
   flex-wrap: wrap;
   gap: var(--gap-sm) var(--gap);
   align-items: end;
+  margin-block-end: var(--gap);
 
   > .field {
     margin-block-end: 0;
@@ -619,6 +620,11 @@ date-range-input {
      rules here.) */
   display: block;
   font-size: var(--text);
+
+  /* That fallback row sits inside a .field that already spaces it. */
+  .field-row {
+    margin-block-end: 0;
+  }
 
   /* The label matches the other fields' labels. The component already spaces it
      from the field, so no margin of its own. */

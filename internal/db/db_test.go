@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,39 +177,93 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	}
 }
 
-// A database from before per-type backdating (a 0/1 flag on each type and a
-// global sick setting) opens, keeps its rows and its STRICT tables, gives every
-// existing type the 90-day policy whatever the old flag said, and loses both
-// old columns. Opening it a second time changes nothing.
-func TestMigrateBackdating(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
+// The previous build's leave_types and settings tables, verbatim from commit
+// 6dd59d8's schema, so the migration is tested against the real old text
+// (including settings.sick_backdate_days and its CHECK) and not a paraphrase.
+const oldLeaveTypes = `CREATE TABLE IF NOT EXISTS leave_types (
+	id              INTEGER PRIMARY KEY,
+	code            TEXT NOT NULL UNIQUE,
+	name            TEXT NOT NULL,
+	-- NULL means unlimited (unpaid leave): there is no balance to exhaust.
+	allowance_days  INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
+	cycle_months    INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
+	-- workdays counts the organisation's working days (Admin -> Settings) that are
+	-- not public holidays; calendar counts every day (maternity leave is four
+	-- consecutive months, holidays included); weekend counts one per weekend
+	-- off, which runs Saturday to Sunday, or Friday to Sunday for someone on
+	-- long weekends.
+	unit            TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar', 'weekend')),
+	-- What this type may do with the restricted day (the restricted day in Settings, e.g.
+	-- Sunday): any -- no rule; min -- only inside a request of at least
+	-- the settings minimum of working days; never -- not at all.
+	restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
+	-- Sick leave is applied for after the fact; nothing else may start in the past.
+	backdate        INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
+	requires_note   INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
+	active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+	sort            INTEGER NOT NULL DEFAULT 0,
+	-- How department coverage limits treat this type. limit: it counts as
+	-- someone being away and can be blocked by the limit. count: it counts as
+	-- away but is never blocked (nobody should be refused sick leave).
+	coverage_rule   TEXT NOT NULL DEFAULT 'limit' CHECK (coverage_rule IN ('limit', 'count'))
+) STRICT`
+
+const oldSettings = `CREATE TABLE IF NOT EXISTS settings (
+	id                    INTEGER PRIMARY KEY CHECK (id = 1),
+	work_days             TEXT NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
+	restricted_day        TEXT NOT NULL DEFAULT '' CHECK (restricted_day IN ('', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat')),
+	restricted_min_days   INTEGER NOT NULL DEFAULT 3 CHECK (restricted_min_days BETWEEN 1 AND 31),
+	final_approver_id     INTEGER REFERENCES users(id),
+	sick_backdate_days    INTEGER NOT NULL DEFAULT 14 CHECK (sick_backdate_days BETWEEN 0 AND 365),
+	sick_cycle_start_year INTEGER NOT NULL DEFAULT 2025 CHECK (sick_cycle_start_year BETWEEN 2000 AND 2100),
+	-- The default team limit, a percentage; 0 means a team with no rule of its
+	-- own has no limit.
+	team_default_percent  INTEGER NOT NULL DEFAULT 0 CHECK (team_default_percent BETWEEN 0 AND 100),
+	updated_by_id         INTEGER REFERENCES users(id),
+	updated_at            TEXT NOT NULL DEFAULT ''
+) STRICT`
+
+// oldDatabase builds a database as the previous build left it, with an
+// annual type (flag 0) and a sick type (flag 1).
+func oldDatabase(t *testing.T, path string) {
+	t.Helper()
 	fresh, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Rebuild the two tables as the previous build defined them.
+	defer fresh.Close()
 	for _, stmt := range []string{
-		`DROP TABLE leave_types`,
-		`CREATE TABLE leave_types (
-			id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
-			allowance_days INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
-			cycle_months INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
-			unit TEXT NOT NULL CHECK (unit IN ('workdays', 'calendar', 'weekend')),
-			restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
-			backdate INTEGER NOT NULL DEFAULT 0 CHECK (backdate IN (0, 1)),
-			requires_note INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
-			active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-			sort INTEGER NOT NULL DEFAULT 0,
-			coverage_rule TEXT NOT NULL DEFAULT 'limit' CHECK (coverage_rule IN ('limit', 'count'))
-		) STRICT`,
+		`DROP TABLE settings`, `DROP TABLE leave_types`, oldLeaveTypes, oldSettings,
+		`INSERT INTO settings (id) VALUES (1)`,
 		`INSERT INTO leave_types (code, name, cycle_months, unit, backdate) VALUES ('annual', 'Annual', 12, 'workdays', 0), ('sick', 'Sick', 36, 'workdays', 1)`,
-		`ALTER TABLE settings ADD COLUMN sick_backdate_days INTEGER NOT NULL DEFAULT 14`,
 	} {
 		if _, err := fresh.Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
-	fresh.Close()
+}
+
+func backups(t *testing.T, dir string) []string {
+	t.Helper()
+	m, err := filepath.Glob(filepath.Join(dir, "*.pre-backdate-*.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// A database from before per-type backdating (a 0/1 flag on each type and a
+// global sick setting) opens, keeps its rows and its STRICT tables, gives every
+// existing type the 92-day policy whatever the old flag said, and loses both
+// old columns. Opening it a second time changes nothing, and only the first
+// open takes a backup.
+func TestMigrateBackdating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.db")
+	oldDatabase(t, path)
+	if n := len(backups(t, dir)); n != 0 {
+		t.Fatalf("%d backups before any migration", n)
+	}
 
 	for pass := 1; pass <= 2; pass++ {
 		d, err := Open(path)
@@ -227,8 +282,8 @@ func TestMigrateBackdating(t *testing.T) {
 			got[c] = n
 		}
 		rows.Close()
-		if len(got) != 2 || got["annual"] != 90 || got["sick"] != 90 {
-			t.Errorf("pass %d: backdate_days = %v, want 90 for both", pass, got)
+		if len(got) != 2 || got["annual"] != 92 || got["sick"] != 92 {
+			t.Errorf("pass %d: backdate_days = %v, want 92 for both", pass, got)
 		}
 		for _, c := range [][2]string{{"leave_types", "backdate"}, {"settings", "sick_backdate_days"}} {
 			var n int
@@ -242,10 +297,74 @@ func TestMigrateBackdating(t *testing.T) {
 		if !strings.HasSuffix(strings.TrimSpace(strings.ToUpper(ddl)), ") STRICT") {
 			t.Errorf("pass %d: leave_types lost STRICT", pass)
 		}
-		// The CHECK came with the column.
-		if _, err := d.Exec(`UPDATE leave_types SET backdate_days = 366`); err == nil {
-			t.Errorf("pass %d: backdate_days 366 accepted", pass)
+		// The CHECK came with the column: 92 is the cap.
+		if _, err := d.Exec(`UPDATE leave_types SET backdate_days = 93`); err == nil {
+			t.Errorf("pass %d: backdate_days 93 accepted", pass)
+		}
+		if _, err := d.Exec(`UPDATE leave_types SET backdate_days = 92`); err != nil {
+			t.Errorf("pass %d: backdate_days 92 refused: %v", pass, err)
 		}
 		d.Close()
+	}
+
+	// One backup, taken before the ALTER: it still has the old columns and the
+	// old flag values, so it is what a rollback restores.
+	bs := backups(t, dir)
+	if len(bs) != 1 {
+		t.Fatalf("%d backups after two opens, want 1: %v", len(bs), bs)
+	}
+	b, err := sql.Open("sqlite3", "file:"+bs[0]+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	var flag int
+	if err := b.QueryRow(`SELECT backdate FROM leave_types WHERE code = 'sick'`).Scan(&flag); err != nil || flag != 1 {
+		t.Errorf("backup does not hold the old schema: flag=%d err=%v", flag, err)
+	}
+}
+
+// A fresh database has nothing to migrate and so nothing to back up.
+func TestFreshDatabaseTakesNoBackup(t *testing.T) {
+	dir := t.TempDir()
+	for range 2 {
+		d, err := Open(filepath.Join(dir, "fresh.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Close()
+	}
+	if n := len(backups(t, dir)); n != 0 {
+		t.Fatalf("%d backups for a fresh database", n)
+	}
+}
+
+// If the backup cannot be written the open fails and the database is left as
+// it was: no half-migrated state.
+func TestMigrateBackdatingNeedsItsBackup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.db")
+	oldDatabase(t, path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	if f, err := os.Create(filepath.Join(dir, "probe")); err == nil {
+		f.Close()
+		t.Skip("directory is writable despite chmod (running as root?)")
+	}
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "back up") {
+		t.Fatalf("err = %v, want a backup failure", err)
+	}
+	os.Chmod(dir, 0o700)
+	d, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var n int
+	d.QueryRow(`SELECT count(*) FROM pragma_table_info('leave_types') WHERE name = 'backdate'`).Scan(&n)
+	if n != 1 {
+		t.Error("the database was migrated without its backup")
 	}
 }

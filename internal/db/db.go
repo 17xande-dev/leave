@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -89,8 +91,8 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	-- the settings minimum of working days; never -- not at all.
 	restricted_rule TEXT NOT NULL DEFAULT 'min' CHECK (restricted_rule IN ('any', 'min', 'never')),
 	-- How many days before today a request of this type may start. 0 means it
-	-- may not start in the past; 90 is about three months.
-	backdate_days   INTEGER NOT NULL DEFAULT 90 CHECK (backdate_days BETWEEN 0 AND 365),
+	-- may not start in the past; 92 is three calendar months at most, the cap.
+	backdate_days   INTEGER NOT NULL DEFAULT 92 CHECK (backdate_days BETWEEN 0 AND 92),
 	requires_note   INTEGER NOT NULL DEFAULT 0 CHECK (requires_note IN (0, 1)),
 	active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
 	sort            INTEGER NOT NULL DEFAULT 0,
@@ -367,7 +369,7 @@ func Open(path string) (*sql.DB, error) {
 		d.Close()
 		return nil, err
 	}
-	if err := migrateBackdating(d); err != nil {
+	if err := migrateBackdating(d, path); err != nil {
 		d.Close()
 		return nil, err
 	}
@@ -455,29 +457,46 @@ func checkCurrent(d *sql.DB) error {
 // per-type leave_types.backdate_days. It is the one in-place migration the
 // app has: the production database predates it and holds real requests.
 //
+// This release is forward-only: the old build refuses the new columns' absence
+// and cannot read the result, so before the first ALTER (and only when there is
+// something to migrate) the database is copied with VACUUM INTO next to the
+// original. If that fails the open fails and nothing has changed. Rolling back
+// means restoring that copy.
+//
 // ADD COLUMN works on a STRICT table, and the new column's NOT NULL, DEFAULT
 // and CHECK are all allowed on it, so the table keeps its STRICT definition
-// (unlike the rebuild the header comment warns about). The default of 90 is
+// (unlike the rebuild the header comment warns about). The default of 92 is
 // the policy for every type, so every existing row gets it without a
 // backfill UPDATE; the old columns are then dropped (SQLite 3.35+, and a
 // column's own CHECK does not block its DROP). It is idempotent: a database
 // already on the new schema, or a fresh one, is left alone.
-func migrateBackdating(d *sql.DB) error {
-	has := func(table, col string) (bool, error) {
+func migrateBackdating(d *sql.DB, path string) error {
+	has := func(q interface {
+		QueryRow(string, ...any) *sql.Row
+	}, table, col string) (bool, error) {
 		var n int
-		err := d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n)
+		err := q.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n)
 		return n > 0, err
 	}
-	oldFlag, err := has("leave_types", "backdate")
+	oldFlag, err := has(d, "leave_types", "backdate")
 	if err != nil {
 		return err
 	}
-	oldSick, err := has("settings", "sick_backdate_days")
+	oldSick, err := has(d, "settings", "sick_backdate_days")
 	if err != nil {
 		return err
 	}
 	if !oldFlag && !oldSick {
 		return nil
+	}
+	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
+		slog.Warn("migrating backdating without a backup: the database path is not a plain file", "path", path)
+	} else {
+		backup := fmt.Sprintf("%s.pre-backdate-%s.db", path, time.Now().UTC().Format("20060102T150405Z"))
+		if _, err := d.Exec(`VACUUM INTO ?`, backup); err != nil {
+			return fmt.Errorf("back up the database before migrating backdating: %w", err)
+		}
+		slog.Info("backed up the database before migrating backdating", "backup", backup)
 	}
 	tx, err := d.Begin()
 	if err != nil {
@@ -485,13 +504,13 @@ func migrateBackdating(d *sql.DB) error {
 	}
 	defer tx.Rollback()
 	if oldFlag {
-		newCol, err := has("leave_types", "backdate_days")
+		newCol, err := has(tx, "leave_types", "backdate_days")
 		if err != nil {
 			return err
 		}
 		if !newCol {
-			if _, err := tx.Exec(`ALTER TABLE leave_types ADD COLUMN backdate_days INTEGER NOT NULL DEFAULT 90
-				CHECK (backdate_days BETWEEN 0 AND 365)`); err != nil {
+			if _, err := tx.Exec(`ALTER TABLE leave_types ADD COLUMN backdate_days INTEGER NOT NULL DEFAULT 92
+				CHECK (backdate_days BETWEEN 0 AND 92)`); err != nil {
 				return fmt.Errorf("migrate backdating: %w", err)
 			}
 		}

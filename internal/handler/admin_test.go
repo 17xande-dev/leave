@@ -106,14 +106,14 @@ func TestTypeAndHolidayAdmin(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 	res, _ := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Study leave"},
-		"allowance": {"5"}, "backdate_days": {"90"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}})
+		"allowance": {"5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("new type: %d", res.StatusCode)
 	}
 	if _, body := hs.get(hs.signIn("staff1"), "/leave/new"); !strings.Contains(body, "Study leave") {
 		t.Fatal("new type not offered")
 	}
-	res, body := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Dup"}, "backdate_days": {"90"}, "cycle_months": {"12"}, "unit": {"workdays"}})
+	res, body := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Dup"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}})
 	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already uses that code") {
 		t.Fatalf("duplicate code: %d", res.StatusCode)
 	}
@@ -196,15 +196,15 @@ func TestShutdownFormValidation(t *testing.T) {
 }
 
 // The type form carries the per-type backdating limit: it shows with the
-// 90-day default, saves, and refuses anything but a whole number from 0 to 365
+// 92-day default, saves, and refuses anything but a whole number from 0 to 92
 // beside the field, showing what was typed.
 func TestTypeFormBackdateDays(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 
 	_, body := hs.get(hr, "/admin/types/new")
-	if !strings.Contains(body, "Backdating (days)") || !strings.Contains(body, `name="backdate_days"`) || !strings.Contains(body, `value="90"`) {
-		t.Fatalf("new type form lacks the backdating field at 90:\n%s", body)
+	if !strings.Contains(body, "Backdating (days)") || !strings.Contains(body, `name="backdate_days"`) || !strings.Contains(body, `value="92"`) {
+		t.Fatalf("new type form lacks the backdating field at 92:\n%s", body)
 	}
 	if strings.Contains(body, "May start in the past") {
 		t.Error("the old checkbox is still on the form")
@@ -239,15 +239,35 @@ func TestTypeFormBackdateDays(t *testing.T) {
 	if res, _ := hs.post(hr, "/admin/types", f); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save at 0: %d", res.StatusCode)
 	}
-	if _, body := hs.get(hr, "/admin/types"); strings.Contains(body, "backdate 0 days") {
-		t.Error("a zero limit should show no badge")
+	if _, body := hs.get(hr, "/admin/types"); !strings.Contains(body, "no backdating") || strings.Contains(body, "backdate 0 days") {
+		t.Error("a zero limit should show \"no backdating\"")
 	}
+	// The default is the norm, so it earns no badge; one day is singular.
+	one := form("1")
+	one.Set("id", itoa(id))
+	hs.post(hr, "/admin/types", one)
+	if _, body := hs.get(hr, "/admin/types"); !strings.Contains(body, "backdate 1 day<") {
+		t.Error("a limit of one day should read \"1 day\"")
+	}
+	if _, body := hs.get(hr, "/admin/types"); strings.Count(body, "backdate ") != 1 || strings.Contains(body, "no backdating") {
+		t.Error("only the changed type should carry a backdating badge")
+	}
+	// One pass: a bad number does not hide a missing name.
+	f = form("93")
+	f.Set("id", itoa(id))
+	f.Set("name", "")
+	if _, body := hs.post(hr, "/admin/types", f); !strings.Contains(body, "Enter a name.") || !strings.Contains(body, "0 to 92") {
+		t.Error("a rejected form did not report the name and the number together")
+	}
+	f = form("0")
+	f.Set("id", itoa(id))
+	hs.post(hr, "/admin/types", f)
 
-	for _, bad := range []string{"-1", "366", "abc", "", "1.5"} {
+	for _, bad := range []string{"-1", "93", "366", "abc", "", "1.5"} {
 		f := form(bad)
 		f.Set("id", itoa(id))
 		res, body := hs.post(hr, "/admin/types", f)
-		if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "whole number of days from 0 to 365") {
+		if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "whole number of days from 0 to 92") {
 			t.Errorf("backdate_days %q: %d, want 422 with a field error", bad, res.StatusCode)
 		}
 		if bad == "abc" && !strings.Contains(body, `value="abc"`) {

@@ -462,25 +462,27 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 		RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
 		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance")), Backdate: strings.TrimSpace(f("backdate_days"))}
+	// Parse the numbers first, then validate everything in one pass, so a bad
+	// number does not hide a missing name until the next submit.
+	parseErrs := leave.FieldErrors{}
 	if n, ok := parseWhole(d.Backdate); ok {
 		t.BackdateDays, d.Type.BackdateDays = n, n
 	} else {
-		d.Errors = leave.FieldErrors{"backdate_days": "Enter a whole number of days from 0 to 365."}
+		parseErrs["backdate_days"] = leave.BackdateMessage
 	}
 	if d.Allowance != "" {
 		n, err := strconv.Atoi(d.Allowance)
 		if err != nil {
-			if d.Errors == nil {
-				d.Errors = leave.FieldErrors{}
-			}
-			d.Errors["allowance"] = "Enter a whole number of days, or leave it empty for no limit."
-			h.render(w, r, http.StatusUnprocessableEntity, "admin_type.html", view{Title: "Leave type", Data: d})
-			return
+			parseErrs["allowance"] = "Enter a whole number of days, or leave it empty for no limit."
+		} else {
+			t.Allowance, d.Type.Allowance = &n, &n
 		}
-		t.Allowance = &n
-		d.Type.Allowance = &n
 	}
-	if d.Errors != nil {
+	if len(parseErrs) > 0 {
+		d.Errors = leave.ValidateType(&t)
+		for k, v := range parseErrs {
+			d.Errors[k] = v
+		}
 		h.render(w, r, http.StatusUnprocessableEntity, "admin_type.html", view{Title: "Leave type", Data: d})
 		return
 	}
