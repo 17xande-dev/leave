@@ -36,6 +36,8 @@
   --pending: light-dark(#8a5a00, #e5a63a);
   --highlight: light-dark(#daf617, #daf617);
   --highlight-ink: light-dark(#0c0c0c, #0c0c0c);
+  /* Shadows stay dark in both themes: one made from --ink would glow in dark. */
+  --shadow: light-dark(#0c0c0c, #000000);
 
   /* Type. One stack, sized fluidly so the page reads on a phone and on a laptop
      without a media query for it. */
@@ -605,28 +607,22 @@ date-range-input {
   --dri-muted: var(--ink-soft);
   --dri-invalid-color: var(--warn);
   --dri-popup-background: var(--paper);
-  --dri-popup-shadow: 0 0.5rem 1.5rem color-mix(in oklab, var(--ink) 20%, transparent);
+  --dri-popup-shadow: 0 0.5rem 1.5rem color-mix(in oklab, var(--shadow) 25%, transparent);
 
+  /* Until the script upgrades it (or when it never runs), the element holds the
+     two native date inputs in an ordinary .field-row, which wraps on a narrow
+     screen; display:block keeps that row from sitting inline. (On a phone the
+     component itself drops to one month, so the popup needs no narrow-screen
+     rules here.) */
+  display: block;
   font-size: var(--text);
 
-  /* The label matches the other fields' labels. */
+  /* The label matches the other fields' labels. The component already spaces it
+     from the field, so no margin of its own. */
   &::part(form-control-label) {
     font-size: var(--text-small);
     font-weight: 500;
     color: var(--ink);
-    margin-block-end: var(--gap-xs);
-  }
-
-  /* Until the script upgrades it (or when it never runs), the element holds the two
-     native date inputs and their labels: lay each label over its input, side by
-     side, as the old field row did. (On a phone the component itself drops to one
-     month, so the popup needs no narrow-screen rules here.) */
-  &:not(:defined) {
-    display: grid;
-    grid-auto-flow: column;
-    grid-template-rows: auto auto;
-    grid-auto-columns: max-content;
-    gap: 0 var(--gap);
   }
 }
 

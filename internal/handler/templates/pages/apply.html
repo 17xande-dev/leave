@@ -46,10 +46,16 @@
     <date-range-input label="Dates" start-name="start" end-name="end" required
         months="2" first-day-of-week="1" with-clear locale="en-GB"
         {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
-      <label for="start">First day</label>
-      <input type="date" id="start" name="start" value="{{.Input.Start}}" required>
-      <label for="end">Last day</label>
-      <input type="date" id="end" name="end" value="{{.Input.End}}" required>
+      <div class="field-row">
+        <div class="field">
+          <label for="start">First day</label>
+          <input type="date" id="start" name="start" value="{{.Input.Start}}" required>
+        </div>
+        <div class="field">
+          <label for="end">Last day</label>
+          <input type="date" id="end" name="end" value="{{.Input.End}}" required>
+        </div>
+      </div>
     </date-range-input>
     {{template "err" index .Errors "start"}}
     {{template "err" index .Errors "end"}}
