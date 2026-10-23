@@ -31,7 +31,7 @@
   {{range .Requests}}
     <tr>
       <td>{{.UserName}}</td>
-      <td><a href="/leave/{{.ID}}">{{.TypeName}}</a></td>
+      <td><a href="/leave/{{.ID}}?from=admin">{{.TypeName}}</a></td>
       <td>{{date .Start}} – {{date .End}}</td>
       <td class="num">{{.Days}}</td>
       <td>{{template "status" .Status}}</td>

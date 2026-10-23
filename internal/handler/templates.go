@@ -12,6 +12,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/17xande-dev/leave/internal/leave"
 )
 
 //go:embed templates
@@ -94,6 +96,14 @@ var funcs = template.FuncMap{
 	// "1 weekend".
 	"units": unitLabel,
 	"list":  func(xs ...string) []string { return xs },
+	// requestsFrom is how the requests partial learns which page it sits on.
+	"requestsFrom": func(rows []leave.Request, from string) requestList { return requestList{rows, from} },
+}
+
+// requestList is a table of requests and the page it is on, as a key of backLinks.
+type requestList struct {
+	Rows []leave.Request
+	From string
 }
 
 // view is what every page renders from. Page-specific data goes in Data, so the

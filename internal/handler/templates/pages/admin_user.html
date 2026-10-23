@@ -137,6 +137,6 @@
 </form>
 
 <h2>Requests</h2>
-{{if .Requests}}{{template "requests" .Requests}}{{else}}<p class="muted">None yet.</p>{{end}}
+{{if .Requests}}{{template "requestsfrom" (requestsFrom .Requests "admin")}}{{else}}<p class="muted">None yet.</p>{{end}}
 {{end}}
 {{end}}

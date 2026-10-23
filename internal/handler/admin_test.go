@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -409,7 +410,7 @@ func TestAdminUnrecord(t *testing.T) {
 	}
 	// Find the request page from the admin page.
 	_, body := hs.get(hr, page)
-	m := regexp.MustCompile(`href="(/leave/\d+)"`).FindStringSubmatch(body)
+	m := regexp.MustCompile(`href="(/leave/\d+)\?from=admin"`).FindStringSubmatch(body)
 	if m == nil {
 		t.Fatalf("no request link:\n%s", body)
 	}
@@ -471,5 +472,45 @@ func TestRecordFormListsInactiveTypes(t *testing.T) {
 	_, body := hs.get(hs.signIn("hr"), "/admin/users/"+itoa(hs.staffID("staff1")))
 	if !strings.Contains(body, "Parental leave (inactive)") || strings.Contains(body, "Annual leave (inactive)") {
 		t.Fatalf("record form types:\n%s", body)
+	}
+}
+
+func TestAdminPeopleSearchAndAnnual(t *testing.T) {
+	hs := newHarness(t)
+	// 3 pending workdays of the 15 allowed leave 12 for Sam, 15 for everyone else.
+	hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	hr := hs.signIn("hr")
+	_, body := hs.get(hr, "/admin/users")
+	if !strings.Contains(body, "Annual leave available") || !strings.Contains(body, `name="q"`) {
+		t.Error("no annual column or search box")
+	}
+	row := func(body, name string) string {
+		i := strings.Index(body, ">"+name+"</a>")
+		if i < 0 {
+			return ""
+		}
+		j := strings.Index(body[i:], "</tr>")
+		return body[i : i+j]
+	}
+	if r := row(body, "Sam Staff"); !strings.Contains(r, `<td class="num">12</td>`) {
+		t.Errorf("Sam's row: %s", r)
+	}
+	if r := row(body, "Thandi Teacher"); !strings.Contains(r, `<td class="num">15</td>`) {
+		t.Errorf("Thandi's row: %s", r)
+	}
+	for q, want := range map[string][]string{
+		"sam":            {"Sam Staff"},
+		"STAFF2":         {"Thandi Teacher"},
+		"headkids@":      {"Kagiso Kids"},
+		"kids":           {"Kagiso Kids", "Thandi Teacher"},
+		"  operations  ": {"Olivia Operations", "Sam Staff", "Hannah HR"},
+		"nobody-at-all":  nil,
+	} {
+		_, body := hs.get(hr, "/admin/users?q="+url.QueryEscape(q))
+		for _, n := range []string{"Senior Pastor", "Olivia Operations", "Kagiso Kids", "Sam Staff", "Thandi Teacher", "Hannah HR"} {
+			if got, w := row(body, n) != "", slices.Contains(want, n); got != w {
+				t.Errorf("q=%q: %s shown=%v, want %v", q, n, got, w)
+			}
+		}
 	}
 }

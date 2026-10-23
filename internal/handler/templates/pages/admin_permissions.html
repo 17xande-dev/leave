@@ -7,7 +7,7 @@
 {{range .Rows}}
 <form method="post" class="panel">
   {{template "csrf" $.CSRF}}
-  <h2><a href="/leave/{{.ID}}">{{.UserName}}: {{.TypeName}}</a></h2>
+  <h2><a href="/leave/{{.ID}}?from=admin">{{.UserName}}: {{.TypeName}}</a></h2>
   <p>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}, {{.Days}} {{units .Days .TypeUnit}}.
   {{if .Shortfall}}That is <strong>{{.Shortfall}} {{units .Shortfall .TypeUnit}}</strong> below zero.{{else}}Their balance now covers it.{{end}}</p>
   <p><strong>Their reason:</strong> {{.Note}}</p>

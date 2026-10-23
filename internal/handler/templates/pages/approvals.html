@@ -9,7 +9,7 @@
   {{range .}}
     <tr>
       <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
-      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}</td>
+      <td><a href="/leave/{{.ID}}?from=approvals">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}</td>
       <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
       <td class="num">{{.Days}}</td>
       <td>
@@ -17,7 +17,7 @@
           {{template "csrf" $.CSRF}}
           <input type="hidden" name="from" value="queue">
           <button type="submit" name="decision" value="approve">{{if .Escalate}}{{with .Next}}Override and send to {{.}}{{else}}Override and approve{{end}}{{else}}Approve{{end}}</button>
-          <a href="/leave/{{.ID}}">Decline…</a>
+          <a href="/leave/{{.ID}}?from=approvals">Decline…</a>
         </form>
       </td>
     </tr>

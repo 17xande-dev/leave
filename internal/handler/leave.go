@@ -189,6 +189,8 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 
 type requestData struct {
 	Request leave.Request
+	// Back is where the page's back link goes, from where the person came.
+	Back backLink
 	// Original is the leave a cancellation request is for.
 	Original *leave.Request
 	// PendingCancellation is a cancellation waiting on this leave.
@@ -238,6 +240,7 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 	u := currentUser(r)
 	d := requestData{
 		Request:     req,
+		Back:        backLink{"/", "My leave"},
 		CanWithdraw: leave.CanWithdraw(u, req),
 		CanCancel:   h.leave.CanRequestCancellation(u, req),
 		CanDecide:   leave.CanDecide(u, req),
@@ -295,6 +298,16 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 	return d, nil
 }
 
+type backLink struct{ Href, Label string }
+
+// backLinks maps the ?from= a list page adds to its links onto a back link. The
+// map is fixed so the query text is never echoed: an unknown value is the default.
+var backLinks = map[string]backLink{
+	"approvals": {"/approvals", "Approvals"},
+	"team":      {"/team", "Team"},
+	"admin":     {"/admin/requests", "Admin"},
+}
+
 func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.loadRequest(w, r)
 	if !ok {
@@ -304,6 +317,9 @@ func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.serverError(w, r, err)
 		return
+	}
+	if b, ok := backLinks[r.URL.Query().Get("from")]; ok {
+		d.Back = b
 	}
 	h.render(w, r, http.StatusOK, "request.html", view{Title: requestTitle(req), Data: d})
 }

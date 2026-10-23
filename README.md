@@ -127,8 +127,9 @@ against the balance, deletes the calendar event, emails the person, and keeps a
 **Removed by** line with who and when. Ordinary approved leave cannot be removed this
 way. Nobody adjusts their own balance either.
 
-**The admin area** has: All requests (with a CSV export), People (approver overrides,
-balance adjustments, long weekends, their teams), Leave types, Public holidays,
+**The admin area** has: All requests (with a CSV export), People (a search box, each
+person's annual leave available, approver overrides, balance adjustments, long weekends,
+their teams), Leave types, Public holidays,
 Shutdowns, Coverage limits, Teams, Permissions, Settings and Outbox.
 
 **Email and calendar** go through an outbox. Each is a database row written in the

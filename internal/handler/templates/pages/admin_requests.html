@@ -32,7 +32,7 @@
   {{range .Requests}}
     <tr>
       <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
-      <td><a href="/leave/{{.ID}}">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a></td>
+      <td><a href="/leave/{{.ID}}?from=admin">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a></td>
       <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
       <td class="num">{{.Days}}</td>
       <td>{{template "status" .Status}}</td>

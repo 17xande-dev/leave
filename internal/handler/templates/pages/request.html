@@ -1,6 +1,6 @@
 {{define "content"}}
 {{with .Data}}{{with .Request}}
-<a class="back" href="/">← My leave</a>
+<a class="back" href="{{$.Data.Back.Href}}">← {{$.Data.Back.Label}}</a>
 <div class="page-head">
   <h1>{{if .IsCancellation}}Cancel {{lower .TypeName}}{{else}}{{.TypeName}}{{end}}</h1>
   {{template "status" .Status}}

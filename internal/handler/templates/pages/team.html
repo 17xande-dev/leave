@@ -9,7 +9,7 @@
   {{range .}}
     <tr>
       <td>{{.UserName}}</td>
-      <td><a href="/leave/{{.ID}}">{{.TypeName}}</a></td>
+      <td><a href="/leave/{{.ID}}?from=team">{{.TypeName}}</a></td>
       <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
       <td class="num">{{.Days}}</td>
       <td>{{template "status" .Status}}</td>

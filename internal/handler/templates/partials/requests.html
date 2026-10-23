@@ -1,12 +1,15 @@
-{{/* A table of requests, from a []leave.Request. */}}
-{{define "requests"}}
+{{/* A table of requests, from a []leave.Request. "requests" is for a person's own
+     list; "requestsfrom" is given a requestList whose From makes the request page's
+     back link return to the page that listed them. */}}
+{{define "requests"}}{{template "requestsfrom" (requestsFrom . "")}}{{end}}
+{{define "requestsfrom"}}
 <div class="scroll-x">
 <table>
   <thead><tr><th>Dates</th><th>Type</th><th class="num">Days</th><th>Status</th></tr></thead>
   <tbody>
-  {{range .}}
+  {{range .Rows}}
     <tr>
-      <td><a href="/leave/{{.ID}}">{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a></td>
+      <td><a href="/leave/{{.ID}}{{if $.From}}?from={{$.From}}{{end}}">{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a></td>
       <td>{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</td>
       <td class="num">{{.Days}}</td>
       <td><span class="badge {{status .Status}}">{{statuslabel .Status}}</span>{{if .Escalate}} <span class="badge special">special permission</span>{{end}}{{if .IsRecorded}} <span class="badge">recorded</span>{{end}}</td>

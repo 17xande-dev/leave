@@ -281,3 +281,57 @@ func mustAtoi(t *testing.T, s string) int64 {
 	}
 	return n
 }
+
+// The back link on a request goes where the person came from, by a fixed map:
+// an unknown value is the default and its text is never echoed.
+func TestRequestBackLink(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	path := hs.apply(staff, "annual", "2026-10-12", "2026-10-12")
+	for _, c := range []struct{ from, href, label string }{
+		{"", `href="/"`, "← My leave"},
+		{"approvals", `href="/approvals"`, "← Approvals"},
+		{"team", `href="/team"`, "← Team"},
+		{"admin", `href="/admin/requests"`, "← Admin"},
+		{"<script>alert(1)</script>", `href="/"`, "← My leave"},
+	} {
+		_, body := hs.get(staff, path+"?from="+url.QueryEscape(c.from))
+		want := `<a class="back" ` + c.href + `>` + c.label + `</a>`
+		if !strings.Contains(body, want) {
+			t.Errorf("from=%q: no %s", c.from, want)
+		}
+		if strings.Contains(c.from, "script") && strings.Contains(body, "alert(1)") {
+			t.Errorf("from=%q was echoed", c.from)
+		}
+	}
+}
+
+// The list pages add the source to their links to a request.
+func TestRequestLinksCarrySource(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-12")
+	id := strings.TrimPrefix(path, "/leave/")
+	hr := hs.signIn("hr")
+	sam, err := hs.us.ByUsername(context.Background(), "staff1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		client     *http.Client
+		page, from string
+	}{
+		{hs.signIn("headops"), "/approvals", "approvals"},
+		{hs.signIn("headops"), "/team", "team"},
+		{hr, "/admin/requests", "admin"},
+		{hr, "/admin/users/" + strconv.FormatInt(sam.ID, 10), "admin"},
+	} {
+		_, body := hs.get(c.client, c.page)
+		if want := `href="/leave/` + id + `?from=` + c.from + `"`; !strings.Contains(body, want) {
+			t.Errorf("%s: no link %s", c.page, want)
+		}
+	}
+	_, body := hs.get(hs.signIn("staff1"), "/")
+	if !strings.Contains(body, `href="/leave/`+id+`"`) {
+		t.Error("home links should carry no source")
+	}
+}

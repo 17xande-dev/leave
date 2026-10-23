@@ -222,6 +222,8 @@ type userRow struct {
 	User     users.User
 	Approver string
 	Override bool
+	// Annual is the annual leave still available; nil when unlimited or there is no such type.
+	Annual *int
 }
 
 func (h *Handler) approverName(r *http.Request, u users.User) (string, error) {
@@ -236,15 +238,32 @@ func (h *Handler) approverName(r *http.Request, u users.User) (string, error) {
 	return a.Name, nil
 }
 
+// usersData is the People page: the people matching Query, and how many there are in all.
+type usersData struct {
+	Rows  []userRow
+	Query string
+}
+
 func (h *Handler) AdminUsers(w http.ResponseWriter, r *http.Request) {
 	us, err := h.users.All(r.Context())
 	if err != nil {
 		h.serverError(w, r, err)
 		return
 	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	// One grouped query gives everyone's annual balance, rather than a Balances
+	// call (a query per leave type) for each person on the page.
+	annual, err := h.leave.AvailabilityByCode(r.Context(), leave.AnnualCode)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
 	rows := make([]userRow, 0, len(us))
 	for _, u := range us {
-		row := userRow{User: u}
+		if !matchesUser(u, q) {
+			continue
+		}
+		row := userRow{User: u, Annual: annual.For(u.ID)}
 		if !u.Disabled {
 			if row.Approver, err = h.approverName(r, u); err != nil {
 				h.serverError(w, r, err)
@@ -259,7 +278,19 @@ func (h *Handler) AdminUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, row)
 	}
-	h.render(w, r, http.StatusOK, "admin_users.html", view{Title: "People", Data: rows})
+	h.render(w, r, http.StatusOK, "admin_users.html", view{Title: "People", Data: usersData{Rows: rows, Query: q}})
+}
+
+// matchesUser is whether q, in any case, is part of the person's name,
+// username, email or department. An empty q matches everyone.
+func matchesUser(u users.User, q string) bool {
+	q = strings.ToLower(q)
+	for _, f := range []string{u.Name, u.Username, u.Email, u.Department} {
+		if strings.Contains(strings.ToLower(f), q) {
+			return true
+		}
+	}
+	return false
 }
 
 type adminUserData struct {
