@@ -799,6 +799,52 @@ table {
   }
 }
 
+/* The home page's lead panel: what is next on the left, the annual balance as
+   one large number on the right (below it on a phone). */
+.panel.up-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-md);
+  align-items: center;
+  justify-content: space-between;
+
+  h2 {
+    font-size: var(--text-large);
+    margin-block: 0 var(--gap-sm);
+  }
+
+  p {
+    margin-block: var(--gap-xs) 0;
+  }
+
+  .up-next-lead {
+    font-size: var(--text-large);
+    font-weight: 600;
+  }
+}
+
+.big-number {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+
+  strong {
+    font-size: clamp(3rem, 2rem + 5vw, 5rem);
+    letter-spacing: -0.03em;
+  }
+}
+
+/* The collapsed Past list of requests. */
+details.past {
+  margin-block-start: var(--gap-md);
+
+  > summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-block-end: var(--gap-sm);
+  }
+}
+
 .actions + .panel {
   margin-block-start: var(--gap-md);
 }

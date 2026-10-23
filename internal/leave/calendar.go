@@ -25,6 +25,12 @@ func ParseDate(s string) (time.Time, error) {
 
 func fmtDate(t time.Time) string { return t.Format(time.DateOnly) }
 
+// FormatDate is a civil date as YYYY-MM-DD, the form requests store.
+func FormatDate(t time.Time) string { return fmtDate(t) }
+
+// DaysBetween is the number of calendar days from a to b, both civil dates.
+func DaysBetween(a, b time.Time) int { return int(b.Sub(a).Hours() / 24) }
+
 // Today is the civil date now in loc.
 func Today(now time.Time, loc *time.Location) time.Time {
 	y, m, d := now.In(loc).Date()

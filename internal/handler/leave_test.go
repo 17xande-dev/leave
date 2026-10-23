@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/17xande-dev/leave/internal/leave"
 )
@@ -363,5 +364,93 @@ func TestBackLinkSurvivesDecide(t *testing.T) {
 	res, _ = hs.post(head, p2+"/decide?from=%3Cb%3E", url.Values{"decision": {"decline"}, "note": {"no"}})
 	if loc := res.Header.Get("Location"); loc != p2+"?notice=declined" {
 		t.Fatalf("redirect to %q", loc)
+	}
+}
+
+// approveAs has the approver decide a request (by path) and fails unless it worked.
+func (hs *harness) approveAs(approver *http.Client, path string) {
+	hs.t.Helper()
+	res, body := hs.post(approver, path+"/decide", url.Values{"decision": {"approve"}, "from": {"queue"}})
+	if res.StatusCode != http.StatusSeeOther {
+		hs.t.Fatalf("approve %s: %d\n%s", path, res.StatusCode, body)
+	}
+}
+
+// The home page, with today pinned to Monday 5 October 2026: the leave ending
+// today is both "now" and upcoming, the one that ended yesterday is past, and
+// pending requests are counted but not offered as the next leave.
+func TestHomeUpNextAndSplit(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	head := hs.signIn("headops")
+
+	_, body := hs.get(staff, "/")
+	if !strings.Contains(body, "No leave booked.") || !strings.Contains(body, "You have not applied for any leave yet.") ||
+		strings.Contains(body, "waiting for a decision") || !strings.Contains(body, "15</strong>") {
+		t.Fatalf("empty home:\n%s", body)
+	}
+
+	yesterday := hs.apply(staff, "annual", "2026-10-02", "2026-10-04") // Fri to Sun: ended yesterday
+	hs.approveAs(head, yesterday)
+	_, body = hs.get(staff, "/")
+	if !strings.Contains(body, "No leave booked.") || !strings.Contains(body, "Nothing upcoming.") ||
+		!strings.Contains(body, "Past (1)") {
+		t.Fatalf("a finished leave is past, not next:\n%s", body)
+	}
+
+	today := hs.apply(staff, "annual", "2026-10-05", "2026-10-05")
+	hs.approveAs(head, today)
+	_, body = hs.get(staff, "/")
+	if !strings.Contains(body, "On leave now, until Mon 5 Oct 2026.") || !strings.Contains(body, "Past (1)") ||
+		!strings.Contains(body, "<h3>Upcoming</h3>") {
+		t.Fatalf("leave ending today is current and upcoming:\n%s", body)
+	}
+
+	later := hs.apply(staff, "annual", "2026-10-12", "2026-10-13")
+	hs.approveAs(head, later)
+	pending := hs.apply(staff, "annual", "2026-10-07", "2026-10-07")
+	_, body = hs.get(staff, "/")
+	// The current leave is still the next one until it is over.
+	if !strings.Contains(body, "On leave now") || strings.Contains(body, "Starts in") ||
+		!strings.Contains(body, `<a href="`+pending+`">1 request waiting for a decision`) {
+		t.Fatalf("one pending, current leave first:\n%s", body)
+	}
+	if strings.Index(body, "Wed 7 Oct 2026") > strings.Index(body, "Mon 12 Oct 2026") {
+		t.Fatalf("upcoming is not soonest first:\n%s", body)
+	}
+
+	// With today's leave gone, the next is the 12th, in 6 days.
+	hs.svc.Now = func() time.Time { return time.Date(2026, 10, 6, 8, 0, 0, 0, time.UTC) }
+	_, body = hs.get(staff, "/")
+	if !strings.Contains(body, "Starts in 6 days.") || !strings.Contains(body, "Past (2)") {
+		t.Fatalf("next leave after today's ended:\n%s", body)
+	}
+}
+
+func TestNewHomeDataAnnual(t *testing.T) {
+	today := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	five := 5
+	annual := func(a *int) leave.Balance {
+		return leave.Balance{Type: leave.Type{Code: leave.AnnualCode}, Allowance: a}
+	}
+	if d := newHomeData([]leave.Balance{annual(&five)}, nil, today); d.Annual == nil || *d.Annual != 5 {
+		t.Errorf("annual = %v, want 5", d.Annual)
+	}
+	if d := newHomeData([]leave.Balance{annual(nil)}, nil, today); d.Annual != nil {
+		t.Errorf("unlimited annual shows %d", *d.Annual)
+	}
+	other := leave.Balance{Type: leave.Type{Code: "sick"}, Allowance: &five}
+	if d := newHomeData([]leave.Balance{other}, nil, today); d.Annual != nil {
+		t.Errorf("a missing annual type shows %d", *d.Annual)
+	}
+	rs := []leave.Request{
+		{ID: 4, Status: leave.StatusDraft, Start: "2026-11-01", End: "2026-11-01"},
+		{ID: 3, Status: leave.StatusDeclined, Start: "2026-10-20", End: "2026-10-20"},
+		{ID: 2, Status: leave.StatusAwaitingHR, Start: "2026-10-10", End: "2026-10-10"},
+		{ID: 1, Status: leave.StatusPending, Start: "2026-10-05", End: "2026-10-05"},
+	}
+	d := newHomeData(nil, rs, today)
+	if len(d.Upcoming) != 2 || len(d.Past) != 1 || d.Pending != 1 || d.PendingFirst != 1 || d.Next != nil {
+		t.Errorf("split = %d upcoming, %d past, %d pending, next %v", len(d.Upcoming), len(d.Past), d.Pending, d.Next)
 	}
 }

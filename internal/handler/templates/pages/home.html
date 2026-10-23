@@ -4,6 +4,22 @@
   <a class="button" href="/leave/new">Apply for leave</a>
 </div>
 {{with .Data}}
+<section class="panel up-next">
+  <div class="up-next-main">
+    <h2>Up next</h2>
+    {{with .Next}}
+      <p class="up-next-lead"><a href="/leave/{{.Request.ID}}">{{.Request.TypeName}}, {{date .Request.Start}}{{if ne .Request.Start .Request.End}} – {{date .Request.End}}{{end}}</a></p>
+      <p class="muted">{{.Request.Days}} {{plural .Request.Days "day" "days"}}.
+        {{if .Now}}On leave now, until {{date .Request.End}}.{{else if eq .In 1}}Starts tomorrow.{{else}}Starts in {{.In}} days.{{end}}</p>
+    {{else}}
+      <p class="muted">No leave booked.</p>
+    {{end}}
+    {{if .Pending}}<p><a href="{{if eq .Pending 1}}/leave/{{.PendingFirst}}{{else}}#upcoming{{end}}">{{.Pending}} {{plural .Pending "request" "requests"}} waiting for a decision</a></p>{{end}}
+  </div>
+  {{with .Annual}}
+  <p class="big-number"><strong>{{.}}</strong> <small>{{plural . "day" "days"}} of annual leave left</small></p>
+  {{end}}
+</section>
 {{with .Drafts}}
 <section class="panel attention">
   <h2>Waiting for you to submit</h2>
@@ -31,7 +47,16 @@
 </table>
 </div>
 
-<h2>My requests</h2>
-{{if .Requests}}{{template "requests" .Requests}}{{else}}<p class="muted">You have not applied for any leave yet.</p>{{end}}
+<h2 id="upcoming">My requests</h2>
+{{if not .HasRequests}}<p class="muted">You have not applied for any leave yet.</p>
+{{else}}
+  {{if .Upcoming}}<h3>Upcoming</h3>{{template "requests" .Upcoming}}{{else}}<p class="muted">Nothing upcoming.</p>{{end}}
+  {{with .Past}}
+  <details class="past">
+    <summary>Past ({{len .}})</summary>
+    {{template "requests" .}}
+  </details>
+  {{end}}
+{{end}}
 {{end}}
 {{end}}

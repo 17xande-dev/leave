@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/users"
@@ -13,7 +15,19 @@ import (
 
 type homeData struct {
 	Balances []leave.Balance
-	Requests []leave.Request
+	// Upcoming (soonest first) and Past (newest first) split the person's own
+	// requests on today; see newHomeData.
+	Upcoming, Past []leave.Request
+	// HasRequests is false only when there is nothing at all, drafts included.
+	HasRequests bool
+	// Next is the next approved leave, nil when none is booked.
+	Next *nextLeave
+	// Pending counts requests awaiting a decision; PendingFirst is the soonest.
+	Pending      int
+	PendingFirst int64
+	// Annual is what is left of annual leave; nil when the type is missing,
+	// inactive or unlimited, so no number is shown rather than a wrong one.
+	Annual *int
 	// Drafts are requests waiting for the person to submit them: shutdown
 	// requests created for them, and ones HR allowed to go below zero.
 	Drafts []leave.Request
@@ -36,8 +50,67 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "home.html", view{Title: "My leave",
-		Data: homeData{Balances: bs, Requests: rs, Drafts: drafts}})
+	hd := newHomeData(bs, rs, h.leave.Today())
+	hd.Drafts = drafts
+	h.render(w, r, http.StatusOK, "home.html", view{Title: "My leave", Data: hd})
+}
+
+// nextLeave is an approved leave that has not finished, with where it sits
+// relative to today.
+type nextLeave struct {
+	Request leave.Request
+	// Now: it has started. Otherwise it starts In days from today.
+	Now bool
+	In  int
+}
+
+// newHomeData builds the home page from the person's balances and requests
+// (newest start first, as Service.ForUser returns them). today comes from the
+// service's clock so the page and the rules agree on the day.
+func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeData {
+	d := homeData{Balances: bs, HasRequests: len(rs) > 0}
+	for _, b := range bs {
+		if b.Type.Code == leave.AnnualCode {
+			d.Annual = b.Available()
+		}
+	}
+	// YYYY-MM-DD compares as text.
+	day := leave.FormatDate(today)
+	// Upcoming is what is still live and not over: waiting for a decision or
+	// approved, ending today or later. Declined, withdrawn and cancelled
+	// requests are history whatever their dates. Drafts are in neither list:
+	// they have their own panel and are not a request yet.
+	upcoming := func(r leave.Request) bool {
+		live := r.Status == leave.StatusPending || r.Status == leave.StatusApproved || r.Status == leave.StatusAwaitingHR
+		return live && r.End >= day
+	}
+	for _, r := range rs {
+		switch {
+		case r.Status == leave.StatusDraft:
+		case upcoming(r):
+			d.Upcoming = append(d.Upcoming, r)
+		default:
+			d.Past = append(d.Past, r)
+		}
+	}
+	// rs is newest first; upcoming reads better soonest first.
+	slices.Reverse(d.Upcoming)
+	for _, r := range d.Upcoming {
+		if r.Status == leave.StatusPending {
+			d.Pending++
+			if d.PendingFirst == 0 {
+				d.PendingFirst = r.ID
+			}
+		}
+		if d.Next == nil && r.Status == leave.StatusApproved && r.Kind == leave.KindLeave {
+			n := &nextLeave{Request: r, Now: r.Start <= day}
+			if start, err := leave.ParseDate(r.Start); err == nil && !n.Now {
+				n.In = leave.DaysBetween(today, start)
+			}
+			d.Next = n
+		}
+	}
+	return d
 }
 
 type applyData struct {
