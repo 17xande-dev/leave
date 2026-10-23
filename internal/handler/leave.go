@@ -22,12 +22,14 @@ type homeData struct {
 	HasRequests bool
 	// Next is the next approved leave, nil when none is booked.
 	Next *nextLeave
-	// Pending counts requests awaiting a decision; PendingFirst is the soonest.
+	// Pending counts requests awaiting a decision, HR's included; PendingFirst is the soonest.
 	Pending      int
 	PendingFirst int64
 	// Annual is what is left of annual leave; nil when the type is missing,
 	// inactive or unlimited, so no number is shown rather than a wrong one.
 	Annual *int
+	// AnnualOver is how many days below zero annual leave is, 0 when it is not.
+	AnnualOver int
 	// Drafts are requests waiting for the person to submit them: shutdown
 	// requests created for them, and ones HR allowed to go below zero.
 	Drafts []leave.Request
@@ -72,17 +74,28 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 	for _, b := range bs {
 		if b.Type.Code == leave.AnnualCode {
 			d.Annual = b.Available()
+			if d.Annual != nil && *d.Annual < 0 {
+				d.AnnualOver = -*d.Annual
+			}
 		}
 	}
 	// YYYY-MM-DD compares as text.
 	day := leave.FormatDate(today)
-	// Upcoming is what is still live and not over: waiting for a decision or
-	// approved, ending today or later. Declined, withdrawn and cancelled
-	// requests are history whatever their dates. Drafts are in neither list:
-	// they have their own panel and are not a request yet.
+	// Upcoming is what is still live: anything waiting for a decision (pending
+	// or awaiting HR), whatever its dates, and approved leave that has not
+	// ended. A request still waiting stays up here even when its dates have
+	// passed (backdating is normal), so it is not hidden under Past and still
+	// counts as waiting. An approved cancellation is done, so it is Past, as
+	// are declined, withdrawn and cancelled requests. Drafts are in neither
+	// list: they have their own panel and are not a request yet.
 	upcoming := func(r leave.Request) bool {
-		live := r.Status == leave.StatusPending || r.Status == leave.StatusApproved || r.Status == leave.StatusAwaitingHR
-		return live && r.End >= day
+		switch r.Status {
+		case leave.StatusPending, leave.StatusAwaitingHR:
+			return true
+		case leave.StatusApproved:
+			return r.Kind == leave.KindLeave && r.End >= day
+		}
+		return false
 	}
 	for _, r := range rs {
 		switch {
@@ -96,7 +109,7 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 	// rs is newest first; upcoming reads better soonest first.
 	slices.Reverse(d.Upcoming)
 	for _, r := range d.Upcoming {
-		if r.Status == leave.StatusPending {
+		if r.Status == leave.StatusPending || r.Status == leave.StatusAwaitingHR {
 			d.Pending++
 			if d.PendingFirst == 0 {
 				d.PendingFirst = r.ID

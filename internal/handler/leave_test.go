@@ -415,7 +415,7 @@ func TestHomeUpNextAndSplit(t *testing.T) {
 		!strings.Contains(body, `<a href="`+pending+`">1 request waiting for a decision`) {
 		t.Fatalf("one pending, current leave first:\n%s", body)
 	}
-	if strings.Index(body, "Wed 7 Oct 2026") > strings.Index(body, "Mon 12 Oct 2026") {
+	if a, b := strings.Index(body, "Wed 7 Oct 2026"), strings.Index(body, "Mon 12 Oct 2026"); a < 0 || b < 0 || a > b {
 		t.Fatalf("upcoming is not soonest first:\n%s", body)
 	}
 
@@ -450,7 +450,86 @@ func TestNewHomeDataAnnual(t *testing.T) {
 		{ID: 1, Status: leave.StatusPending, Start: "2026-10-05", End: "2026-10-05"},
 	}
 	d := newHomeData(nil, rs, today)
-	if len(d.Upcoming) != 2 || len(d.Past) != 1 || d.Pending != 1 || d.PendingFirst != 1 || d.Next != nil {
+	if len(d.Upcoming) != 2 || len(d.Past) != 1 || d.Pending != 2 || d.PendingFirst != 1 || d.Next != nil {
 		t.Errorf("split = %d upcoming, %d past, %d pending, next %v", len(d.Upcoming), len(d.Past), d.Pending, d.Next)
+	}
+}
+
+func (hs *harness) clock(y int, m time.Month, d int) {
+	hs.svc.Now = func() time.Time { return time.Date(y, m, d, 8, 0, 0, 0, time.UTC) }
+}
+
+func TestHomeStartsTomorrowAndWeekend(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	hs.approveAs(head, hs.apply(staff, "annual", "2026-10-06", "2026-10-06"))
+	if _, body := hs.get(staff, "/"); !strings.Contains(body, "Starts tomorrow.") {
+		t.Fatalf("starts tomorrow:\n%s", body)
+	}
+	// Friday to Monday, seen on the Saturday: the leave has started.
+	hs.approveAs(head, hs.apply(staff, "annual", "2026-10-09", "2026-10-12"))
+	hs.clock(2026, time.October, 10)
+	if _, body := hs.get(staff, "/"); !strings.Contains(body, "On leave now, until Mon 12 Oct 2026.") {
+		t.Fatalf("weekend-spanning leave:\n%s", body)
+	}
+}
+
+// An approved cancellation is finished business: it is Past, and the leave it
+// cancelled is no longer next.
+func TestHomeCancelledLeaveIsNotUpcoming(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	path := hs.apply(staff, "annual", "2026-10-12", "2026-10-13")
+	hs.approveAs(head, path)
+	res, _ := hs.post(staff, path+"/cancel", url.Values{"note": {"plans changed"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("cancel: %d", res.StatusCode)
+	}
+	cpath, _, _ := strings.Cut(res.Header.Get("Location"), "?")
+	hs.approveAs(head, cpath)
+	_, body := hs.get(staff, "/")
+	if !strings.Contains(body, "No leave booked.") || !strings.Contains(body, "Nothing upcoming.") || !strings.Contains(body, "Past (2)") {
+		t.Fatalf("cancelled leave:\n%s", body)
+	}
+}
+
+// Backdated requests are normal: one still waiting stays Upcoming and counted
+// even though its dates have gone.
+func TestHomeBackdatedPendingStaysUpcoming(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	path := hs.apply(staff, "annual", "2026-09-28", "2026-09-29")
+	_, body := hs.get(staff, "/")
+	if !strings.Contains(body, `<a href="`+path+`">1 request waiting for a decision`) || !strings.Contains(body, "<h3>Upcoming</h3>") ||
+		strings.Contains(body, "Past (") {
+		t.Fatalf("backdated pending:\n%s", body)
+	}
+}
+
+func TestHomeAnnualNegativeAndInactive(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	hr, _ := hs.us.ByUsername(context.Background(), "hr")
+	id := hs.staffID("staff1")
+	tid, _ := strconv.ParseInt(hs.typeID("annual"), 10, 64)
+	err := hs.svc.AddAdjustment(context.Background(), hr, leave.Adjustment{UserID: id, TypeID: tid, CycleStart: "2026-01-01", Days: -17, Reason: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body := hs.get(staff, "/")
+	if !strings.Contains(body, "<strong>-2</strong>") || !strings.Contains(body, "2 days below zero for annual leave") ||
+		strings.Contains(body, "annual leave left") {
+		t.Fatalf("negative annual:\n%s", body)
+	}
+	at, err := hs.svc.Type(context.Background(), tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at.Active = false
+	if _, err := hs.svc.SaveType(context.Background(), at); err != nil {
+		t.Fatal(err)
+	}
+	if _, body := hs.get(staff, "/"); strings.Contains(body, "big-number") {
+		t.Fatalf("inactive annual shows a number:\n%s", body)
 	}
 }

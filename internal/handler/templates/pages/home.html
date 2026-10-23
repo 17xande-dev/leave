@@ -17,7 +17,7 @@
     {{if .Pending}}<p><a href="{{if eq .Pending 1}}/leave/{{.PendingFirst}}{{else}}#upcoming{{end}}">{{.Pending}} {{plural .Pending "request" "requests"}} waiting for a decision</a></p>{{end}}
   </div>
   {{with .Annual}}
-  <p class="big-number"><strong>{{.}}</strong> <small>{{plural . "day" "days"}} of annual leave left</small></p>
+  <p class="big-number"><strong>{{.}}</strong> <small>{{if $.Data.AnnualOver}}{{$.Data.AnnualOver}} {{plural $.Data.AnnualOver "day" "days"}} below zero for annual leave{{else}}{{plural . "day" "days"}} of annual leave left{{end}}</small></p>
   {{end}}
 </section>
 {{with .Drafts}}
