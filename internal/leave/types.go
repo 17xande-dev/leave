@@ -309,26 +309,44 @@ func (s *Service) HolidaysInYear(ctx context.Context, year int) ([]HolidayRow, e
 	return out, rows.Err()
 }
 
-// holidaySet returns the stored holidays between start and end. Callers run
-// ensureYears first and outside any transaction: with _txlock=immediate a
-// write on s.db from inside a transaction would wait on its own lock.
-func (s *Service) holidaySet(ctx context.Context, q querier, start, end time.Time) (map[time.Time]bool, error) {
-	out := map[time.Time]bool{}
-	rows, err := q.QueryContext(ctx, `SELECT date FROM holidays WHERE date BETWEEN ? AND ?`, fmtDate(start), fmtDate(end))
+// holidayNames returns the stored holidays between start and end, with their
+// names. Callers run ensureYears first and outside any transaction: with
+// _txlock=immediate a write on s.db from inside a transaction would wait on
+// its own lock.
+func (s *Service) holidayNames(ctx context.Context, q querier, start, end time.Time) (map[time.Time]string, error) {
+	out := map[time.Time]string{}
+	rows, err := q.QueryContext(ctx, `SELECT date, name FROM holidays WHERE date BETWEEN ? AND ?`, fmtDate(start), fmtDate(end))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var ds string
-		if err := rows.Scan(&ds); err != nil {
+		var ds, name string
+		if err := rows.Scan(&ds, &name); err != nil {
 			return nil, err
 		}
 		if t, err := ParseDate(ds); err == nil {
-			out[t] = true
+			out[t] = name
 		}
 	}
 	return out, rows.Err()
+}
+
+// holidaySet is holidayNames without the names, for the day counting.
+func (s *Service) holidaySet(ctx context.Context, q querier, start, end time.Time) (map[time.Time]bool, error) {
+	names, err := s.holidayNames(ctx, q, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return holidayDays(names), nil
+}
+
+func holidayDays(names map[time.Time]string) map[time.Time]bool {
+	out := make(map[time.Time]bool, len(names))
+	for d := range names {
+		out[d] = true
+	}
+	return out
 }
 
 type querier interface {

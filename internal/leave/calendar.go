@@ -4,6 +4,7 @@ package leave
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -132,11 +133,73 @@ func (w Week) Working(d time.Time, holidays map[time.Time]bool) bool {
 func CountDays(start, end time.Time, unit string, holidays map[time.Time]bool, week Week) int {
 	n := 0
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if unit == UnitCalendar || week.Working(d, holidays) {
+		if charged(d, unit, holidays, week) {
 			n++
 		}
 	}
 	return n
+}
+
+// charged is the one rule for whether a day costs leave, shared by CountDays
+// and NotCharged so the count and the explanation cannot disagree.
+func charged(d time.Time, unit string, holidays map[time.Time]bool, week Week) bool {
+	return unit == UnitCalendar || week.Working(d, holidays)
+}
+
+// NotCharged is one line explaining days in a request that cost nothing.
+type NotCharged struct {
+	Date time.Time // the first day the line is about
+	Text string
+}
+
+// maxNotCharged caps the lines shown; the rest are counted in more.
+const maxNotCharged = 6
+
+// notCharged lists the days in start..end that CountDays skips, and why: one
+// line for the weekdays the working week leaves out ("Saturday and Sunday
+// are not working days"), then one per public holiday, soonest first. A
+// holiday on a day off is already explained by the week. At most
+// maxNotCharged lines; more counts the holiday lines left out.
+func notCharged(start, end time.Time, unit string, names map[time.Time]string, week Week) (lines []NotCharged, more int) {
+	holidays := holidayDays(names)
+	var off [7]bool
+	var offFirst time.Time
+	var hols []NotCharged
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		if charged(d, unit, holidays, week) {
+			continue
+		}
+		if !week[d.Weekday()] {
+			if offFirst.IsZero() {
+				offFirst = d
+			}
+			off[d.Weekday()] = true
+			continue
+		}
+		hols = append(hols, NotCharged{Date: d, Text: d.Format("Mon 2 Jan") + ": " + names[d]})
+	}
+	if !offFirst.IsZero() {
+		var days []string
+		// Monday first, as a week reads, not Sunday.
+		for i := 1; i <= 7; i++ {
+			if wd := time.Weekday(i % 7); off[wd] {
+				days = append(days, wd.String())
+			}
+		}
+		text := days[0] + " is not a working day"
+		if len(days) > 1 {
+			text = strings.Join(days[:len(days)-1], ", ") + " and " + days[len(days)-1] + " are not working days"
+		}
+		lines = append(lines, NotCharged{Date: offFirst, Text: text})
+	}
+	for _, h := range hols {
+		if len(lines) == maxNotCharged {
+			more++
+			continue
+		}
+		lines = append(lines, h)
+	}
+	return lines, more
 }
 
 // CycleStart is the first day of the leave cycle containing d. Annual-style

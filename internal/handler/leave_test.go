@@ -533,3 +533,46 @@ func TestHomeAnnualNegativeAndInactive(t *testing.T) {
 		t.Fatalf("inactive annual shows a number:\n%s", body)
 	}
 }
+
+func TestQuoteListsUnchargedDays(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.signIn("staff1")
+	// Monday to Friday over the Day of Reconciliation (Wed 16 Dec), plus a weekend.
+	_, body := hs.get(c, fmt.Sprintf("/leave/quote?type=%s&start=2026-12-14&end=2026-12-20", hs.typeID("annual")))
+	for _, want := range []string{"4 working days", "Wed 16 Dec: Day of Reconciliation", "Saturday and Sunday are not working days"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("quote lacks %q:\n%s", want, body)
+		}
+	}
+	_, body = hs.get(c, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-16", hs.typeID("annual")))
+	if strings.Contains(body, "Not charged") {
+		t.Errorf("clean week lists uncharged days:\n%s", body)
+	}
+}
+
+func TestApplyTypeLabelsShowWhatIsLeft(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.signIn("staff1")
+	ctx := context.Background()
+	annual, _ := hs.svc.Type(ctx, mustAtoi(t, hs.typeID("annual")))
+	_, body := hs.get(c, "/leave/new")
+	if !strings.Contains(body, ">Annual leave (15 left)</option>") {
+		t.Errorf("annual label:\n%s", body)
+	}
+	if !strings.Contains(body, ">Unpaid leave</option>") {
+		t.Errorf("unlimited type should be just its name:\n%s", body)
+	}
+	annual.Allowance = new(int)
+	weekend, _ := hs.svc.Type(ctx, mustAtoi(t, hs.anyTypeID("weekend")))
+	two := 2
+	weekend.Active, weekend.Allowance = true, &two
+	for _, ty := range []leave.Type{annual, weekend} {
+		if _, err := hs.svc.SaveType(ctx, ty); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body = hs.get(c, "/leave/new")
+	if !strings.Contains(body, ">Annual leave (0 left)</option>") || !strings.Contains(body, ">Weekends off (2 weekends left)</option>") {
+		t.Errorf("exhausted and weekend labels:\n%s", body)
+	}
+}

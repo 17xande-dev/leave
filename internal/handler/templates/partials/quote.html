@@ -11,6 +11,13 @@
   {{with .Quote}}{{if .Days}}
     <p><strong>{{.Days}} {{units .Days .Type.Unit}}</strong>
     {{with .After}} — {{.}} left in this cycle afterwards{{end}}</p>
+    {{with .NotCharged}}
+    <p class="hint">Not charged:</p>
+    <ul class="not-charged">
+      {{range .}}<li>{{.Text}}</li>{{end}}
+      {{with $.Quote.NotChargedMore}}<li>and {{.}} more not charged</li>{{end}}
+    </ul>
+    {{end}}
   {{end}}{{end}}
   {{/* Buttons inside the swapped partial, which is inside the form: they post
        the form's fields with override=1 or negative=1, and work after a swap. */}}

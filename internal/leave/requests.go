@@ -260,6 +260,11 @@ type Quote struct {
 	// Coverage has one entry for each limit (its department's, its teams')
 	// the request is over, whether or not that is allowed; empty when none.
 	Coverage []Coverage
+	// NotCharged explains the days in the range that cost nothing (days off
+	// and public holidays), capped; NotChargedMore counts the lines left out.
+	// Empty for weekend-unit types, which cost one per weekend whatever its days.
+	NotCharged     []NotCharged
+	NotChargedMore int
 }
 
 // Offers reads what a refused quote leaves open to the person: canOverride is
@@ -391,10 +396,11 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return qt, errs
 	}
 
-	holidays, err := s.holidaySet(ctx, q, start, end)
+	holidayNames, err := s.holidayNames(ctx, q, start, end)
 	if err != nil {
 		return Quote{}, err
 	}
+	holidays := holidayDays(holidayNames)
 	if t.Unit == UnitWeekend {
 		if msg := weekendShape(start, end, u.LongWeekend); msg != "" {
 			errs["start"] = msg
@@ -403,6 +409,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		qt.Days = 1
 	} else {
 		qt.Days = CountDays(start, end, t.Unit, holidays, st.Week)
+		qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
 		if qt.Days == 0 {
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs

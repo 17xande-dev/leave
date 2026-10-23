@@ -360,6 +360,7 @@ type PreviewOut struct {
 	AvailableBefore  *int      `json:"available_before,omitempty"`
 	AvailableAfter   *int      `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
 	ShortfallDays    int       `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
+	NotCharged       []string  `json:"not_charged,omitempty" jsonschema:"days in the range that cost nothing (public holidays by name, non-working weekdays), as the apply form shows them"`
 	CoverageWarnings []string  `json:"coverage_warnings,omitempty" jsonschema:"one for each department or team limit the request is over"`
 	Problems         []Problem `json:"problems" jsonschema:"every rule the request breaks; empty when ok"`
 	CanOverride      bool      `json:"can_ask_special_permission" jsonschema:"apply_for_leave with override=true would be accepted"`
@@ -412,6 +413,12 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 		out.Type, out.Unit, out.Days = qt.Type.Name, qt.Type.Unit, qt.Days
 		out.Start, out.End = qt.Start.Format(time.DateOnly), qt.End.Format(time.DateOnly)
 		out.AvailableBefore, out.AvailableAfter, out.ShortfallDays = qt.Balance.Available(), qt.After, qt.Shortfall
+	}
+	for _, l := range qt.NotCharged {
+		out.NotCharged = append(out.NotCharged, l.Text)
+	}
+	if qt.NotChargedMore > 0 {
+		out.NotCharged = append(out.NotCharged, fmt.Sprintf("and %d more not charged", qt.NotChargedMore))
 	}
 	out.CoverageWarnings = sentences(qt.Coverage)
 	if out.Approver, err = d.approverName(ctx, u); err != nil {

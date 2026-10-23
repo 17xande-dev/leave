@@ -726,6 +726,13 @@ date-range-input {
   }
 }
 
+.not-charged {
+  margin-block: 0 var(--gap-sm);
+  padding-inline-start: 1.25rem;
+  color: var(--ink-soft);
+  font-size: var(--text-small);
+}
+
 /* --- Tables ------------------------------------------------------------- */
 
 table {

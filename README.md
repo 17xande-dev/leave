@@ -6,7 +6,7 @@ person above them. Every step sends an email, and approved leave appears on a sh
 Microsoft 365 calendar.
 
 - **Go**, standard library `net/http` and `html/template`, server-rendered.
-- **htmx** only for the live day-count preview on the apply form. Every form is a plain
+- **htmx** only for the live preview on the apply form (days charged, and which days are not and why). Every form is a plain
   POST that works without JavaScript.
 - **SQLite** in a single file. **One plain CSS file**, no framework or build step.
 - One binary with everything embedded, running in Docker on-prem next to the DC.
@@ -170,7 +170,7 @@ anything unless the person has asked.
 | `get_request` | One request in full: decision trail, coverage warning, which actions are open to them |
 | `team_leave` | Current and upcoming leave of the people who report to them |
 | `public_holidays` | Holidays for a year |
-| `preview_request` | Day count, balance afterwards and every rule that would stop a request (dates, restricted day, overlap, coverage, balance), and whether special permission or asking HR is available. Changes nothing |
+| `preview_request` | Day count, which days in the range are not charged and why, balance afterwards and every rule that would stop a request (dates, restricted day, overlap, coverage, balance), and whether special permission or asking HR is available. Changes nothing |
 | `apply_for_leave` | Submit a request. `override` asks for special permission and `ask_hr` asks HR to allow a negative balance, like the two buttons on the form |
 | `withdraw_request` | Withdraw their own undecided request |
 | `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |

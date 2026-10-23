@@ -138,14 +138,41 @@ type applyData struct {
 	// Mins maps a type's ID to its earliest start (YYYY-MM-DD), for the
 	// select's data-min attributes.
 	Mins map[int64]string
+	// Labels maps a type's ID to its option text: the name, with what is left
+	// of the balance when the type has one.
+	Labels map[int64]string
+}
+
+// typeLabel is the select's option text: "Annual leave (11 left)". Unlimited
+// types show just the name; an overdrawn balance reads as 0, since the person
+// cannot request any more either way.
+func typeLabel(b leave.Balance) string {
+	avail := b.Available()
+	if avail == nil {
+		return b.Type.Name
+	}
+	n := max(*avail, 0)
+	// Days are the usual count, so "(11 left)"; only weekends need naming.
+	if b.Type.Unit == leave.UnitWeekend {
+		return fmt.Sprintf("%s (%d %s left)", b.Type.Name, n, unitLabel(n, b.Type.Unit))
+	}
+	return fmt.Sprintf("%s (%d left)", b.Type.Name, n)
 }
 
 func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors) (applyData, error) {
-	types, err := h.leave.Types(r.Context(), true)
+	// One balances lookup serves both the type list (active types, in display
+	// order) and the "n left" in each option.
+	bs, err := h.leave.Balances(r.Context(), currentUser(r).ID)
 	if err != nil {
 		return applyData{}, err
 	}
-	d := applyData{Types: types, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}}
+	types := make([]leave.Type, len(bs))
+	d := applyData{Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
+	for i, b := range bs {
+		types[i] = b.Type
+		d.Labels[b.Type.ID] = typeLabel(b)
+	}
+	d.Types = types
 	// The same cut-off the server enforces (Service.EarliestStart), so the
 	// picker greys out exactly what a submit would refuse. YYYY-MM-DD
 	// compares as text.

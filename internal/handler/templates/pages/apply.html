@@ -35,7 +35,7 @@
     <label for="type">Type of leave</label>
     <select id="type" name="type" required>
       <option value="">Choose…</option>
-      {{range .Types}}<option value="{{.ID}}" data-min="{{index $.Data.Mins .ID}}"{{if eq .ID $.Data.Input.TypeID}} selected{{end}}>{{.Name}}</option>{{end}}
+      {{range .Types}}<option value="{{.ID}}" data-min="{{index $.Data.Mins .ID}}"{{if eq .ID $.Data.Input.TypeID}} selected{{end}}>{{index $.Data.Labels .ID}}</option>{{end}}
     </select>
     {{template "err" index .Errors "type"}}
   </div>
