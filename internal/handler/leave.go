@@ -184,13 +184,16 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 	if req.Status == leave.StatusAwaitingHR {
 		notice = "negative-requested"
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", req.ID, notice), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, req.ID, notice), http.StatusSeeOther)
 }
 
 type requestData struct {
 	Request leave.Request
-	// Back is where the page's back link goes, from where the person came.
+	// Back is where the page's back link goes, from where the person came, and
+	// From is the key of backLinks it came from, empty for the default. The forms
+	// pass From on so the link survives the next step.
 	Back backLink
+	From string
 	// Original is the leave a cancellation request is for.
 	Original *leave.Request
 	// PendingCancellation is a cancellation waiting on this leave.
@@ -258,6 +261,9 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 			}
 		}
 	}
+	if k := fromKey(r); k != "" {
+		d.Back, d.From = backLinks[k], k
+	}
 	var err error
 	if d.Steps, err = h.leave.Steps(r.Context(), req.ID); err != nil {
 		return d, err
@@ -308,6 +314,26 @@ var backLinks = map[string]backLink{
 	"admin":     {"/admin/requests", "Admin"},
 }
 
+// fromKey is the ?from= of the request's URL if it is a key of backLinks, else
+// empty. It is read from the URL, not the form body, which has its own "from".
+func fromKey(r *http.Request) string {
+	k := r.URL.Query().Get("from")
+	if _, ok := backLinks[k]; ok {
+		return k
+	}
+	return ""
+}
+
+// requestURL is where to send someone after acting on a request, keeping the
+// back link they had. The key is from the fixed map, so nothing typed is echoed.
+func requestURL(r *http.Request, id int64, notice string) string {
+	u := fmt.Sprintf("/leave/%d?notice=%s", id, notice)
+	if k := fromKey(r); k != "" {
+		u += "&from=" + k
+	}
+	return u
+}
+
 func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.loadRequest(w, r)
 	if !ok {
@@ -317,9 +343,6 @@ func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.serverError(w, r, err)
 		return
-	}
-	if b, ok := backLinks[r.URL.Query().Get("from")]; ok {
-		d.Back = b
 	}
 	h.render(w, r, http.StatusOK, "request.html", view{Title: requestTitle(req), Data: d})
 }
@@ -334,7 +357,7 @@ func requestTitle(r leave.Request) string {
 // notPossible answers a transition the request's state no longer allows --
 // typically a second tab, or someone else deciding first.
 func notPossible(w http.ResponseWriter, r *http.Request, id int64) {
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=not-possible", id), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, id, "not-possible"), http.StatusSeeOther)
 }
 
 func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
@@ -351,7 +374,7 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=withdrawn", req.ID), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, req.ID, "withdrawn"), http.StatusSeeOther)
 }
 
 func (h *Handler) RequestCancellation(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +391,7 @@ func (h *Handler) RequestCancellation(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=cancel-requested", c.ID), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, c.ID, "cancel-requested"), http.StatusSeeOther)
 }
 
 // SubmitDraft submits a draft: a shutdown request someone was given
@@ -406,7 +429,7 @@ func (h *Handler) SubmitDraft(w http.ResponseWriter, r *http.Request) {
 	if out.Status == leave.StatusApproved {
 		notice = "approved"
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", out.ID, notice), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, out.ID, notice), http.StatusSeeOther)
 }
 
 // Decide approves or declines. The decision is an explicit "approve" or
@@ -458,7 +481,7 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/approvals?notice="+notice, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", req.ID, notice), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, req.ID, notice), http.StatusSeeOther)
 }
 
 // queueRow is a request in the approvals queue with what an approver needs to

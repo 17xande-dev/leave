@@ -7,7 +7,7 @@ import (
 )
 
 // AnnualCode is the code of the seeded annual leave type. The code, not the
-// name, is what identifies it: it is unique, and the type form calls it permanent.
+// name, is what identifies it: it is unique and SaveType never changes it.
 const AnnualCode = "annual"
 
 // Availability is every person's available balance for one leave type in the
@@ -32,7 +32,7 @@ func (a Availability) For(userID int64) *int {
 // for everyone, in the cycle containing today. A missing type gives an
 // Availability whose For is always nil.
 func (s *Service) AvailabilityByCode(ctx context.Context, code string) (Availability, error) {
-	t, err := scanType(s.db.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE code = ?`, code))
+	t, err := scanType(s.db.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE code = ? AND active = 1`, code))
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
 		return Availability{}, nil
 	}

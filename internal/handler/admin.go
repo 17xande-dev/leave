@@ -204,7 +204,7 @@ func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
 		case leave.MsgReassignDormant:
 			notice = "reassign-dormant"
 		}
-		http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", id, notice), http.StatusSeeOther)
+		http.Redirect(w, r, requestURL(r, id, notice), http.StatusSeeOther)
 		return
 	case errors.Is(err, leave.ErrNotAllowed):
 		notPossible(w, r, id)
@@ -213,7 +213,7 @@ func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=reassigned", id), http.StatusSeeOther)
+	http.Redirect(w, r, requestURL(r, id, "reassigned"), http.StatusSeeOther)
 }
 
 // --- Users ---------------------------------------------------------------
@@ -238,7 +238,7 @@ func (h *Handler) approverName(r *http.Request, u users.User) (string, error) {
 	return a.Name, nil
 }
 
-// usersData is the People page: the people matching Query, and how many there are in all.
+// usersData is the People page: the people matching Query.
 type usersData struct {
 	Rows  []userRow
 	Query string
@@ -521,7 +521,7 @@ func (h *Handler) AdminUnrecord(w http.ResponseWriter, r *http.Request) {
 		case fe["request"] != "":
 			notice = "unrecord-gone"
 		}
-		http.Redirect(w, r, fmt.Sprintf("/leave/%d?notice=%s", id, notice), http.StatusSeeOther)
+		http.Redirect(w, r, requestURL(r, id, notice), http.StatusSeeOther)
 		return
 	case err != nil:
 		h.serverError(w, r, err)
@@ -581,7 +581,22 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(f("id"), 10, 64)
 	cycle, _ := strconv.Atoi(f("cycle_months"))
 	sort, _ := strconv.Atoi(f("sort"))
-	t := leave.Type{ID: id, Code: f("code"), Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
+	// A type's code is fixed once created (the form does not offer it), so an
+	// existing type keeps its own whatever was posted.
+	code := f("code")
+	if id != 0 {
+		old, err := h.leave.Type(r.Context(), id)
+		if errors.Is(err, leave.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			h.serverError(w, r, err)
+			return
+		}
+		code = old.Code
+	}
+	t := leave.Type{ID: id, Code: code, Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
 		RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
 		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance")), Backdate: strings.TrimSpace(f("backdate_days"))}

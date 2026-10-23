@@ -33,7 +33,7 @@
 {{end}}
 {{range .Coverage}}<p class="notice">{{.Sentence}}</p>{{end}}
 {{if .CanSubmit}}
-<form method="post" action="/leave/{{.Request.ID}}/submit" class="panel">
+<form method="post" action="/leave/{{.Request.ID}}/submit{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Submit this leave</h2>
   {{template "err" index .Errors "start"}}{{template "err" index .Errors "end"}}{{template "err" index .Errors "type"}}{{template "err" index .Errors "note"}}
@@ -67,7 +67,7 @@
 {{end}}
 
 {{if .CanDecide}}
-<form method="post" action="/leave/{{.Request.ID}}/decide" class="panel">
+<form method="post" action="/leave/{{.Request.ID}}/decide{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Your decision</h2>
   <div class="field">
@@ -83,7 +83,7 @@
 {{end}}
 
 {{with .Candidates}}
-<form method="post" action="/admin/requests/{{$.Data.Request.ID}}/reassign" class="panel">
+<form method="post" action="/admin/requests/{{$.Data.Request.ID}}/reassign{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Reassign <small>(admin)</small></h2>
   <div class="field-row">
@@ -100,14 +100,14 @@
 {{end}}
 
 {{if .CanWithdraw}}
-<form method="post" action="/leave/{{.Request.ID}}/withdraw" class="actions">
+<form method="post" action="/leave/{{.Request.ID}}/withdraw{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="actions">
   {{template "csrf" $.CSRF}}
   <button type="submit" class="quiet">Withdraw this request</button>
 </form>
 {{end}}
 
 {{if .CanUnrecord}}
-<form method="post" action="/admin/requests/{{.Request.ID}}/unrecord" class="panel">
+<form method="post" action="/admin/requests/{{.Request.ID}}/unrecord{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Remove this recorded leave <small>(admin)</small></h2>
   <p class="hint">Recorded leave has no approver to cancel it. Removing it means it no longer counts against their balance, takes it off the calendar and emails {{.Request.UserName}}.</p>
@@ -116,7 +116,7 @@
 {{end}}
 
 {{if .CanCancel}}
-<form method="post" action="/leave/{{.Request.ID}}/cancel" class="panel">
+<form method="post" action="/leave/{{.Request.ID}}/cancel{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Cancel this leave</h2>
   <p class="hint">Cancelling approved leave needs approval too. Until it is approved, the leave stays booked.</p>

@@ -196,7 +196,8 @@ func ValidateType(t *Type) FieldErrors {
 	return errs
 }
 
-// SaveType inserts (ID 0) or updates a type.
+// SaveType inserts (ID 0) or updates a type. The code is set on insert and
+// never changed: SeedTypes and the people list find types by it.
 func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	errs := ValidateType(&t)
 	if len(errs) > 0 {
@@ -219,10 +220,10 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 		}
 		return res.LastInsertId()
 	}
-	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET code = ?, name = ?, allowance_days = ?,
+	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET name = ?, allowance_days = ?,
 		cycle_months = ?, unit = ?, backdate_days = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?,
 		coverage_rule = ? WHERE id = ?`,
-		t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted,
+		t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted,
 		t.CoverageRule, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {

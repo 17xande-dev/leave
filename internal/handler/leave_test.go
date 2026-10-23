@@ -335,3 +335,33 @@ func TestRequestLinksCarrySource(t *testing.T) {
 		t.Error("home links should carry no source")
 	}
 }
+
+// The back link survives the step after the page: a decline refused for want of
+// a note re-renders with it, and the redirect after a decline carries it.
+func TestBackLinkSurvivesDecide(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-12")
+	head := hs.signIn("headops")
+	back := `<a class="back" href="/approvals">← Approvals</a>`
+	res, body := hs.post(head, path+"/decide?from=approvals", url.Values{"decision": {"decline"}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, back) {
+		t.Fatalf("re-render %d, back link missing", res.StatusCode)
+	}
+	if !strings.Contains(body, `action="`+path+`/decide?from=approvals"`) {
+		t.Error("decide form lost the source")
+	}
+	res, _ = hs.post(head, path+"/decide?from=approvals", url.Values{"decision": {"decline"}, "note": {"no"}})
+	if loc := res.Header.Get("Location"); loc != path+"?notice=declined&from=approvals" {
+		t.Fatalf("redirect to %q", loc)
+	}
+	_, body = hs.get(head, path+"?notice=declined&from=approvals")
+	if !strings.Contains(body, back) {
+		t.Error("back link lost after the redirect")
+	}
+	// An unknown source is dropped, not carried or echoed.
+	p2 := hs.apply(hs.signIn("staff1"), "annual", "2026-10-19", "2026-10-19")
+	res, _ = hs.post(head, p2+"/decide?from=%3Cb%3E", url.Values{"decision": {"decline"}, "note": {"no"}})
+	if loc := res.Header.Get("Location"); loc != p2+"?notice=declined" {
+		t.Fatalf("redirect to %q", loc)
+	}
+}

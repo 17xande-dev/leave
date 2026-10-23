@@ -12,9 +12,11 @@
     {{template "err" index .Errors "name"}}
   </div>
   <div class="field narrow">
-    <label for="code">Code</label>
+    {{if .Type.ID}}<strong>Code</strong>
+    <p><code>{{.Type.Code}}</code></p>
+    <span class="hint">Fixed once the type is created.</span>{{else}}<label for="code">Code</label>
     <input id="code" name="code" value="{{.Type.Code}}" required>
-    <span class="hint">Short and permanent, e.g. <code>annual</code>.</span>
+    <span class="hint">Short and permanent, e.g. <code>annual</code>. It cannot be changed later.</span>{{end}}
     {{template "err" index .Errors "code"}}
   </div>
   <div class="field-row">

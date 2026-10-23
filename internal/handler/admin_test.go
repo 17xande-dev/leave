@@ -514,3 +514,39 @@ func TestAdminPeopleSearchAndAnnual(t *testing.T) {
 		}
 	}
 }
+
+// A type's code is fixed once created: a posted code is ignored for an existing type.
+func TestTypeCodeIsFixed(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	id := hs.typeID("annual")
+	_, body := hs.get(hr, "/admin/types/"+id)
+	if strings.Contains(body, `name="code"`) {
+		t.Error("existing type offers a code input")
+	}
+	res, _ := hs.post(hr, "/admin/types", url.Values{"id": {id}, "name": {"Annual leave"}, "code": {"renamed"},
+		"allowance": {"15"}, "cycle_months": {"12"}, "backdate_days": {"92"}, "unit": {"workdays"},
+		"restricted": {"min"}, "coverage_rule": {"limit"}, "active": {"1"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("save: %d", res.StatusCode)
+	}
+	if typ, err := hs.svc.Type(context.Background(), int64(mustAtoi(t, id))); err != nil || typ.Code != "annual" {
+		t.Fatalf("code = %q, %v", typ.Code, err)
+	}
+	if _, body := hs.get(hr, "/admin/types/new"); !strings.Contains(body, `name="code"`) {
+		t.Error("new type has no code input")
+	}
+}
+
+// An inactive annual type shows no balance, as Balances does.
+func TestPeopleAnnualIgnoresInactiveType(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	id := hs.typeID("annual")
+	hs.post(hr, "/admin/types", url.Values{"id": {id}, "name": {"Annual leave"}, "allowance": {"15"},
+		"cycle_months": {"12"}, "backdate_days": {"92"}, "unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"limit"}})
+	_, body := hs.get(hr, "/admin/users")
+	if strings.Contains(body, `<td class="num">15</td>`) {
+		t.Error("inactive annual type still shown")
+	}
+}
