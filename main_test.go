@@ -85,3 +85,17 @@ func TestCSRFExemptions(t *testing.T) {
 		}
 	}
 }
+
+// Bulk approval is a state change in one post: it needs the token like any form.
+func TestCSRFRefusesTokenlessBulkApprove(t *testing.T) {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	req := httptest.NewRequest("POST", "http://leave.test/approvals/approve", strings.NewReader(url.Values{"id": {"1"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://leave.test")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("tokenless bulk approve: %d, want 403", rec.Code)
+	}
+}

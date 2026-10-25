@@ -71,6 +71,24 @@ approved") and approved leave. Each person appears once with all their dates, up
 people, and "and N more" counts people. It shows names and dates only, never the type, so
 sick leave stays private. It is information: it does not change the coverage limit.
 
+**Approvals** (`/approvals`) lists what waits for you, oldest first. Each row says what is
+left of the requester's balance for the request's own cycle once it is approved ("11
+working days left in this cycle afterwards", "2 working days below zero afterwards";
+nothing for unlimited types, and the cycle is named, "in 2027", when it is not the
+current one). A pending request is already reserved against the balance, so this is the
+balance as it stands now, not the balance minus the request again; approving a
+cancellation gives the days back. Each row also lists who else is away on those dates
+("Also away: Thandi, Sick leave (12–14 Mar), ..."), from your own department, teams and
+reports, up to five people then "and N more", pending marked. You see the leave type
+only for the people `Away` reveals it for (your reports, requests you are the approver
+of, everyone for an admin); the requester themself is left out. **Approve selected**
+approves the ticked rows in one post, each through the normal approval; ticked rows that
+fail (already decided, not yours) are listed on the page and the rest stay approved.
+Rows needing special permission have no tick box: each needs its own "Override"
+button, and the bulk post refuses them too. At most 50 per post. **Decline...** on a row
+opens a reason box (required) and declines from the queue; **Details** opens the
+request. No JavaScript.
+
 **Team** (`/team`, in the navigation for everyone) is a month grid of who is away: one row
 per person, one column per day, for your department, the volunteer teams you share, and the
 people who report to you, plus a row marked "You" for your own leave. Solid cells are
@@ -199,7 +217,7 @@ anything unless the person has asked.
 | `withdraw_request` | Withdraw their own undecided request |
 | `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |
 | `request_cancellation` | Ask for approved, not-yet-started leave to be cancelled |
-| `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, and the trail |
+| `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, the requester's balance afterwards (`balance_after`, absent for unlimited types) and the trail |
 | `decide_request` | Approve or decline (a decline needs a note) |
 | `all_requests` | Administrators only: every request, filtered by status, dates and person |
 | `who_is_away` | Administrators only: who is away in a date range, by department |

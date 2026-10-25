@@ -47,6 +47,51 @@ func (s *Service) BalanceIn(ctx context.Context, userID int64, t Type, cycle tim
 	return s.balance(ctx, s.db, userID, t, cycle)
 }
 
+// After is what a pending request leaves its person: the balance of the
+// request's own cycle once it is decided in the way the approver is asked.
+type After struct {
+	// Left is the days (or weekends) left, negative when below zero; nil for
+	// an unlimited type, where there is nothing to say.
+	Left *int
+	// CycleName names the cycle as Quote.CycleName does, empty for the cycle
+	// containing today.
+	CycleName string
+	Unit      string
+}
+
+// AfterApproval is the requester's balance after approving req, which must be
+// pending. A pending leave request is already in Balance.Pending, so
+// Available() IS the figure afterwards: subtracting the days again would count
+// them twice (Quote.After subtracts because a quote is not yet reserved). A
+// cancellation is not reserved against anything; approving it gives the days
+// back, so they are added.
+func (s *Service) AfterApproval(ctx context.Context, req Request) (After, error) {
+	t, err := s.Type(ctx, req.TypeID)
+	if err != nil {
+		return After{}, err
+	}
+	st, err := s.settings(ctx, s.db)
+	if err != nil {
+		return After{}, err
+	}
+	cs, err := ParseDate(req.CycleStart)
+	if err != nil {
+		return After{}, err
+	}
+	b, err := s.balance(ctx, s.db, req.UserID, t, cs)
+	if err != nil {
+		return After{}, err
+	}
+	out := After{Unit: t.Unit, CycleName: cycleName(cs, s.today(), t, st.SickCycleAnchor)}
+	if left := b.Available(); left != nil {
+		if req.Kind == KindCancellation {
+			*left += req.Days
+		}
+		out.Left = left
+	}
+	return out, nil
+}
+
 // Balances is every active type's balance for the cycle containing today.
 func (s *Service) Balances(ctx context.Context, userID int64) ([]Balance, error) {
 	types, err := s.Types(ctx, true)

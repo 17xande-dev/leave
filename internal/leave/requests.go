@@ -461,12 +461,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// the year end is charged to the old year in full -- simpler to explain
 	// than a split, and the admin can adjust if it matters.
 	qt.CycleStart = CycleStart(start, t.CycleMonths, st.SickCycleAnchor)
-	if !qt.CycleStart.Equal(CycleStart(today, t.CycleMonths, st.SickCycleAnchor)) {
-		qt.CycleName = "the cycle starting " + qt.CycleStart.Format("2 Jan 2006")
-		if t.CycleMonths == 12 {
-			qt.CycleName = qt.CycleStart.Format("2006")
-		}
-	}
+	qt.CycleName = cycleName(qt.CycleStart, today, t, st.SickCycleAnchor)
 	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart); err != nil {
 		return Quote{}, err
 	}
@@ -485,6 +480,18 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return qt, errs
 	}
 	return qt, nil
+}
+
+// cycleName names the cycle starting at cs ("2027"), or is empty when it is the
+// cycle containing today, so a caller can say "this cycle" only when it is true.
+func cycleName(cs, today time.Time, t Type, anchor int) string {
+	if cs.Equal(CycleStart(today, t.CycleMonths, anchor)) {
+		return ""
+	}
+	if t.CycleMonths == 12 {
+		return cs.Format("2006")
+	}
+	return "the cycle starting " + cs.Format("2 Jan 2006")
 }
 
 // weekendShape checks a weekend-off request covers exactly one weekend:

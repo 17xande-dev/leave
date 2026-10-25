@@ -1,15 +1,28 @@
 {{define "content"}}
 <h1>Approvals</h1>
+{{with .Data.Approved}}<p class="notice" role="status">{{.}} approved.</p>{{end}}
+{{with .Data.Failures}}
+<div class="error" role="alert">
+  <p><strong>Not everything could be approved:</strong></p>
+  <ul>{{range .}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
 {{with .Data.Queue}}
-<p class="muted">Requests waiting for you, oldest first. Open one to decline it with a reason.</p>
+<p class="muted">Requests waiting for you, oldest first. Tick the ordinary ones and approve them together, or decline one with a reason.</p>
+{{/* The ticked rows post as one form from outside the table: a form cannot wrap
+     table rows, and the per-row buttons are forms of their own. */}}
+<form id="bulk" method="post" action="/approvals/approve">{{template "csrf" $.CSRF}}</form>
 <div class="scroll-x">
 <table>
-  <thead><tr><th>Who</th><th>Request</th><th>Dates</th><th class="num">Days</th><th></th></tr></thead>
+  <thead><tr><th><span class="visually-hidden">Select</span></th><th>Who</th><th>Request</th><th>Dates</th><th class="num">Days</th><th></th></tr></thead>
   <tbody>
-  {{range .}}
+  {{range .}}{{$row := .}}
     <tr>
+      <td>{{if .Bulk}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}" aria-label="Select {{.UserName}}, {{.TypeName}}, {{date .Start}}">{{end}}</td>
       <td>{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
-      <td><a href="/leave/{{.ID}}?from=approvals">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}</td>
+      <td><a href="/leave/{{.ID}}?from=approvals">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}
+        {{with .After}}<br><small class="after">{{if .Below}}{{.Below}} {{units .Below .Unit}} below zero{{else}}{{.Left}} {{units .Left .Unit}} left in {{with .CycleName}}{{.}}{{else}}this cycle{{end}}{{end}} afterwards</small>{{end}}
+        {{with .Away}}<br><small class="away">Also away: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a.Name}}{{range $j, $r := $a.Ranges}}{{if $j}};{{end}}{{with $r.Type}}, {{.}}{{end}} ({{shortrange $r.Start $r.End}}){{end}}{{if eq $a.Pending "all"}} (not yet approved){{else if $a.Pending}} (some not yet approved){{end}}{{end}}{{with $row.AwayMore}}, and {{.}} more{{end}}</small>{{end}}</td>
       <td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td>
       <td class="num">{{.Days}}</td>
       <td>
@@ -17,14 +30,28 @@
           {{template "csrf" $.CSRF}}
           <input type="hidden" name="from" value="queue">
           <button type="submit" name="decision" value="approve">{{if .Escalate}}{{with .Next}}Override and send to {{.}}{{else}}Override and approve{{end}}{{else}}Approve{{end}}</button>
-          <a href="/leave/{{.ID}}?from=approvals">Decline…</a>
+          <a href="/leave/{{.ID}}?from=approvals">Details</a>
         </form>
+        <details class="decline"{{if eq .ID $.Data.OpenID}} open{{end}}>
+          <summary>Decline…</summary>
+          <form method="post" action="/leave/{{.ID}}/decide" class="stack">
+            {{template "csrf" $.CSRF}}
+            <input type="hidden" name="from" value="queue">
+            <div class="field">
+              <label for="note-{{.ID}}">Reason <small>(required)</small></label>
+              <textarea id="note-{{.ID}}" name="note" rows="2" required>{{if eq .ID $.Data.OpenID}}{{$.Data.OpenNote}}{{end}}</textarea>
+              {{if eq .ID $.Data.OpenID}}{{template "err" index $.Data.OpenErrors "note"}}{{end}}
+            </div>
+            <button type="submit" name="decision" value="decline" class="quiet">Decline</button>
+          </form>
+        </details>
       </td>
     </tr>
   {{end}}
   </tbody>
 </table>
 </div>
+<p><button type="submit" form="bulk">Approve selected</button></p>
 {{else}}
 <p class="muted">Nothing is waiting for you.</p>
 {{end}}

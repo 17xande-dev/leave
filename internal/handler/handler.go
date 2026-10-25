@@ -139,6 +139,7 @@ func (h *Handler) protectedRoutes() []route {
 		u("POST /leave/{id}/cancel", h.RequestCancellation),
 		u("POST /leave/{id}/decide", h.Decide),
 		u("GET /approvals", h.Approvals),
+		u("POST /approvals/approve", h.ApproveMany),
 		u("GET /team", h.Team),
 		// The consent screen. It stays behind the session and under CSRF: it is
 		// a form a person submits in a browser.

@@ -1059,3 +1059,18 @@ img {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* A queue row's decline form, folded away until wanted. */
+details.decline {
+  margin-block-start: var(--gap-sm);
+
+  > summary {
+    cursor: pointer;
+    font-size: var(--text-small);
+  }
+
+  > form {
+    margin-block-start: var(--gap-sm);
+    min-width: 14rem;
+  }
+}

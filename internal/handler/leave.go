@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -326,7 +327,45 @@ type awayView struct {
 	Pending string
 }
 
-type awayRange struct{ Start, End string }
+// awayRange is one stretch; Type is set only where the caller asked for it.
+type awayRange struct{ Start, End, Type string }
+
+// groupAway makes one awayView per person, in order of first appearance (rows
+// come sorted by start). withType keeps the leave type on each range, else it
+// is dropped; exclude is a person to leave out (0: nobody).
+func groupAway(away []leave.Away, withType bool, exclude int64) []awayView {
+	byUser := map[int64]int{}
+	var all []awayView
+	pending := map[int64]int{}
+	for _, a := range away {
+		if a.UserID == exclude {
+			continue
+		}
+		i, ok := byUser[a.UserID]
+		if !ok {
+			i = len(all)
+			byUser[a.UserID] = i
+			all = append(all, awayView{Name: a.Name})
+		}
+		rg := awayRange{Start: a.Start, End: a.End}
+		if withType {
+			rg.Type = a.LeaveType
+		}
+		all[i].Ranges = append(all[i].Ranges, rg)
+		if a.Status == "pending" {
+			pending[a.UserID]++
+		}
+	}
+	for uid, i := range byUser {
+		switch n := pending[uid]; {
+		case n == len(all[i].Ranges):
+			all[i].Pending = "all"
+		case n > 0:
+			all[i].Pending = "some"
+		}
+	}
+	return all
+}
 
 // withAway adds who else is away between start and end, for the chosen dates.
 // It is information only: unusable dates just leave the hint out.
@@ -340,31 +379,9 @@ func (h *Handler) withAway(r *http.Request, d quoteData, start, end string) (quo
 	if err != nil {
 		return d, err
 	}
-	// One entry per person (rows come sorted by start, so entries keep that
-	// order), so the cap counts people, not requests.
-	byUser := map[int64]int{}
-	var all []awayView
-	pending := map[int64]int{}
-	for _, a := range away {
-		i, ok := byUser[a.UserID]
-		if !ok {
-			i = len(all)
-			byUser[a.UserID] = i
-			all = append(all, awayView{Name: a.Name})
-		}
-		all[i].Ranges = append(all[i].Ranges, awayRange{a.Start, a.End})
-		if a.Status == "pending" {
-			pending[a.UserID]++
-		}
-	}
-	for uid, i := range byUser {
-		switch n := pending[uid]; {
-		case n == len(all[i].Ranges):
-			all[i].Pending = "all"
-		case n > 0:
-			all[i].Pending = "some"
-		}
-	}
+	// One entry per person, so the cap counts people, not requests. The
+	// quote is type-free by construction, for approver and colleague alike.
+	all := groupAway(away, false, 0)
 	if len(all) > awayShown {
 		d.AwayMore = len(all) - awayShown
 		all = all[:awayShown]
@@ -701,6 +718,17 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 	decided, err := h.leave.Decide(r.Context(), currentUser(r), req.ID, approve, note)
 	var fe leave.FieldErrors
 	switch {
+	case errors.As(err, &fe) && r.PostFormValue("from") == "queue":
+		// Declined from a row without a note: back to the queue, that row's
+		// details open with what they typed and the error beside it.
+		d, derr := h.queueData(r)
+		if derr != nil {
+			h.serverError(w, r, derr)
+			return
+		}
+		d.OpenID, d.OpenNote, d.OpenErrors = req.ID, note, fe
+		h.render(w, r, http.StatusUnprocessableEntity, "approvals.html", view{Title: "Approvals", Data: d})
+		return
 	case errors.As(err, &fe):
 		d, derr := h.requestData(r, req)
 		if derr != nil {
@@ -734,44 +762,182 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 
 // queueRow is a request in the approvals queue with what an approver needs to
 // weigh it: for one needing special permission, the coverage warnings as they
-// stands now, and who it would go to next.
+// stands now, and who it would go to next; for every row, what is left of the
+// requester's balance afterwards and who else is away on those dates.
 type queueRow struct {
 	leave.Request
 	Coverage []leave.Coverage
 	Next     string
+	// Bulk: the row may be ticked for "Approve selected". Special permission
+	// needs a deliberate override each, so those rows get no checkbox.
+	Bulk bool
+	// After is nil for an unlimited type.
+	After *queueAfter
+	// Away is who else is away then, with the leave type where the approver
+	// may see it; AwayMore counts the people past the cap.
+	Away     []awayView
+	AwayMore int
+}
+
+// queueAfter is the balance line: Below is how far under zero, else 0.
+type queueAfter struct {
+	Left, Below int
+	CycleName   string
+	Unit        string
 }
 
 type queueData struct {
 	Queue []queueRow
+	// Approved and Failures report a bulk approval that did not all go
+	// through (the page is re-rendered, never built from the query string).
+	Approved int
+	Failures []string
+	// OpenID is a row whose decline was refused for want of a note: its
+	// details stay open with OpenNote and OpenErrors.
+	OpenID     int64
+	OpenNote   string
+	OpenErrors leave.FieldErrors
 }
 
-func (h *Handler) Approvals(w http.ResponseWriter, r *http.Request) {
+// queueAway shapes Away rows for the queue: grouped per person like the apply
+// hint, but keeping the leave type, which leave.Away already blanks for anyone
+// the approver may not see it on. Rows for the request's own requester are
+// left out. Capped by people.
+func queueAway(away []leave.Away, exclude int64) (out []awayView, more int) {
+	groups := groupAway(away, true, exclude)
+	if len(groups) > awayShown {
+		more = len(groups) - awayShown
+		groups = groups[:awayShown]
+	}
+	return groups, more
+}
+
+// queueData builds the queue: the rows with their context. It calls Away and
+// AfterApproval once per row, not batched: a queue is dozens of rows and each
+// call is one indexed query.
+func (h *Handler) queueData(r *http.Request) (queueData, error) {
 	u := currentUser(r)
 	q, err := h.leave.Queue(r.Context(), u)
 	if err != nil {
-		h.serverError(w, r, err)
-		return
+		return queueData{}, err
 	}
 	rows := make([]queueRow, 0, len(q))
 	for _, req := range q {
-		row := queueRow{Request: req}
+		row := queueRow{Request: req, Bulk: !(req.Escalate && req.Kind == leave.KindLeave)}
 		if req.Escalate {
 			if row.Coverage, err = h.leave.CoverageFor(r.Context(), req); err != nil {
-				h.serverError(w, r, err)
-				return
+				return queueData{}, err
 			}
 			next, ok, err := h.leave.NextApprover(r.Context(), u, req)
 			if err != nil {
-				h.serverError(w, r, err)
-				return
+				return queueData{}, err
 			}
 			if ok {
 				row.Next = next.Name
 			}
 		}
+		af, err := h.leave.AfterApproval(r.Context(), req)
+		if err != nil {
+			return queueData{}, err
+		}
+		if af.Left != nil {
+			row.After = &queueAfter{Left: *af.Left, Below: max(0, -*af.Left), CycleName: af.CycleName, Unit: af.Unit}
+		}
+		away, err := h.leave.Away(r.Context(), u, req.Start, req.End)
+		if err != nil {
+			return queueData{}, err
+		}
+		row.Away, row.AwayMore = queueAway(away, req.UserID)
 		rows = append(rows, row)
 	}
-	h.render(w, r, http.StatusOK, "approvals.html", view{Title: "Approvals", Data: queueData{Queue: rows}})
+	return queueData{Queue: rows}, nil
+}
+
+func (h *Handler) Approvals(w http.ResponseWriter, r *http.Request) {
+	d, err := h.queueData(r)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	h.render(w, r, http.StatusOK, "approvals.html", view{Title: "Approvals", Data: d})
+}
+
+// bulkMax caps how many requests one "Approve selected" handles.
+const bulkMax = 50
+
+// ApproveMany approves each ticked request through Service.Decide, the same
+// path as the single button, so no approval rule lives here. Ids are parsed
+// strictly (a bad one fails the whole post), duplicates are ignored and the
+// count is capped. Partial success stands: those approved are approved, and
+// the page is re-rendered listing each failure. A request the person cannot
+// decide is reported without naming it or its person, so a forged id confirms
+// nothing. One needing special permission is refused here: Decide would take
+// it as an override, and an override must be deliberate, one row at a time.
+func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Those requests could not be read.", http.StatusBadRequest)
+		return
+	}
+	var ids []int64
+	seen := map[int64]bool{}
+	for _, v := range r.PostForm["id"] {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			http.Error(w, "Those requests could not be read.", http.StatusBadRequest)
+			return
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > bulkMax {
+		http.Error(w, fmt.Sprintf("Approve at most %d at a time.", bulkMax), http.StatusBadRequest)
+		return
+	}
+	var failures []string
+	approved := 0
+	for _, id := range ids {
+		req, err := h.leave.Get(r.Context(), id)
+		if errors.Is(err, leave.ErrNotFound) || (err == nil && !leave.CanDecide(u, req)) {
+			failures = append(failures, fmt.Sprintf("Request %d: you cannot approve it. It may already be decided.", id))
+			continue
+		}
+		if err != nil {
+			h.serverError(w, r, err)
+			return
+		}
+		label := fmt.Sprintf("%s, %s (%s)", req.UserName, req.TypeName, shortRange(req.Start, req.End))
+		if req.Escalate && req.Kind == leave.KindLeave {
+			failures = append(failures, label+": needs special permission. Use its own Override button.")
+			continue
+		}
+		switch _, err := h.leave.Decide(r.Context(), u, id, true, ""); {
+		case errors.Is(err, leave.ErrNotAllowed):
+			failures = append(failures, label+": no longer waiting for you.")
+		case err != nil:
+			slog.Error("bulk approve", "request", id, "err", err)
+			failures = append(failures, label+": something went wrong. Try it on its own.")
+		default:
+			approved++
+		}
+	}
+	if len(failures) == 0 && approved > 0 {
+		http.Redirect(w, r, "/approvals?notice=approved-many", http.StatusSeeOther)
+		return
+	}
+	d, err := h.queueData(r)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	d.Approved = approved
+	d.Failures = failures
+	if len(ids) == 0 {
+		d.Failures = []string{"Tick at least one request first."}
+	}
+	h.render(w, r, http.StatusUnprocessableEntity, "approvals.html", view{Title: "Approvals", Data: d})
 }
 
 // statusClass maps a status to its badge style.

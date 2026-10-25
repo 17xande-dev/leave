@@ -253,7 +253,7 @@ func (d *deps) register(s *mcp.Server) {
 
 	// Approve
 	add(d, s, &mcp.Tool{Name: "approval_queue", Annotations: readOnly("Approval queue"),
-		Description: "Requests waiting for your decision, oldest first, each with any department or team coverage warnings, who it goes to next if you approve, and its trail so far."}, d.approvalQueue)
+		Description: "Requests waiting for your decision, oldest first, each with any department or team coverage warnings, who it goes to next if you approve, the requester's balance afterwards and its trail so far."}, d.approvalQueue)
 	add(d, s, &mcp.Tool{Name: "decide_request", Annotations: destructive("Approve or decline a request"),
 		Description: "Approve or decline a request waiting for your decision. A decline needs a note saying why. " +
 			"Only call this when the person has told you the decision; never decide on your own judgement."}, d.decide)

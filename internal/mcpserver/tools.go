@@ -534,6 +534,16 @@ type QueueItem struct {
 	CoverageWarnings []string    `json:"coverage_warnings,omitempty"`
 	NextApprover     string      `json:"next_approver,omitempty" jsonschema:"who it goes to if you approve; empty when yours is the last approval"`
 	Steps            []StepInfo  `json:"steps"`
+	// BalanceAfter is the requester's balance once this is approved, as on the page.
+	BalanceAfter *BalanceAfterInfo `json:"balance_after,omitempty" jsonschema:"the requester's balance for this request's cycle after approving; absent for unlimited types"`
+}
+
+// BalanceAfterInfo is the Approvals page's "N left in 2026 afterwards": negative
+// Left means below zero.
+type BalanceAfterInfo struct {
+	Left  int    `json:"left" jsonschema:"days (or weekends) left afterwards; negative when below zero"`
+	Unit  string `json:"unit" jsonschema:"workdays, calendar or weekend"`
+	Cycle string `json:"cycle" jsonschema:"the cycle's name when it is not the current one (for example 2027); empty for the current cycle"`
 }
 
 type QueueOut struct {
@@ -551,6 +561,13 @@ func (d *deps) approvalQueue(ctx context.Context, u users.User, _ none) (QueueOu
 		item := QueueItem{Request: requestInfo(req)}
 		if item.Steps, err = d.steps(ctx, req.ID); err != nil {
 			return QueueOut{}, "", err
+		}
+		af, err := d.leave.AfterApproval(ctx, req)
+		if err != nil {
+			return QueueOut{}, "", err
+		}
+		if af.Left != nil {
+			item.BalanceAfter = &BalanceAfterInfo{Left: *af.Left, Unit: af.Unit, Cycle: af.CycleName}
 		}
 		if req.Escalate {
 			cov, err := d.leave.CoverageFor(ctx, req)

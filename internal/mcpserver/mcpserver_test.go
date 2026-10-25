@@ -344,6 +344,20 @@ func TestPreviewOffersWhatTheButtonsOffer(t *testing.T) {
 	f.refused(staff, "submit_draft", map[string]any{"id": id(r)}, "That is not possible")
 }
 
+// An unlimited type has no balance afterwards to report.
+func TestApprovalQueueBalanceAfterAbsentWhenUnlimited(t *testing.T) {
+	f := newFixture(t)
+	staff, head := f.as("staff1"), f.as("headops")
+	f.ok(staff, "apply_for_leave", map[string]any{"type": "unpaid", "start": "2026-11-02", "end": "2026-11-03", "note": "n"})
+	items := f.ok(head, "approval_queue", nil).Data["queue"].([]any)
+	if len(items) != 1 || get(items[0].(map[string]any), "request", "type") != "Unpaid leave" {
+		t.Fatalf("queue = %v", items)
+	}
+	if _, has := items[0].(map[string]any)["balance_after"]; has {
+		t.Errorf("unlimited type has balance_after: %v", items[0])
+	}
+}
+
 func TestApprovalsGoThroughTheServiceRules(t *testing.T) {
 	f := newFixture(t)
 	staff, head, pastor := f.as("staff1"), f.as("headops"), f.as("pastor")
@@ -358,6 +372,11 @@ func TestApprovalsGoThroughTheServiceRules(t *testing.T) {
 	}
 	if q := f.ok(pastor, "approval_queue", nil); len(q.Data["queue"].([]any)) != 0 {
 		t.Errorf("pastor's queue = %v", q.Data)
+	}
+	// 15 days less the 3 requested, which are already reserved: 12, not 9.
+	ba := items[0].(map[string]any)["balance_after"].(map[string]any)
+	if ba["left"].(float64) != 12 || ba["unit"] != "workdays" || ba["cycle"] != "" {
+		t.Errorf("balance_after = %v", ba)
 	}
 	if tl := f.ok(head, "team_leave", nil); len(tl.Data["requests"].([]any)) != 1 {
 		t.Errorf("team_leave = %v", tl.Data)

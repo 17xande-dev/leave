@@ -203,6 +203,7 @@ var notices = map[string]string{
 	"withdrawn":          "Your request has been withdrawn.",
 	"cancel-requested":   "Your cancellation request has been sent for approval.",
 	"approved":           "Request approved.",
+	"approved-many":      "The selected requests are approved.",
 	"declined":           "Request declined.",
 	"saved":              "Saved.",
 	"reassigned":         "Request reassigned.",
