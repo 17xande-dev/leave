@@ -25,8 +25,14 @@ type Away struct {
 // is not yet a plan. The viewer and disabled people are left out.
 //
 // The type of leave is returned only where the viewer is an admin, is the
-// person's approver on that request, or the person is their report; it never
-// reaches a colleague. One query: the report test is a column so the type can
+// frozen approver_id of that request, or the person is the viewer's report
+// (by directory manager or approver override); it never reaches a colleague.
+// The test is on the request's own approver_id, not a fresh ResolveApprover,
+// so it follows the request. Two consequences: an admin gets the type only for
+// people already in their own department, teams or reports, and someone who
+// approved an escalated request at an earlier step (approver_id has moved up
+// since) loses the type unless the person is their report. Phase 6 (the
+// approvals queue) will use this view, so that is the rule to keep. One query: the report test is a column so the type can
 // be blanked in SQL, before it reaches any caller that might render it.
 func (s *Service) Away(ctx context.Context, viewer users.User, start, end string) ([]Away, error) {
 	// A report: managed in the directory (unless an override sends them

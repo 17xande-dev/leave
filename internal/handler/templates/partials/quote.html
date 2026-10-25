@@ -20,7 +20,7 @@
     {{end}}
   {{end}}{{end}}
   {{with .Away}}
-  <p class="hint">Also away then: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a.Name}} ({{shortrange $a.Start $a.End}}){{if $a.Pending}} (not yet approved){{end}}{{end}}{{with $.AwayMore}}, and {{.}} more{{end}}</p>
+  <p class="hint">Also away then: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a.Name}} ({{range $j, $r := $a.Ranges}}{{if $j}}, {{end}}{{shortrange $r.Start $r.End}}{{end}}){{if eq $a.Pending "all"}} (not yet approved){{else if $a.Pending}} (some not yet approved){{end}}{{end}}{{with $.AwayMore}}, and {{.}} more{{end}}</p>
   {{end}}
   {{/* Buttons inside the swapped partial, which is inside the form: they post
        the form's fields with override=1 or negative=1, and work after a swap. */}}

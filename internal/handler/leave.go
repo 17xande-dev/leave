@@ -317,13 +317,16 @@ type quoteData struct {
 // awayShown caps the names in the "Also away then" hint.
 const awayShown = 5
 
-// awayView is one person in the hint: name and dates, nothing private.
+// awayView is one person in the hint: name and dates, nothing private. A
+// person with several requests in the range is one entry with several ranges.
 type awayView struct {
-	Name    string
-	Start   string
-	End     string
-	Pending bool
+	Name   string
+	Ranges []awayRange
+	// Pending is "all" or "some" of the ranges awaiting approval, else "".
+	Pending string
 }
+
+type awayRange struct{ Start, End string }
 
 // withAway adds who else is away between start and end, for the chosen dates.
 // It is information only: unusable dates just leave the hint out.
@@ -337,13 +340,36 @@ func (h *Handler) withAway(r *http.Request, d quoteData, start, end string) (quo
 	if err != nil {
 		return d, err
 	}
-	for i, a := range away {
-		if i == awayShown {
-			d.AwayMore = len(away) - awayShown
-			break
+	// One entry per person (rows come sorted by start, so entries keep that
+	// order), so the cap counts people, not requests.
+	byUser := map[int64]int{}
+	var all []awayView
+	pending := map[int64]int{}
+	for _, a := range away {
+		i, ok := byUser[a.UserID]
+		if !ok {
+			i = len(all)
+			byUser[a.UserID] = i
+			all = append(all, awayView{Name: a.Name})
 		}
-		d.Away = append(d.Away, awayView{Name: a.Name, Start: a.Start, End: a.End, Pending: a.Status == "pending"})
+		all[i].Ranges = append(all[i].Ranges, awayRange{a.Start, a.End})
+		if a.Status == "pending" {
+			pending[a.UserID]++
+		}
 	}
+	for uid, i := range byUser {
+		switch n := pending[uid]; {
+		case n == len(all[i].Ranges):
+			all[i].Pending = "all"
+		case n > 0:
+			all[i].Pending = "some"
+		}
+	}
+	if len(all) > awayShown {
+		d.AwayMore = len(all) - awayShown
+		all = all[:awayShown]
+	}
+	d.Away = all
 	return d, nil
 }
 

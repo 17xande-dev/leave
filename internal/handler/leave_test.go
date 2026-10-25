@@ -779,10 +779,45 @@ func TestQuoteAlsoAway(t *testing.T) {
 	if strings.Contains(body, "Also away") {
 		t.Error("hint with no dates")
 	}
-	// The viewer being an approver of these people does not add the type.
-	head := hs.signIn("headops")
-	_, body = hs.get(head, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-14", annual))
-	if strings.Contains(body, "Annual") || strings.Contains(body, "Zoe") == false {
-		t.Errorf("approver's hint:\n%s", body)
+}
+
+// The hint is type-free for everyone, the approver and an admin included.
+func TestQuoteAlsoAwayNeverShowsType(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	sick := hs.typeID("sick")
+	if res, body := hs.post(staff, "/leave", url.Values{"type": {sick}, "start": {"2026-10-12"}, "end": {"2026-10-13"}, "note": {"flu"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("apply: %d\n%s", res.StatusCode, body)
+	}
+	path := fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-14", hs.typeID("annual"))
+	// headops is staff1's approver, hr an admin (and a colleague).
+	for _, who := range []string{"headops", "hr"} {
+		_, body := hs.get(hs.signIn(who), path)
+		if !strings.Contains(body, "Sam Staff (12–13 Oct)") || strings.Contains(strings.ToLower(body), "sick") {
+			t.Errorf("%s:\n%s", who, body)
+		}
+	}
+	// A refused submit re-renders the form with the hint, still type-free.
+	hs.limitOperations()
+	hs.apply(hs.signIn("hr"), "annual", "2026-10-20", "2026-10-20")
+	res, body := hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-20"}, "end": {"2026-10-20"}})
+	// Only the quote: the type <select> on the same page names "Sick leave".
+	hint, _, _ := strings.Cut(body[strings.Index(body, `id="quote"`):], `class="actions"`)
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(hint, "Also away then: Hannah HR (20 Oct)") ||
+		strings.Contains(strings.ToLower(hint), "sick") {
+		t.Errorf("refused submit: %d\n%s", res.StatusCode, hint)
+	}
+}
+
+// One person with two requests in the range is one entry and one cap slot.
+func TestQuoteAlsoAwayGroupsPeople(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	hs.apply(hs.signIn("headops"), "annual", "2026-10-12", "2026-10-12")
+	hs.apply(hs.signIn("hr"), "annual", "2026-10-13", "2026-10-13")
+	hs.apply(hs.signIn("hr"), "annual", "2026-10-15", "2026-10-15")
+	_, body := hs.get(staff, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-16", hs.typeID("annual")))
+	if !strings.Contains(body, "Olivia Operations (12 Oct) (not yet approved), Hannah HR (13 Oct, 15 Oct) (not yet approved)") {
+		t.Errorf("grouping:\n%s", body)
 	}
 }

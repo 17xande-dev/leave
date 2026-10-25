@@ -14,6 +14,13 @@ func (f *fixture) away(viewer, start, end string) []Away {
 	return out
 }
 
+func (f *fixture) exec(q string, args ...any) {
+	f.t.Helper()
+	if _, err := f.db.Exec(q, args...); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func names(as []Away) []string {
 	out := []string{}
 	for _, a := range as {
@@ -43,9 +50,12 @@ func TestAwayHidesTypeFromColleagues(t *testing.T) {
 			t.Errorf("%s sees %+v", who, got)
 		}
 	}
-	// Someone else's approver by the request's own approver_id sees it too,
-	// even when the person is not their report or colleague by directory.
-	f.db.Exec(`UPDATE requests SET approver_id = ?`, f.people["pastor"].ID)
+	// pastor is a colleague, not staff's report: no type until the request's
+	// frozen approver_id names them (the approver_id branch, apart from reports).
+	if got := f.away("pastor", "2026-10-12", "2026-10-12"); len(got) != 1 || got[0].LeaveType != "" {
+		t.Errorf("colleague pastor sees %+v", got)
+	}
+	f.exec(`UPDATE requests SET approver_id = ?`, f.people["pastor"].ID)
 	if got := f.away("pastor", "2026-10-12", "2026-10-12"); len(got) != 1 || got[0].LeaveType != "Sick leave" {
 		t.Errorf("approver_id viewer sees %+v", got)
 	}
@@ -76,12 +86,12 @@ func TestAwayScope(t *testing.T) {
 		t.Errorf("viewer included: %v", got)
 	}
 	// A disabled team shares nothing.
-	f.db.Exec(`UPDATE teams SET disabled = 1`)
+	f.exec(`UPDATE teams SET disabled = 1`)
 	if got := names(f.away("orphan", "2026-10-12", "2026-10-12")); !reflect.DeepEqual(got, []string{"staff"}) {
 		t.Errorf("disabled team: %v", got)
 	}
 	// A disabled colleague is not shown.
-	f.db.Exec(`UPDATE users SET disabled = 1 WHERE id = ?`, f.people["staff"].ID)
+	f.exec(`UPDATE users SET disabled = 1 WHERE id = ?`, f.people["staff"].ID)
 	if got := f.away("orphan", "2026-10-12", "2026-10-12"); len(got) != 0 {
 		t.Errorf("disabled colleague: %v", names(got))
 	}
@@ -120,6 +130,22 @@ func TestAwayStatusesAndBoundaries(t *testing.T) {
 	for _, c := range []struct{ s, e string }{{"2026-10-09", "2026-10-11"}, {"2026-10-15", "2026-10-16"}} {
 		if got := f.away("orphan", c.s, c.e); len(got) != 0 {
 			t.Errorf("%s..%s shown: %v", c.s, c.e, names(got))
+		}
+	}
+}
+
+// Two shared teams and a shared department must not multiply a request's row.
+func TestAwayOneRowPerRequest(t *testing.T) {
+	f := newFixture(t)
+	f.dept("Ops", "orphan", "staff", "head")
+	f.team("Band", "orphan", "staff", "head")
+	f.team("Choir", "orphan", "staff", "head")
+	f.insertAway("staff", "annual", "2026-10-12", "2026-10-12", "approved")
+	f.insertAway("staff", "annual", "2026-10-14", "2026-10-14", "pending")
+	for _, who := range []string{"orphan", "head"} {
+		got := f.away(who, "2026-10-12", "2026-10-16")
+		if len(got) != 2 || got[0].Start != "2026-10-12" || got[1].Start != "2026-10-14" {
+			t.Errorf("%s sees %+v", who, got)
 		}
 	}
 }
