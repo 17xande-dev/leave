@@ -187,6 +187,7 @@ type RequestDetail struct {
 	Cancels             *RequestInfo `json:"cancels,omitempty" jsonschema:"for a cancellation: the leave it would cancel"`
 	PendingCancellation int64        `json:"pending_cancellation_id,omitempty" jsonschema:"id of a cancellation waiting on this leave"`
 	CanWithdraw         bool         `json:"can_withdraw"`
+	Fingerprint         string       `json:"fingerprint" jsonschema:"pass as expected to decide_request to refuse the decision if the request is edited first"`
 	CanEdit             bool         `json:"can_edit" jsonschema:"edit_request would be accepted for this request"`
 	CanRequestCancel    bool         `json:"can_request_cancellation"`
 	CanDecide           bool         `json:"can_decide"`
@@ -201,6 +202,7 @@ func (d *deps) getRequest(ctx context.Context, u users.User, in IDIn) (RequestDe
 	}
 	out := RequestDetail{
 		Request:          requestInfo(req),
+		Fingerprint:      req.Fingerprint(),
 		CanWithdraw:      leave.CanWithdraw(u, req),
 		CanRequestCancel: d.leave.CanRequestCancellation(u, req),
 		CanDecide:        leave.CanDecide(u, req),
@@ -569,6 +571,7 @@ func (d *deps) requestCancellation(ctx context.Context, u users.User, in CancelI
 
 type QueueItem struct {
 	Request          RequestInfo `json:"request"`
+	Fingerprint      string      `json:"fingerprint" jsonschema:"pass as expected to decide_request to refuse the decision if the request is edited first"`
 	CoverageWarnings []string    `json:"coverage_warnings,omitempty"`
 	NextApprover     string      `json:"next_approver,omitempty" jsonschema:"who it goes to if you approve; empty when yours is the last approval"`
 	Steps            []StepInfo  `json:"steps"`
@@ -596,7 +599,7 @@ func (d *deps) approvalQueue(ctx context.Context, u users.User, _ none) (QueueOu
 	}
 	out := QueueOut{Queue: make([]QueueItem, 0, len(q))}
 	for _, req := range q {
-		item := QueueItem{Request: requestInfo(req)}
+		item := QueueItem{Request: requestInfo(req), Fingerprint: req.Fingerprint()}
 		if item.Steps, err = d.steps(ctx, req.ID); err != nil {
 			return QueueOut{}, "", err
 		}
@@ -630,6 +633,8 @@ type DecideIn struct {
 	ID       int64  `json:"id" jsonschema:"the request's id"`
 	Decision string `json:"decision" jsonschema:"exactly approve or decline"`
 	Note     string `json:"note,omitempty" jsonschema:"required when declining: say why"`
+	// Expected is optional: with it, the decision is refused if the person has edited the request since you read it.
+	Expected string `json:"expected,omitempty" jsonschema:"the fingerprint from get_request or approval_queue; if the request has changed since, the decision is refused"`
 }
 
 func (d *deps) decide(ctx context.Context, u users.User, in DecideIn) (RequestOut, string, error) {
@@ -646,7 +651,7 @@ func (d *deps) decide(ctx context.Context, u users.User, in DecideIn) (RequestOu
 	if err != nil {
 		return RequestOut{}, "", err
 	}
-	decided, err := d.leave.Decide(ctx, u, req.ID, approve, in.Note)
+	decided, err := d.leave.DecideSeen(ctx, u, req.ID, approve, in.Note, in.Expected)
 	if err != nil {
 		return RequestOut{}, "", err
 	}

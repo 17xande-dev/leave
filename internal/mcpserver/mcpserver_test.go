@@ -839,3 +839,31 @@ func TestEditRequestTool(t *testing.T) {
 		t.Fatalf("get_request after approval = %v", d.Data)
 	}
 }
+
+// decide_request's optional expected: the fingerprint read from get_request or
+// the queue refuses a decision on a request edited since; without it the call
+// behaves as before.
+func TestDecideExpectedFingerprint(t *testing.T) {
+	f := newFixture(t)
+	staff, head := f.as("staff1"), f.as("headops")
+	rid := id(f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-12"}))
+	fp, _ := f.ok(head, "get_request", map[string]any{"id": rid}).Data["fingerprint"].(string)
+	q := f.ok(head, "approval_queue", nil).Data["queue"].([]any)
+	if fp == "" || q[0].(map[string]any)["fingerprint"] != fp {
+		t.Fatalf("fingerprint %q vs queue %v", fp, q)
+	}
+	f.ok(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-12", "end": "2026-10-23"})
+	f.refused(head, "decide_request", map[string]any{"id": rid, "decision": "approve", "expected": fp}, "changed after you read it")
+	f.refused(head, "decide_request", map[string]any{"id": rid, "decision": "decline", "note": "no", "expected": fp}, "changed after you read it")
+	if d := f.ok(head, "get_request", map[string]any{"id": rid}); get(d.Data, "request", "status") != "pending" {
+		t.Fatalf("a refused decision changed it: %v", d.Data)
+	}
+	fresh, _ := f.ok(head, "get_request", map[string]any{"id": rid}).Data["fingerprint"].(string)
+	if fresh == fp {
+		t.Fatal("fingerprint did not change")
+	}
+	f.ok(head, "decide_request", map[string]any{"id": rid, "decision": "approve", "expected": fresh})
+	// No expected: as today.
+	r2 := id(f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02"}))
+	f.ok(head, "decide_request", map[string]any{"id": r2, "decision": "approve"})
+}

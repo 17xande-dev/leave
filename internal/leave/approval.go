@@ -2,8 +2,11 @@ package leave
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/17xande-dev/leave/internal/users"
@@ -179,7 +182,30 @@ func (s *Service) PendingCancellation(ctx context.Context, id int64) (*Request, 
 // each approval is logged and, unless the approver is the final one, passes the
 // request to their own approver. Declining at any level ends it.
 func (s *Service) Decide(ctx context.Context, actor users.User, id int64, approve bool, note string) (Request, error) {
-	return s.decide(ctx, actor, id, approve, note, false)
+	return s.decide(ctx, actor, id, approve, note, false, "")
+}
+
+// ErrChanged is a decision refused because the request is not what the
+// approver was shown: its owner edited it after the page was read.
+var ErrChanged = errors.New("leave: the request was changed after it was read")
+
+// Fingerprint identifies what an approver decides on: the type, dates, days,
+// special-permission flag and note. An edit changes it, so a decision made on
+// a page read before the edit can be told apart (see DecideSeen). It is a hash,
+// opaque to callers, and covers nothing an approver's own actions change.
+func (r Request) Fingerprint() string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%d|%s|%s|%d|%t|%s", r.ID, r.Kind, r.TypeID, r.Start, r.End, r.Days, r.Escalate, r.Note)))
+	return hex.EncodeToString(h[:12])
+}
+
+// DecideSeen is Decide for an approver who decides what they were shown: seen
+// is the Fingerprint of the request when they read it, compared inside the
+// transaction against the row as it stands, and a difference is ErrChanged with
+// nothing done -- approving or declining a request that has since changed is
+// not what they chose. An empty seen skips the check; the web forms never send
+// one empty.
+func (s *Service) DecideSeen(ctx context.Context, actor users.User, id int64, approve bool, note, seen string) (Request, error) {
+	return s.decide(ctx, actor, id, approve, note, false, seen)
 }
 
 // ErrNeedsOverride is DecideOrdinary's refusal of a request needing special permission.
@@ -190,11 +216,11 @@ var ErrNeedsOverride = errors.New("leave: needs special permission")
 // permission, judged inside the transaction on the row as it stands then.
 // Bulk approval uses it, because an override must be a deliberate act on one
 // request, and a request can become escalated after the list was read.
-func (s *Service) DecideOrdinary(ctx context.Context, actor users.User, id int64) (Request, error) {
-	return s.decide(ctx, actor, id, true, "", true)
+func (s *Service) DecideOrdinary(ctx context.Context, actor users.User, id int64, seen string) (Request, error) {
+	return s.decide(ctx, actor, id, true, "", true, seen)
 }
 
-func (s *Service) decide(ctx context.Context, actor users.User, id int64, approve bool, note string, ordinary bool) (Request, error) {
+func (s *Service) decide(ctx context.Context, actor users.User, id int64, approve bool, note string, ordinary bool, seen string) (Request, error) {
 	note = strings.TrimSpace(note)
 	if !approve && note == "" {
 		return Request{}, FieldErrors{"note": "Say why, so they know what to change."}
@@ -212,6 +238,9 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 			return Request{}, err
 		}
 	}
+	if s.beforeDecideTx != nil {
+		s.beforeDecideTx()
+	}
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		r, err := s.get(ctx, tx, id)
@@ -220,6 +249,12 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 		}
 		if !CanDecide(actor, r) || r.ApproverID != before.ApproverID {
 			return ErrNotAllowed
+		}
+		// An edit can land between the read above and this transaction, and
+		// flip escalate, which decides who comes next and whether this is an
+		// override; the fingerprint also covers an edit before the page loaded.
+		if r.Escalate != before.Escalate || (seen != "" && seen != r.Fingerprint()) {
+			return ErrChanged
 		}
 		if ordinary && r.Escalate && r.Kind == KindLeave {
 			return ErrNeedsOverride

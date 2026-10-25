@@ -485,3 +485,35 @@ func TestEditedNotifiesApproverOnly(t *testing.T) {
 		t.Fatalf("admin-queue edit jobs = %+v", jobs)
 	}
 }
+
+// An edit that takes a request out of special permission says so; one that
+// puts it into special permission says that instead.
+func TestEditedEmailSaysWhenSpecialPermissionChanges(t *testing.T) {
+	e := setup(t)
+	e.dept(t, "Pair", "staff", "hr")
+	if err := e.svc.SetCoverageRule(e.ctx, "Pair", 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Submit(e.ctx, e.people["hr"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Override: true})
+	if err != nil || !r.Escalate {
+		t.Fatalf("setup: %+v %v", r, err)
+	}
+	e.drain(t)
+	if _, err := e.svc.Edit(e.ctx, e.people["staff"], r.ID, leave.Input{TypeID: e.annual, Start: "2026-10-19", End: "2026-10-21"}); err != nil {
+		t.Fatal(err)
+	}
+	m := email(t, e.drain(t)[0])
+	if !strings.Contains(m.Text, "It no longer needs special permission") || strings.Contains(m.Text, "This needs special permission") {
+		t.Fatalf("dropped:\n%s", m.Text)
+	}
+	if _, err := e.svc.Edit(e.ctx, e.people["staff"], r.ID, leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Override: true}); err != nil {
+		t.Fatal(err)
+	}
+	m = email(t, e.drain(t)[0])
+	if !strings.Contains(m.Text, "This needs special permission") || strings.Contains(m.Text, "no longer needs") {
+		t.Fatalf("needed again:\n%s", m.Text)
+	}
+}

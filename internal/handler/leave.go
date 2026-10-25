@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -233,6 +234,11 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	d := applyData{Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
 	for i, b := range bs {
 		types[i] = b.Type
+		// The request being edited is already counted as pending in its own
+		// cycle; its days are the person's to move, so the label gives them back.
+		if edit != nil && b.Type.ID == edit.TypeID && b.CycleStart == edit.CycleStart {
+			b.Pending -= edit.Days
+		}
 		d.Labels[b.Type.ID] = typeLabel(b)
 	}
 	d.Types = types
@@ -717,6 +723,16 @@ func notPossible(w http.ResponseWriter, r *http.Request, id int64) {
 	http.Redirect(w, r, requestURL(r, id, "not-possible"), http.StatusSeeOther)
 }
 
+// changed answers a decision on a request that was edited after the approver
+// read it: nothing was decided, and they are sent back to look at it again.
+func changed(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.PostFormValue("from") == "queue" {
+		http.Redirect(w, r, "/approvals?notice=request-changed", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, requestURL(r, id, "request-changed"), http.StatusSeeOther)
+}
+
 func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.loadRequest(w, r)
 	if !ok {
@@ -807,9 +823,19 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note := r.PostFormValue("note")
-	decided, err := h.leave.Decide(r.Context(), currentUser(r), req.ID, approve, note)
+	// What the approver saw. Required: a form without it (an old tab) cannot
+	// show it was read after the last edit, so it is sent to look again.
+	seen := r.PostFormValue("seen")
+	if seen == "" {
+		changed(w, r, req.ID)
+		return
+	}
+	decided, err := h.leave.DecideSeen(r.Context(), currentUser(r), req.ID, approve, note, seen)
 	var fe leave.FieldErrors
 	switch {
+	case errors.Is(err, leave.ErrChanged):
+		changed(w, r, req.ID)
+		return
 	case errors.As(err, &fe) && r.PostFormValue("from") == "queue":
 		// Declined from a row without a note: back to the queue, that row's
 		// details open with the error beside it.
@@ -978,6 +1004,9 @@ const bulkMax = 50
 // decide is reported without naming it or its person, so a forged id confirms
 // nothing. One needing special permission is refused here: Decide would take
 // it as an override, and an override must be deliberate, one row at a time.
+// fingerprintRE is the shape of Request.Fingerprint, for strict parsing.
+var fingerprintRE = regexp.MustCompile(`^[0-9a-f]{24}$`)
+
 func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	if err := r.ParseForm(); err != nil {
@@ -985,15 +1014,17 @@ func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ids []int64
-	seen := map[int64]bool{}
+	seen := map[int64]string{} // id -> the fingerprint the approver saw
 	for _, v := range r.PostForm["id"] {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
+		// "id:fingerprint": what was ticked is what was read.
+		idText, fp, ok := strings.Cut(v, ":")
+		id, err := strconv.ParseInt(idText, 10, 64)
+		if !ok || err != nil || id <= 0 || !fingerprintRE.MatchString(fp) {
 			http.Error(w, "Those requests could not be read.", http.StatusBadRequest)
 			return
 		}
-		if !seen[id] {
-			seen[id] = true
+		if _, dup := seen[id]; !dup {
+			seen[id] = fp
 			ids = append(ids, id)
 		}
 	}
@@ -1018,7 +1049,9 @@ func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 			failures = append(failures, label+": needs special permission. Use its own Override button.")
 			continue
 		}
-		switch _, err := h.leave.DecideOrdinary(r.Context(), u, id); {
+		switch _, err := h.leave.DecideOrdinary(r.Context(), u, id, seen[id]); {
+		case errors.Is(err, leave.ErrChanged):
+			failures = append(failures, label+": changed after you opened it. Check it again.")
 		case errors.Is(err, leave.ErrNeedsOverride):
 			failures = append(failures, label+": needs special permission. Use its own Override button.")
 		case errors.Is(err, leave.ErrNotAllowed):

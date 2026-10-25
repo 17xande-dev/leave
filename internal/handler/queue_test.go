@@ -203,7 +203,7 @@ func TestBulkRefusesARequestEscalatedAfterTheRead(t *testing.T) {
 	if _, err := hs.db.Exec(`UPDATE requests SET escalate = 1 WHERE id = ?`, id); err != nil {
 		t.Fatal(err)
 	}
-	_, err := hs.svc.DecideOrdinary(context.Background(), mustUser(t, hs, "headops"), id)
+	_, err := hs.svc.DecideOrdinary(context.Background(), mustUser(t, hs, "headops"), id, "")
 	if !errors.Is(err, leave.ErrNeedsOverride) {
 		t.Fatalf("DecideOrdinary on an escalated request: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestBulkApprove(t *testing.T) {
 
 	_, body := hs.get(head, "/approvals")
 	for _, p := range []string{a, b} {
-		if !strings.Contains(rowFor(t, body, p), `name="id" value="`+idOf(p)+`"`) {
+		if !strings.Contains(rowFor(t, body, p), `name="id" value="`+idOf(p)+`:`) {
 			t.Fatalf("no checkbox on %s", p)
 		}
 	}
@@ -264,7 +264,7 @@ func TestBulkApproveRefusesWhatIsNotYours(t *testing.T) {
 	others := hs.apply(hs.signIn("staff2"), "annual", "2026-10-12", "2026-10-14") // headkids's to decide
 	own := hs.apply(head, "annual", "2026-10-26", "2026-10-27")                   // pastor's to decide
 
-	res, body := hs.post(head, "/approvals/approve", url.Values{"id": {idOf(mine), idOf(others), idOf(own), "9999"}})
+	res, body := hs.post(head, "/approvals/approve", url.Values{"id": {idOf(mine), idOf(others), idOf(own), "9999:000000000000000000000000"}})
 	if res.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d", res.StatusCode)
 	}
@@ -361,5 +361,124 @@ func TestDeclineFromTheRow(t *testing.T) {
 	res, _ = hs.post(head, p+"/decide", url.Values{"decision": {"decline"}, "from": {"queue"}, "note": {"clashes"}})
 	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/approvals?notice=declined" || hs.status(p) != "declined" {
 		t.Fatalf("with note: %d %s %s", res.StatusCode, res.Header.Get("Location"), hs.status(p))
+	}
+}
+
+// The decide forms post what the approver saw. A request edited since is not
+// decided, whichever button is pressed, and nothing about it changes.
+func TestDecideRefusesAStalePage(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	p := hs.apply(staff, "annual", "2026-10-12", "2026-10-12")
+	id := idOf(p)
+
+	// The queue page carries the fingerprint it rendered, in both forms and the checkbox.
+	_, page := hs.get(head, "/approvals")
+	req, _ := hs.svc.Get(context.Background(), mustAtoi(t, id))
+	old := req.Fingerprint()
+	if n := strings.Count(page, `name="seen" value="`+old+`"`); n != 2 {
+		t.Fatalf("seen fields on the queue page = %d, want approve and decline", n)
+	}
+	if !strings.Contains(page, `name="id" value="`+id+`:`+old+`"`) {
+		t.Fatal("checkbox does not carry id:fingerprint")
+	}
+	if _, body := hs.get(head, p); !strings.Contains(body, `name="seen" value="`+old+`"`) {
+		t.Fatal("request page decision form lacks seen")
+	}
+
+	// The owner edits after the page loaded: 1 day becomes 15.
+	if res, body := hs.post(staff, p+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"}, "end": {"2026-10-30"}, "note": {"n"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("edit: %d\n%s", res.StatusCode, body)
+	}
+	for _, d := range []url.Values{
+		{"decision": {"approve"}, "from": {"queue"}, "seen": {old}},
+		{"decision": {"decline"}, "from": {"queue"}, "seen": {old}, "note": {"no"}},
+	} {
+		res, _ := hs.postRaw(head, p+"/decide", d)
+		if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/approvals?notice=request-changed" {
+			t.Fatalf("stale %s: %d %s", d.Get("decision"), res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+	// From the request page the person goes back to it.
+	res, _ := hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}, "seen": {old}})
+	if res.Header.Get("Location") != p+"?notice=request-changed" {
+		t.Fatalf("stale from the page: %s", res.Header.Get("Location"))
+	}
+	// An absent seen (an old tab) is refused the same way.
+	if res, _ := hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}}); !strings.HasSuffix(res.Header.Get("Location"), "notice=request-changed") {
+		t.Fatalf("no seen: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	if r, _ := hs.svc.Get(context.Background(), mustAtoi(t, id)); r.Status != "pending" || r.Days != 15 {
+		t.Fatalf("request changed by refused decisions: %+v", r)
+	}
+	if _, body := hs.get(head, "/approvals?notice=request-changed"); !strings.Contains(body, "changed after you opened it") {
+		t.Fatal("no notice")
+	}
+
+	// A fresh fingerprint approves normally.
+	fresh, _ := hs.svc.Get(context.Background(), mustAtoi(t, id))
+	res, _ = hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}, "from": {"queue"}, "seen": {fresh.Fingerprint()}})
+	if res.Header.Get("Location") != "/approvals?notice=approved" {
+		t.Fatalf("fresh: %s", res.Header.Get("Location"))
+	}
+}
+
+func TestBulkReportsAStaleRowAndApprovesTheRest(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	a := hs.apply(staff, "annual", "2026-10-12", "2026-10-12")
+	b := hs.apply(staff, "annual", "2026-10-14", "2026-10-14")
+	ra, _ := hs.svc.Get(context.Background(), mustAtoi(t, idOf(a)))
+	rb, _ := hs.svc.Get(context.Background(), mustAtoi(t, idOf(b)))
+	hs.post(staff, a+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"}, "end": {"2026-10-13"}, "note": {"n"}})
+
+	res, body := hs.postRaw(head, "/approvals/approve", url.Values{"id": {idOf(a) + ":" + ra.Fingerprint(), idOf(b) + ":" + rb.Fingerprint()}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "changed after you opened it") || !strings.Contains(body, "1 approved.") {
+		t.Fatalf("bulk: %d\n%s", res.StatusCode, body)
+	}
+	if x, _ := hs.svc.Get(context.Background(), mustAtoi(t, idOf(a))); x.Status != "pending" {
+		t.Error("the stale row was approved")
+	}
+	if x, _ := hs.svc.Get(context.Background(), mustAtoi(t, idOf(b))); x.Status != "approved" {
+		t.Error("the fresh row was not approved")
+	}
+	// Strict parsing: anything that is not id:fingerprint is a 400.
+	for _, bad := range []string{idOf(a), idOf(a) + ":", idOf(a) + ":zz", idOf(a) + ":" + ra.Fingerprint() + "0", idOf(a) + ":" + ra.Fingerprint() + ":x", ":" + ra.Fingerprint()} {
+		if res, _ := hs.postRaw(head, "/approvals/approve", url.Values{"id": {bad}}); res.StatusCode != http.StatusBadRequest {
+			t.Errorf("id %q: %d, want 400", bad, res.StatusCode)
+		}
+	}
+}
+
+// A request that became special permission after the queue was read cannot be
+// approved by a plain Approve; the page's fingerprint no longer matches.
+func TestPlainApproveRefusedWhenEditAddedOverride(t *testing.T) {
+	hs := newHarness(t)
+	p := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	id := mustAtoi(t, idOf(p))
+	r, _ := hs.svc.Get(context.Background(), id)
+	seen := r.Fingerprint()
+	if _, err := hs.db.Exec(`UPDATE requests SET escalate = 1 WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := hs.postRaw(hs.signIn("headops"), p+"/decide", url.Values{"decision": {"approve"}, "from": {"queue"}, "seen": {seen}})
+	if res.Header.Get("Location") != "/approvals?notice=request-changed" {
+		t.Fatalf("%s", res.Header.Get("Location"))
+	}
+	if x, _ := hs.svc.Get(context.Background(), id); x.Status != "pending" {
+		t.Fatalf("approved: %+v", x)
+	}
+}
+
+// While editing, the type's label gives the request's own days back.
+func TestEditFormLabelCountsItsOwnDaysBack(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	p := hs.apply(staff, "annual", "2026-10-12", "2026-10-14") // 3 days of 15
+	if _, body := hs.get(staff, "/leave/new"); !strings.Contains(body, "Annual leave (12 left this year)") {
+		t.Fatalf("new form label:\n%s", body)
+	}
+	if _, body := hs.get(staff, p+"/edit"); !strings.Contains(body, "Annual leave (15 left this year)") {
+		t.Fatalf("edit form label:\n%s", body)
 	}
 }

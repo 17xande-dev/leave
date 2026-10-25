@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -128,7 +129,49 @@ func (hs *harness) get(c *http.Client, path string) (int, string) {
 	return res.StatusCode, string(b)
 }
 
+// post sends a form as a signed-in browser would. Decision forms carry what the
+// approver saw (the hidden "seen", and "id:fingerprint" for bulk), which a page
+// always renders, so it is filled in from the current request when a test did
+// not set it; postRaw sends exactly what it is given.
 func (hs *harness) post(c *http.Client, path string, form url.Values) (*http.Response, string) {
+	hs.t.Helper()
+	fp := func(id string) string {
+		n, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			return ""
+		}
+		r, err := hs.svc.Get(context.Background(), n)
+		if err != nil {
+			return ""
+		}
+		return r.Fingerprint()
+	}
+	if m := regexp.MustCompile(`^/leave/(\d+)/decide`).FindStringSubmatch(path); m != nil && form != nil && form.Get("seen") == "" {
+		if f := fp(m[1]); f != "" {
+			form = cloneForm(form)
+			form.Set("seen", f)
+		}
+	}
+	if path == "/approvals/approve" {
+		form = cloneForm(form)
+		for i, v := range form["id"] {
+			if f := fp(v); f != "" {
+				form["id"][i] = v + ":" + f
+			}
+		}
+	}
+	return hs.postRaw(c, path, form)
+}
+
+func cloneForm(f url.Values) url.Values {
+	out := url.Values{}
+	for k, v := range f {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
+}
+
+func (hs *harness) postRaw(c *http.Client, path string, form url.Values) (*http.Response, string) {
 	hs.t.Helper()
 	res, err := c.PostForm(hs.srv.URL+path, form)
 	if err != nil {

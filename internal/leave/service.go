@@ -30,6 +30,8 @@ type Service struct {
 	// beforeEditTx lets a test land a decision between Edit's first read and
 	// its transaction; nil outside tests.
 	beforeEditTx func()
+	// beforeDecideTx is the same for Decide, between its read and its transaction.
+	beforeDecideTx func()
 	// Now is replaceable so tests can pin "today".
 	Now func() time.Time
 }

@@ -312,3 +312,59 @@ func TestPreviewEditExcludesOnlyYourOwnEditableRequest(t *testing.T) {
 		t.Fatalf("decided request honoured: %v %v", editing, err)
 	}
 }
+
+// An approver decides what they were shown. Each of these is a way a decision
+// could otherwise land on a request that changed under it.
+func TestDecideSeenRefusesAChangedRequest(t *testing.T) {
+	f := newFixture(t)
+	head := f.people["head"]
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-12") // 1 day
+	seen := r.Fingerprint()
+	f.mustEdit("staff", r.ID, "annual", "2026-10-12", "2026-10-30", "n") // 15 days, after the page loaded
+	if mustGet(f, r.ID).Fingerprint() == seen {
+		t.Fatal("an edit left the fingerprint alone")
+	}
+	for _, approve := range []bool{true, false} {
+		if _, err := f.svc.DecideSeen(f.ctx, head, r.ID, approve, "no", seen); !errors.Is(err, ErrChanged) {
+			t.Fatalf("approve=%v on a stale fingerprint: %v", approve, err)
+		}
+	}
+	if got := mustGet(f, r.ID); got.Status != StatusPending || got.DecidedByID != 0 {
+		t.Fatalf("a refused decision changed the request: %+v", got)
+	}
+	if _, err := f.svc.DecideOrdinary(f.ctx, head, r.ID, seen); !errors.Is(err, ErrChanged) {
+		t.Fatalf("bulk on a stale fingerprint: %v", err)
+	}
+	// The fresh one works, and an empty one (MCP without expected) behaves as before.
+	if _, err := f.svc.DecideSeen(f.ctx, head, r.ID, true, "", mustGet(f, r.ID).Fingerprint()); err != nil {
+		t.Fatal(err)
+	}
+	r2 := f.mustSubmit("staff", "unpaid", "2026-11-09", "2026-11-09")
+	if _, err := f.svc.DecideSeen(f.ctx, head, r2.ID, true, "", ""); err != nil {
+		t.Fatalf("no fingerprint: %v", err)
+	}
+}
+
+// An edit that flips escalate between Decide's read and its transaction: a
+// plain approval must not become an override, nor an override a final approval.
+func TestDecideRefusesEscalateFlippedInTheGap(t *testing.T) {
+	for _, becomes := range []bool{true, false} {
+		f := newFixture(t)
+		r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+		if !becomes {
+			f.exec(`UPDATE requests SET escalate = 1 WHERE id = ?`, r.ID)
+		}
+		f.svc.beforeDecideTx = func() { f.exec(`UPDATE requests SET escalate = ? WHERE id = ?`, becomes, r.ID) }
+		// No fingerprint: this is the in-transaction check on its own.
+		if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); !errors.Is(err, ErrChanged) {
+			t.Fatalf("escalate -> %v: %v", becomes, err)
+		}
+		got := mustGet(f, r.ID)
+		if got.Status != StatusPending || got.ApproverID != f.people["head"].ID {
+			t.Fatalf("request moved: %+v", got)
+		}
+		if steps, _ := f.svc.Steps(f.ctx, r.ID); len(steps) != 0 {
+			t.Fatalf("a step was logged: %v", steps)
+		}
+	}
+}

@@ -95,6 +95,8 @@ func humanError(tool string, err error) error {
 			parts = append(parts, fieldLabel(k)+fe[k])
 		}
 		return userError(strings.Join(parts, " "))
+	case errors.Is(err, leave.ErrChanged):
+		return userError("This request was changed after you read it. Read it again (get_request) and check before deciding.")
 	case errors.Is(err, leave.ErrNotAllowed):
 		return userError("That is not possible. The request may already have been decided or withdrawn, " +
 			"or it is not yours to do this with.")
@@ -246,7 +248,7 @@ func (d *deps) register(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "edit_request", Annotations: additive("Edit a pending request"),
 		Description: "Change the type, dates or note of one of your own pending requests that nobody has started to decide, instead of withdrawing it and applying again. " +
 			"Give the id and the full new type, start, end and note; the same checks as apply_for_leave apply, and its approver is emailed. " +
-			"Only call this when the person has asked for it. override asks for special permission as in apply_for_leave; There is no ask_hr here: to go below zero, withdraw and apply again with ask_hr."}, d.edit)
+			"Only call this when the person has asked for it. override asks for special permission as in apply_for_leave. There is no ask_hr here: to go below zero, withdraw and apply again with ask_hr."}, d.edit)
 	add(d, s, &mcp.Tool{Name: "withdraw_request", Annotations: destructive("Withdraw a request"),
 		Description: "Withdraw one of your own requests that has not been decided yet (pending, waiting for HR, or a draft). Cannot be undone."}, d.withdraw)
 	add(d, s, &mcp.Tool{Name: "submit_draft", Annotations: additive("Submit a draft request"),
@@ -260,7 +262,8 @@ func (d *deps) register(s *mcp.Server) {
 		Description: "Requests waiting for your decision, oldest first, each with any department or team coverage warnings, who it goes to next if you approve, the requester's balance afterwards and its trail so far."}, d.approvalQueue)
 	add(d, s, &mcp.Tool{Name: "decide_request", Annotations: destructive("Approve or decline a request"),
 		Description: "Approve or decline a request waiting for your decision. A decline needs a note saying why. " +
-			"Only call this when the person has told you the decision; never decide on your own judgement."}, d.decide)
+			"Only call this when the person has told you the decision; never decide on your own judgement. " +
+			"Pass the request's fingerprint (from get_request or approval_queue) as expected, so that a request its owner has edited since you read it is not decided unseen."}, d.decide)
 
 	// Admin, read-only
 	add(d, s, &mcp.Tool{Name: "all_requests", Annotations: readOnly("All requests (administrators)"),

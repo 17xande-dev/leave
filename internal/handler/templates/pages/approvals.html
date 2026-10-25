@@ -18,7 +18,7 @@
   <tbody>
   {{range .}}{{$row := .}}
     <tr>
-      <td class="tick">{{if .Bulk}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}" aria-label="Select {{if .IsCancellation}}Cancel: {{end}}{{.UserName}}, {{.TypeName}}, {{date .Start}}">{{end}}</td>
+      <td class="tick">{{if .Bulk}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}:{{.Fingerprint}}" aria-label="Select {{if .IsCancellation}}Cancel: {{end}}{{.UserName}}, {{.TypeName}}, {{date .Start}}">{{end}}</td>
       <td class="who">{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
       <td><a href="/leave/{{.ID}}?from=approvals">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}
         {{with .After}}<br><small class="after">{{if .Below}}{{.Below}} {{units .Below .Unit}} below zero{{else}}{{.Left}} {{units .Left .Unit}} left in {{with .CycleName}}{{.}}{{else}}this cycle{{end}}{{end}}{{if .Shared}} if all their pending requests are approved{{else}} afterwards{{end}}</small>{{end}}
@@ -29,6 +29,7 @@
         <form method="post" action="/leave/{{.ID}}/decide" class="row">
           {{template "csrf" $.CSRF}}
           <input type="hidden" name="from" value="queue">
+          <input type="hidden" name="seen" value="{{.Fingerprint}}">
           <button type="submit" name="decision" value="approve">{{if .Escalate}}{{with .Next}}Override and send to {{.}}{{else}}Override and approve{{end}}{{else}}Approve{{end}}</button>
           <a href="/leave/{{.ID}}?from=approvals">Details</a>
         </form>
@@ -37,6 +38,7 @@
           <form method="post" action="/leave/{{.ID}}/decide" class="stack">
             {{template "csrf" $.CSRF}}
             <input type="hidden" name="from" value="queue">
+            <input type="hidden" name="seen" value="{{.Fingerprint}}">
             <div class="field">
               <label for="note-{{.ID}}">Reason <small>(required)</small></label>
               <textarea id="note-{{.ID}}" name="note" rows="2" required></textarea>

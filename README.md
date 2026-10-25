@@ -162,7 +162,7 @@ person asks for special permission, as for a new request, and one that is no lon
 limit stops needing it. An edit never asks HR to go below zero: withdraw and apply again.
 The request stays with the approver it was sent to and keeps its place in the queue; that
 approver (or the admins, for the admins' queue) is emailed what changed, and the person is
-not. An edit that changes nothing sends nothing. There is no "edited on" mark: it would
+not. An edit that changes nothing sends nothing. Every decision form posts a fingerprint of what the approver saw (type, dates, days, special-permission flag, note); a request edited since is not approved or declined, and the approver is sent back to look again. Bulk approval ticks carry it too, per row. There is no "edited on" mark: it would
 need a new column.
 
 **Settings** (**Admin → Settings**) hold the policy an admin may change without a
@@ -237,7 +237,7 @@ anything unless the person has asked.
 | `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |
 | `request_cancellation` | Ask for approved, not-yet-started leave to be cancelled |
 | `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, the requester's balance afterwards (`balance_after`, absent for unlimited types) and the trail |
-| `decide_request` | Approve or decline (a decline needs a note) |
+| `decide_request` | Approve or decline (a decline needs a note). `expected` is optional: pass the `fingerprint` from `get_request` or `approval_queue` and the decision is refused if the person has edited the request since |
 | `all_requests` | Administrators only: every request, filtered by status, dates and person |
 | `who_is_away` | Administrators only: who is away in a date range, by department |
 | `outbox_problems` | Administrators only: failing emails and calendar jobs |

@@ -69,6 +69,7 @@
 {{if .CanDecide}}
 <form method="post" action="/leave/{{.Request.ID}}/decide{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
+  <input type="hidden" name="seen" value="{{.Request.Fingerprint}}">
   <h2>Your decision</h2>
   <div class="field">
     <label for="note">Note <small>(required to decline)</small></label>

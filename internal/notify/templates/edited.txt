@@ -10,7 +10,9 @@ Their note now reads: {{.}}
 {{else}}
 They removed the note.
 {{end}}{{end}}
-{{if .Request.Escalate}}
+{{if .DroppedSpecial}}
+It no longer needs special permission, so it is an ordinary request again.
+{{end}}{{if .Request.Escalate}}
 This needs special permission.{{range .Coverage}} {{.}}{{end}} It goes up through each level, so approving it sends it on to the next person; declining ends it.
 {{end}}
 Please approve or decline it as changed.{{end}}

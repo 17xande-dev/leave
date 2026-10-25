@@ -196,6 +196,8 @@ type msgData struct {
 	// says the note differs too.
 	Was, Now    string
 	NoteChanged bool
+	// DroppedSpecial: the request needed special permission and no longer does.
+	DroppedSpecial bool
 }
 
 // changes fills in what an edit changed, so the approver sees the old and the
@@ -211,6 +213,7 @@ func changes(e leave.Event) func(*msgData) {
 		if b.Note != e.Request.Note {
 			d.NoteChanged = true
 		}
+		d.DroppedSpecial = b.Escalate && !e.Request.Escalate
 	}
 }
 
