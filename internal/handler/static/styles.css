@@ -589,8 +589,15 @@ fieldset {
     margin-block-end: 0;
     max-width: none;
 
+    /* A flex item will not shrink below its content, and a select is as wide as
+       its longest option: let it shrink and keep the select inside its field. */
+    min-inline-size: 0;
+
     > :where(input, select) {
       width: auto;
+    }
+    > select {
+      max-inline-size: 100%;
     }
   }
 }
@@ -651,6 +658,9 @@ date-range-input {
     vertical-align: -0.15em;
     margin-inline-end: 0.4em;
   }
+  & span {
+    white-space: nowrap;
+  }
   & span + span {
     margin-inline-start: var(--gap);
   }
@@ -667,7 +677,7 @@ date-range-input {
     inline-size: 1em;
     block-size: 1em;
     border-radius: 2px;
-    background: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 45%, transparent) 0 2px, transparent 2px 5px);
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 55%, transparent) 0 2px, transparent 2px 5px);
     outline: 1px solid color-mix(in srgb, currentColor 35%, transparent);
   }
 }

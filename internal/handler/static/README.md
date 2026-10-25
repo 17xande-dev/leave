@@ -49,7 +49,7 @@ bypass the content-hashed URL).
 
 ## date-range-input
 
-The `<date-range-input>` web component on the apply page. It is our own, kept in a
+The `<date-range-input>` web component on the apply page and the admin Record leave form. It is our own, kept in a
 separate repository, which is the source of truth: do not edit the copy here.
 
 - Source: `/home/alex/dev/date-range-input/date-range-input.js`, commit `33999ff`
@@ -57,9 +57,13 @@ separate repository, which is the source of truth: do not edit the copy here.
 - Size: 28 987 bytes
 - SHA-256: `6a755403da4860a5d869ec661dd93486ef95567d76e740e24cb688b9d5ab24d0`
 
+The size and hash above are the upstream source at `33999ff`, not the copy here, which
+has diverged (below). The local copy is 32 691 bytes, SHA-256
+`810848d17b3a249e412b0493a0d1ba6bf1679e4d86bc8421365b9def3ab08ecd`.
+
 **Local divergence:** this copy adds the `marks` attribute (holiday and booked-day parts
 via Cally's `getDayParts`, documented at the top of the file) and the `::part(holiday)`
-/ `::part(booked*)` styles, which are not in the source repo yet. Port them there before
+/ `::part(booked*)` styles (plus background-color in the hover rules, and a selected-day hover rule), which are not in the source repo yet. Port them there before
 the next copy over, or the next update will silently drop the marks.
 
 To update, copy from that repo and record the new commit, size and hash above:

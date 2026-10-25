@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -660,7 +661,7 @@ func TestPickerMarksOnBothForms(t *testing.T) {
 		t.Errorf("holidays = %v", m.Holidays)
 	}
 	want := []markedRange{{"2026-10-26", "2026-10-27", "pending"}, {"2026-10-12", "2026-10-14", "approved"}}
-	if len(m.Booked) != 2 || m.Booked[0] != want[0] || m.Booked[1] != want[1] {
+	if !reflect.DeepEqual(m.Booked, want) {
 		t.Errorf("booked = %v, want %v", m.Booked, want)
 	}
 	// The hostile name must not break out of the block: the only literal
@@ -673,15 +674,56 @@ func TestPickerMarksOnBothForms(t *testing.T) {
 	pid := hs.staffID("staff1")
 	_, body = hs.get(hr, "/admin/users/"+itoa(pid))
 	m = marksBlock(t, body, "record-marks")
-	if len(m.Booked) != 2 || m.Holidays["2026-11-20"] != hostile {
-		t.Errorf("admin marks = %v", m)
+	if !reflect.DeepEqual(m.Booked, want) || m.Holidays["2026-11-20"] != hostile || m.Holidays["2026-12-25"] != "Christmas Day" {
+		t.Errorf("admin marks = %v, want booked %v", m, want)
 	}
 	if !strings.Contains(body, `marks="#record-marks"`) {
 		t.Error("record picker has no marks attribute")
 	}
 	hid := hs.staffID("headops")
 	_, body = hs.get(hr, "/admin/users/"+itoa(hid))
-	if m = marksBlock(t, body, "record-marks"); len(m.Booked) != 1 || m.Booked[0].Start != "2026-11-02" {
+	if m = marksBlock(t, body, "record-marks"); !reflect.DeepEqual(m.Booked, []markedRange{{"2026-11-02", "2026-11-03", "pending"}}) {
 		t.Errorf("headops marks = %v", m.Booked)
+	}
+}
+
+// Which requests are marked, and the window's edges. The harness clock is
+// 2026-10-05, so the window is 2026-07-05 to 2027-10-05.
+func TestPickerMarksFilter(t *testing.T) {
+	hs := newHarness(t)
+	req := func(kind, status, start, end string) leave.Request {
+		return leave.Request{Kind: kind, Status: status, Start: start, End: end}
+	}
+	rs := []leave.Request{
+		req(leave.KindLeave, leave.StatusApproved, "2026-11-02", "2026-11-03"),
+		req(leave.KindLeave, leave.StatusPending, "2026-11-09", "2026-11-10"),
+		req(leave.KindLeave, leave.StatusAwaitingHR, "2026-11-16", "2026-11-17"),
+		req(leave.KindLeave, leave.StatusDraft, "2026-11-23", "2026-11-24"),
+		req(leave.KindLeave, leave.StatusDeclined, "2026-11-25", "2026-11-26"),
+		req(leave.KindLeave, leave.StatusWithdrawn, "2026-11-27", "2026-11-28"),
+		req(leave.KindLeave, leave.StatusCancelled, "2026-11-29", "2026-11-30"),
+		req(leave.KindCancellation, leave.StatusApproved, "2026-12-01", "2026-12-02"),
+		req(leave.KindCancellation, leave.StatusPending, "2026-12-03", "2026-12-04"),
+		// Ends the day before the window opens: dropped.
+		req(leave.KindLeave, leave.StatusApproved, "2026-06-29", "2026-07-04"),
+		// Straddles the opening edge: kept whole, not clipped.
+		req(leave.KindLeave, leave.StatusApproved, "2026-07-01", "2026-07-05"),
+		// Starts the day after the window closes: dropped; one on the last day is kept.
+		req(leave.KindLeave, leave.StatusApproved, "2027-10-06", "2027-10-08"),
+		req(leave.KindLeave, leave.StatusPending, "2027-10-05", "2027-10-08"),
+	}
+	m, err := hs.h.pickerMarks(context.Background(), rs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []markedRange{
+		{"2026-11-02", "2026-11-03", "approved"},
+		{"2026-11-09", "2026-11-10", "pending"},
+		{"2026-11-16", "2026-11-17", "pending"},
+		{"2026-07-01", "2026-07-05", "approved"},
+		{"2027-10-05", "2027-10-08", "pending"},
+	}
+	if !reflect.DeepEqual(m.Booked, want) {
+		t.Errorf("booked = %v\nwant     %v", m.Booked, want)
 	}
 }

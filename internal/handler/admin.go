@@ -356,10 +356,10 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {
 		return d, err
 	}
-	if d.Marks, err = h.pickerMarks(ctx, u.ID); err != nil {
+	if d.Requests, err = h.leave.ForUser(ctx, u.ID); err != nil {
 		return d, err
 	}
-	d.Requests, err = h.leave.ForUser(ctx, u.ID)
+	d.Marks, err = h.pickerMarks(ctx, d.Requests)
 	return d, err
 }
 

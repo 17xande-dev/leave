@@ -167,7 +167,7 @@ func typeLabel(b leave.Balance) string {
 	return fmt.Sprintf("%s (%d left this cycle)", b.Type.Name, n)
 }
 
-// pickerMarks is the JSON data block behind the date picker's marks: public
+// pickerMarks (given the person's own requests) is the JSON data block behind the date picker's marks: public
 // holidays by date, and the person's live leave as ranges. It is advisory
 // only (the server still validates), so it covers a window rather than all
 // time: 92 days back, for recording leave just taken or checking a recent
@@ -183,7 +183,7 @@ type markedRange struct {
 	Status string `json:"status"`
 }
 
-func (h *Handler) pickerMarks(ctx context.Context, userID int64) (pickerMarks, error) {
+func (h *Handler) pickerMarks(ctx context.Context, rs []leave.Request) (pickerMarks, error) {
 	today := h.leave.Today()
 	from, to := leave.FormatDate(today.AddDate(0, 0, -92)), leave.FormatDate(today.AddDate(1, 0, 0))
 	m := pickerMarks{Holidays: map[string]string{}, Booked: []markedRange{}}
@@ -200,10 +200,6 @@ func (h *Handler) pickerMarks(ctx context.Context, userID int64) (pickerMarks, e
 				m.Holidays[hd.Date] = hd.Name
 			}
 		}
-	}
-	rs, err := h.leave.ForUser(ctx, userID)
-	if err != nil {
-		return m, err
 	}
 	for _, r := range rs {
 		// Drafts are not booked, and a cancellation request is not itself leave.
@@ -234,7 +230,11 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 		d.Labels[b.Type.ID] = typeLabel(b)
 	}
 	d.Types = types
-	if d.Marks, err = h.pickerMarks(r.Context(), currentUser(r).ID); err != nil {
+	mine, err := h.leave.ForUser(r.Context(), currentUser(r).ID)
+	if err != nil {
+		return applyData{}, err
+	}
+	if d.Marks, err = h.pickerMarks(r.Context(), mine); err != nil {
 		return applyData{}, err
 	}
 	// The same cut-off the server enforces (Service.EarliestStart), so the

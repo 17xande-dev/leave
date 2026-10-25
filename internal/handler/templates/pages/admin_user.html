@@ -128,7 +128,7 @@
     {{/* Data, not script: the CSP never sees it as code. The picker reads it and
          marks days; nothing here disables a day. */}}
     <script type="application/json" id="record-marks">{{.Marks}}</script>
-    <p class="legend muted"><span class="mark-holiday">public holiday</span> <span class="mark-booked">{{.User.Name}} is already away</span></p>
+    <p class="legend muted"><span class="mark-holiday">public holiday</span> <span class="mark-booked">{{.User.Name}} has leave booked or requested</span></p>
     {{template "err" index .RecErrors "start"}}
     {{template "err" index .RecErrors "end"}}
   </div>

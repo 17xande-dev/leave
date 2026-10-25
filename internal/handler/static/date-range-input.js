@@ -155,10 +155,10 @@ calendar-range {
     color: inherit;
     cursor: pointer;
   }
-  &::part(button):hover { background: var(--_range-background); }
+  &::part(button):hover { background-color: var(--_range-background); }
   &::part(button):focus-visible { outline: var(--_focus-ring); outline-offset: -2px; }
   &::part(disabled) { opacity: 0.35; cursor: default; }
-  &::part(disabled):hover { background: transparent; }
+  &::part(disabled):hover { background-color: transparent; }
   & svg { inline-size: 1em; block-size: 1em; }
 }
 
@@ -174,39 +174,45 @@ calendar-month {
   }
   &::part(th) { color: var(--_muted); font-weight: 500; }
   &::part(button) { border-radius: var(--_border-radius); cursor: pointer; }
-  &::part(button):hover { background: var(--_range-background); }
+  &::part(button):hover { background-color: var(--_range-background); }
   &::part(today) { box-shadow: inset 0 0 0 1px var(--_muted); }
   &::part(selected) { background: var(--_accent); color: var(--_accent-color); }
+  /* Keep the selected colours under the pointer: the hover tint would leave the light-on-dark digits unreadable. */
+  &::part(selected):hover { background-color: var(--_accent); }
   &::part(range-inner) { background: var(--_range-background); color: var(--_color); border-radius: 0; }
   &::part(range-start) { border-start-end-radius: 0; border-end-end-radius: 0; }
   &::part(range-end) { border-start-start-radius: 0; border-end-start-radius: 0; }
   &::part(range-start range-end) { border-radius: var(--_border-radius); }
   &::part(outside) { opacity: 0.4; }
   /* Marks (see the header). Neither is by colour alone: a holiday is a dot under the
-     number, a booked day is hatched, and a pending booking is hatched more lightly. */
+     number, a booked day has a hatched band along the bottom of the cell (the digits
+     stay clean), and a pending booking's band is lighter. Only background-image is set
+     here, and the hover, focus and disallowed rules below set background-color, so
+     none of them wipes a mark. */
   &::part(holiday) {
-    background-image: radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem);
+    --_dot: radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem);
+    background-image: var(--_dot);
   }
   &::part(booked) {
-    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 40%, transparent) 0 2px, transparent 2px 6px);
+    --_band: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 55%, transparent) 0 2px, transparent 2px 5px);
+    background-image: var(--_band);
+    background-size: 100% 38%;
+    background-position: 0 100%;
+    background-repeat: no-repeat;
   }
   &::part(booked-pending) {
-    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 24%, transparent) 0 2px, transparent 2px 8px);
+    --_band: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 30%, transparent) 0 2px, transparent 2px 7px);
+    background-image: var(--_band);
   }
   &::part(holiday booked) {
-    background-image:
-      radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem),
-      repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 40%, transparent) 0 2px, transparent 2px 6px);
-  }
-  &::part(holiday booked-pending) {
-    background-image:
-      radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem),
-      repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 24%, transparent) 0 2px, transparent 2px 8px);
+    background-image: var(--_dot), var(--_band);
+    background-size: auto, 100% 38%;
+    background-position: 0 0, 0 100%;
   }
   &::part(disallowed) { opacity: 0.4; cursor: default; text-decoration: line-through; }
-  &::part(disallowed):hover { background: transparent; }
+  &::part(disallowed):hover { background-color: transparent; }
   &::part(button):focus-visible {
-    background: var(--_accent);
+    background-color: var(--_accent);
     color: var(--_accent-color);
     outline: 2px solid var(--_accent-color);
     outline-offset: -3px;
