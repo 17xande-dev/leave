@@ -201,6 +201,15 @@ func (s *Service) Team(ctx context.Context, u users.User) ([]Request, error) {
 		ORDER BY r.start_date, u.name`, fmtDate(s.today()), u.DN, u.ID)
 }
 
+// HasReports is whether anyone reports to u, by the same rule as Team.
+func (s *Service) HasReports(ctx context.Context, u users.User) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM users WHERE manager_dn = ? AND manager_dn <> '' AND id NOT IN (SELECT user_id FROM approver_overrides)
+		UNION ALL SELECT 1 FROM approver_overrides WHERE approver_id = ?)`, u.DN, u.ID).Scan(&n)
+	return n == 1, err
+}
+
 // Filter narrows the admin's list of all requests.
 type Filter struct {
 	Status string

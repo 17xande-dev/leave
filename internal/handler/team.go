@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/17xande-dev/leave/internal/leave"
@@ -23,6 +24,9 @@ type teamData struct {
 	// Reports is the leave of the people the viewer approves for, with types.
 	// It is empty for anyone who approves nobody.
 	Reports []leave.Request
+	// HasReports is whether the viewer approves for anyone, so the list can
+	// say "nobody has leave coming up" rather than vanish.
+	HasReports bool
 }
 
 // teamGrid is the month grid. It carries no leave type, by construction: the
@@ -87,7 +91,12 @@ func (h *Handler) Team(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "team.html", view{Title: "Team", Data: teamData{Grid: grid, Reports: reports}})
+	has, err := h.leave.HasReports(r.Context(), u)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	h.render(w, r, http.StatusOK, "team.html", view{Title: "Team", Data: teamData{Grid: grid, Reports: reports, HasReports: has}})
 }
 
 func (h *Handler) buildGrid(r *http.Request, month, cur, today time.Time) (teamGrid, error) {
@@ -130,7 +139,7 @@ func (h *Handler) buildGrid(r *http.Request, month, cur, today time.Time) (teamG
 			day.Class = "off"
 		}
 		if d.Equal(time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)) {
-			day.Class += " today"
+			day.Class = strings.TrimSpace(day.Class + " today")
 		}
 		g.Days = append(g.Days, day)
 	}
@@ -184,18 +193,20 @@ func (h *Handler) buildGrid(r *http.Request, month, cur, today time.Time) (teamG
 		row := gridRow{Name: names[id], You: id == u.ID}
 		for _, day := range g.Days {
 			date := leave.FormatDate(first.AddDate(0, 0, day.Num-1))
-			c := gridCell{Class: day.Class}
+			// Choose the mark first: approved wins where ranges overlap, and
+			// the hidden text always matches what is drawn.
+			mark, label := "", ""
 			for _, sp := range byUser[id] {
 				if sp.start > date || sp.end < date {
 					continue
 				}
-				// Approved wins where two ranges cover a day.
 				if sp.status == "approved" {
-					c.Class, c.Label = "away "+c.Class, "away"
+					mark, label = "away", "away"
 					break
 				}
-				c.Class, c.Label = "pending "+c.Class, "awaiting approval"
+				mark, label = "pending", "awaiting approval"
 			}
+			c := gridCell{Class: strings.TrimSpace(mark + " " + day.Class), Label: label}
 			c.Title = day.Holiday
 			row.Cells = append(row.Cells, c)
 		}

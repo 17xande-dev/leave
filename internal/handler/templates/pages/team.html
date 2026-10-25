@@ -7,9 +7,10 @@
   {{if $g.This}}<a href="{{$g.This}}">This month</a>{{end}}
   {{if $g.Next}}<a href="{{$g.Next}}" rel="next">Next</a>{{else}}<span class="muted">Next</span>{{end}}
 </nav>
-<div class="scroll-x">
+<h2 class="month-title">{{$g.Caption}}</h2>
+<div class="scroll-x" tabindex="0" role="region" aria-label="Who is away, by day">
 <table class="month-grid">
-  <caption>{{$g.Caption}}</caption>
+  <caption class="visually-hidden">{{$g.Caption}}</caption>
   <thead><tr>
     <th scope="col">Who</th>
     {{range $g.Days}}<th scope="col" class="{{.Class}}" title="{{.Title}}"><span class="wd">{{.Initial}}</span>{{.Num}}</th>{{end}}
@@ -17,7 +18,7 @@
   <tbody>
   {{range $g.Rows}}
     <tr>
-      <th scope="row">{{if .You}}You{{else}}{{.Name}}{{end}}</th>
+      <th scope="row" title="{{.Name}}">{{if .You}}You{{else}}{{.Name}}{{end}}</th>
       {{range .Cells}}<td class="{{.Class}}"{{with .Title}} title="{{.}}"{{end}}>{{with .Label}}<span class="visually-hidden">{{.}}</span>{{end}}</td>{{end}}
     </tr>
   {{end}}
@@ -33,8 +34,9 @@
 </p>
 <p class="muted">Your department, the volunteer teams you share, and the people who report to you. Leave types are not shown here.</p>
 
-{{with .Reports}}
+{{if or .Reports .HasReports}}
 <h2>Leave of the people you approve for</h2>
+{{with .Reports}}
 <div class="scroll-x">
 <table>
   <thead><tr><th>Who</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th></tr></thead>
@@ -51,6 +53,9 @@
   </tbody>
 </table>
 </div>
+{{else}}
+<p class="muted">Nobody you approve for has leave coming up.</p>
+{{end}}
 {{end}}
 {{end}}
 {{end}}

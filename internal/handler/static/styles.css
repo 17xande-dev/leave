@@ -825,6 +825,11 @@ table {
   margin-block-end: var(--gap-sm);
 }
 
+.month-title {
+  font-size: var(--text);
+  margin-block: 0 var(--gap-sm);
+}
+
 .month-grid {
   --away: var(--ink);
   --shade: color-mix(in srgb, var(--ink) 8%, var(--paper));
@@ -832,15 +837,6 @@ table {
   width: max-content;
   min-width: 100%;
   font-size: var(--text-small);
-
-  caption {
-    text-align: start;
-    font-weight: 600;
-    padding-block-end: var(--gap-sm);
-    /* Stays put while the days scroll underneath. */
-    position: sticky;
-    inset-inline-start: 0;
-  }
 
   :where(th, td) {
     padding: var(--gap-xs) 0;
@@ -866,6 +862,13 @@ table {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* The cell border scrolls away with the days; this stays with the name. */
+    box-shadow: inset -1px 0 var(--rule);
+
+    @media (width < 30rem) {
+      min-inline-size: 0;
+      max-inline-size: 7rem;
+    }
   }
 
   thead th .wd {
@@ -887,7 +890,7 @@ table {
   }
 
   td.pending {
-    background: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
+    background-image: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
   }
 
   th.today {
@@ -920,7 +923,7 @@ table {
   }
 
   .pending {
-    background: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
+    background-image: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
   }
 
   .off {

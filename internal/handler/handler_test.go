@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -31,6 +32,7 @@ type harness struct {
 	svc   *leave.Service
 	us    *users.Store
 	oauth *oauth.Server
+	db    *sql.DB
 }
 
 // newHarness serves the real mux (no CSRF layer: main_test covers that) over
@@ -81,7 +83,7 @@ func newHarness(t *testing.T) *harness {
 	h.Routes(mux)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &harness{t: t, h: h, srv: srv, dir: dir, svc: svc, us: us, oauth: oa}
+	return &harness{t: t, h: h, srv: srv, dir: dir, svc: svc, us: us, oauth: oa, db: d}
 }
 
 func mustAll(t *testing.T, dir *directory.Fake) []directory.User {
