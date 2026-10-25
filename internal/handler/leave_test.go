@@ -545,7 +545,7 @@ func TestQuoteListsUnchargedDays(t *testing.T) {
 		}
 	}
 	_, body = hs.get(c, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-16", hs.typeID("annual")))
-	if strings.Contains(body, "Not charged") {
+	if !strings.Contains(body, "5 working days") || strings.Contains(body, "Not charged") {
 		t.Errorf("clean week lists uncharged days:\n%s", body)
 	}
 }
@@ -554,25 +554,65 @@ func TestApplyTypeLabelsShowWhatIsLeft(t *testing.T) {
 	hs := newHarness(t)
 	c := hs.signIn("staff1")
 	ctx := context.Background()
-	annual, _ := hs.svc.Type(ctx, mustAtoi(t, hs.typeID("annual")))
+	annual, err := hs.svc.Type(ctx, mustAtoi(t, hs.typeID("annual")))
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, body := hs.get(c, "/leave/new")
-	if !strings.Contains(body, ">Annual leave (15 left)</option>") {
-		t.Errorf("annual label:\n%s", body)
+	if !strings.Contains(body, ">Annual leave (15 left this year)</option>") || !strings.Contains(body, ">Sick leave (30 left this cycle)</option>") {
+		t.Errorf("annual and 36-month labels:\n%s", body)
 	}
 	if !strings.Contains(body, ">Unpaid leave</option>") {
 		t.Errorf("unlimited type should be just its name:\n%s", body)
 	}
-	annual.Allowance = new(int)
-	weekend, _ := hs.svc.Type(ctx, mustAtoi(t, hs.anyTypeID("weekend")))
+	// Overdrawn by 2 reads as 0: nothing more can be requested either way.
+	hr, err := hs.us.ByUsername(ctx, "hr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: annual.ID, CycleStart: "2026-01-01", Days: -17, Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	weekend, err := hs.svc.Type(ctx, mustAtoi(t, hs.anyTypeID("weekend")))
+	if err != nil {
+		t.Fatal(err)
+	}
 	two := 2
 	weekend.Active, weekend.Allowance = true, &two
-	for _, ty := range []leave.Type{annual, weekend} {
-		if _, err := hs.svc.SaveType(ctx, ty); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := hs.svc.SaveType(ctx, weekend); err != nil {
+		t.Fatal(err)
 	}
 	_, body = hs.get(c, "/leave/new")
-	if !strings.Contains(body, ">Annual leave (0 left)</option>") || !strings.Contains(body, ">Weekends off (2 weekends left)</option>") {
+	if !strings.Contains(body, ">Annual leave (0 left this year)</option>") || !strings.Contains(body, ">Weekends off (2 weekends left)</option>") {
 		t.Errorf("exhausted and weekend labels:\n%s", body)
+	}
+}
+
+// In December the select counts this year's balance, so a quote for January
+// must say it is measuring next year's, or the two would seem to disagree.
+func TestQuoteNamesAnotherCycle(t *testing.T) {
+	hs := newHarness(t)
+	hs.clock(2026, time.December, 1)
+	c := hs.signIn("staff1")
+	ctx := context.Background()
+	hr, err := hs.us.ByUsername(ctx, "hr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tid := mustAtoi(t, hs.typeID("annual"))
+	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: tid, CycleStart: "2026-01-01", Days: -12, Reason: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := hs.get(c, "/leave/new")
+	if !strings.Contains(body, ">Annual leave (3 left this year)</option>") {
+		t.Errorf("select:\n%s", body)
+	}
+	_, body = hs.get(c, "/leave/quote?type="+hs.typeID("annual")+"&start=2027-01-04&end=2027-01-08")
+	if !strings.Contains(body, "10 left in 2027 afterwards") {
+		t.Errorf("January quote:\n%s", body)
+	}
+	_, body = hs.get(c, "/leave/quote?type="+hs.typeID("annual")+"&start=2026-12-07&end=2026-12-08")
+	if !strings.Contains(body, "1 left in this cycle afterwards") {
+		t.Errorf("December quote:\n%s", body)
 	}
 }

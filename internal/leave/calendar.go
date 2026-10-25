@@ -148,7 +148,6 @@ func charged(d time.Time, unit string, holidays map[time.Time]bool, week Week) b
 
 // NotCharged is one line explaining days in a request that cost nothing.
 type NotCharged struct {
-	Date time.Time // the first day the line is about
 	Text string
 }
 
@@ -163,22 +162,20 @@ const maxNotCharged = 6
 func notCharged(start, end time.Time, unit string, names map[time.Time]string, week Week) (lines []NotCharged, more int) {
 	holidays := holidayDays(names)
 	var off [7]bool
-	var offFirst time.Time
+	anyOff := false
 	var hols []NotCharged
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		if charged(d, unit, holidays, week) {
 			continue
 		}
 		if !week[d.Weekday()] {
-			if offFirst.IsZero() {
-				offFirst = d
-			}
+			anyOff = true
 			off[d.Weekday()] = true
 			continue
 		}
-		hols = append(hols, NotCharged{Date: d, Text: d.Format("Mon 2 Jan") + ": " + names[d]})
+		hols = append(hols, NotCharged{Text: d.Format("Mon 2 Jan") + ": " + names[d]})
 	}
-	if !offFirst.IsZero() {
+	if anyOff {
 		var days []string
 		// Monday first, as a week reads, not Sunday.
 		for i := 1; i <= 7; i++ {
@@ -190,7 +187,7 @@ func notCharged(start, end time.Time, unit string, names map[time.Time]string, w
 		if len(days) > 1 {
 			text = strings.Join(days[:len(days)-1], ", ") + " and " + days[len(days)-1] + " are not working days"
 		}
-		lines = append(lines, NotCharged{Date: offFirst, Text: text})
+		lines = append(lines, NotCharged{Text: text})
 	}
 	for _, h := range hols {
 		if len(lines) == maxNotCharged {

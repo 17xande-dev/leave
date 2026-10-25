@@ -152,11 +152,16 @@ func typeLabel(b leave.Balance) string {
 		return b.Type.Name
 	}
 	n := max(*avail, 0)
-	// Days are the usual count, so "(11 left)"; only weekends need naming.
+	// The balance is for the cycle containing today, which the quote names
+	// when the dates fall in another. Days are the usual count; only weekends
+	// need naming.
 	if b.Type.Unit == leave.UnitWeekend {
 		return fmt.Sprintf("%s (%d %s left)", b.Type.Name, n, unitLabel(n, b.Type.Unit))
 	}
-	return fmt.Sprintf("%s (%d left)", b.Type.Name, n)
+	if b.Type.CycleMonths == 12 {
+		return fmt.Sprintf("%s (%d left this year)", b.Type.Name, n)
+	}
+	return fmt.Sprintf("%s (%d left this cycle)", b.Type.Name, n)
 }
 
 func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors) (applyData, error) {

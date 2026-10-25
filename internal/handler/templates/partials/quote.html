@@ -10,7 +10,7 @@
   {{with .Errors}}{{range .}}<p class="error">{{.}}</p>{{end}}{{end}}
   {{with .Quote}}{{if .Days}}
     <p><strong>{{.Days}} {{units .Days .Type.Unit}}</strong>
-    {{with .After}} — {{.}} left in this cycle afterwards{{end}}</p>
+    {{with .After}} — {{.}} left in {{with $.Quote.CycleName}}{{.}}{{else}}this cycle{{end}} afterwards{{end}}</p>
     {{with .NotCharged}}
     <p class="hint">Not charged:</p>
     <ul class="not-charged">

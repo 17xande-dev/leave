@@ -257,6 +257,13 @@ func TestApplyWithdrawAndStructuredResults(t *testing.T) {
 		p.Data["approver"] != "Olivia Operations" || len(p.Data["problems"].([]any)) != 0 {
 		t.Fatalf("preview = %v", p.Data)
 	}
+	if _, ok := p.Data["not_charged"]; ok {
+		t.Errorf("clean week lists uncharged days: %v", p.Data["not_charged"])
+	}
+	long := f.ok(staff, "preview_request", map[string]any{"type": "Annual leave", "start": "2026-12-14", "end": "2026-12-20"})
+	if got := fmt.Sprint(long.Data["not_charged"]); got != "[Saturday and Sunday are not working days Wed 16 Dec: Day of Reconciliation]" {
+		t.Errorf("not_charged = %v", long.Data["not_charged"])
+	}
 	// Previewing made nothing.
 	if rs := f.ok(staff, "my_requests", nil); len(rs.Data["requests"].([]any)) != 0 {
 		t.Fatalf("preview created a request: %v", rs.Data)

@@ -251,7 +251,11 @@ type Quote struct {
 	Start, End time.Time
 	Days       int
 	CycleStart time.Time
-	Balance    Balance
+	// CycleName names the cycle After is measured in ("2027"), empty when it
+	// is the cycle containing today, so the form can say "this cycle" only
+	// when it is true.
+	CycleName string
+	Balance   Balance
 	// After is the balance left if this request is approved; nil when unlimited.
 	After *int
 	// Shortfall is how many days below zero the request would take the
@@ -448,6 +452,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// the year end is charged to the old year in full -- simpler to explain
 	// than a split, and the admin can adjust if it matters.
 	qt.CycleStart = CycleStart(start, t.CycleMonths, st.SickCycleAnchor)
+	if !qt.CycleStart.Equal(CycleStart(today, t.CycleMonths, st.SickCycleAnchor)) {
+		qt.CycleName = "the cycle starting " + qt.CycleStart.Format("2 Jan 2006")
+		if t.CycleMonths == 12 {
+			qt.CycleName = qt.CycleStart.Format("2006")
+		}
+	}
 	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart); err != nil {
 		return Quote{}, err
 	}

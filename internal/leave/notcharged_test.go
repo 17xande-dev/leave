@@ -41,13 +41,13 @@ func TestQuoteNotCharged(t *testing.T) {
 
 	// Nothing to explain.
 	q = f.previewQuote("annual", "2026-10-12", "2026-10-16")
-	if len(q.NotCharged) != 0 || q.NotChargedMore != 0 {
-		t.Errorf("clean week: %q", lines(q))
+	if len(q.NotCharged) != 0 || q.NotChargedMore != 0 || q.Days != 5 {
+		t.Errorf("clean week: %q days %d", lines(q), q.Days)
 	}
 
 	// Calendar-day types charge everything, so nothing is uncharged.
-	if q = f.previewQuote("parental", "2026-12-14", "2026-12-20"); len(q.NotCharged) != 0 {
-		t.Errorf("calendar type: %q", lines(q))
+	if q = f.previewQuote("parental", "2026-12-14", "2026-12-20"); len(q.NotCharged) != 0 || q.Days != 7 {
+		t.Errorf("calendar type: %q days %d", lines(q), q.Days)
 	}
 
 	// A weekend-unit type is counted per weekend; the list is irrelevant.
