@@ -57,6 +57,11 @@ separate repository, which is the source of truth: do not edit the copy here.
 - Size: 28 987 bytes
 - SHA-256: `6a755403da4860a5d869ec661dd93486ef95567d76e740e24cb688b9d5ab24d0`
 
+**Local divergence:** this copy adds the `marks` attribute (holiday and booked-day parts
+via Cally's `getDayParts`, documented at the top of the file) and the `::part(holiday)`
+/ `::part(booked*)` styles, which are not in the source repo yet. Port them there before
+the next copy over, or the next update will silently drop the marks.
+
 To update, copy from that repo and record the new commit, size and hash above:
 
 ```sh

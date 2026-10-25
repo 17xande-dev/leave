@@ -313,6 +313,8 @@ type adminUserData struct {
 	RecErrors leave.FieldErrors
 	// Teams are read-only here: the directory is the source of truth.
 	Teams []leave.Team
+	// Marks are for the Record leave picker: this person's leave, not the admin's.
+	Marks pickerMarks
 }
 
 func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error) {
@@ -352,6 +354,9 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 		return d, err
 	}
 	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {
+		return d, err
+	}
+	if d.Marks, err = h.pickerMarks(ctx, u.ID); err != nil {
 		return d, err
 	}
 	d.Requests, err = h.leave.ForUser(ctx, u.ID)

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -614,5 +615,73 @@ func TestQuoteNamesAnotherCycle(t *testing.T) {
 	_, body = hs.get(c, "/leave/quote?type="+hs.typeID("annual")+"&start=2026-12-07&end=2026-12-08")
 	if !strings.Contains(body, "1 left in this cycle afterwards") {
 		t.Errorf("December quote:\n%s", body)
+	}
+}
+
+// marksBlock pulls the picker's JSON data block out of a page, undoing the
+// HTML-escaping of the markup around it.
+func marksBlock(t *testing.T, body, id string) pickerMarks {
+	t.Helper()
+	open := `<script type="application/json" id="` + id + `">`
+	i := strings.Index(body, open)
+	if i < 0 {
+		t.Fatalf("no %s block:\n%s", id, body)
+	}
+	rest := body[i+len(open):]
+	j := strings.Index(rest, "</script>")
+	if j < 0 {
+		t.Fatalf("unterminated %s block", id)
+	}
+	var m pickerMarks
+	if err := json.Unmarshal([]byte(rest[:j]), &m); err != nil {
+		t.Fatalf("%s is not JSON: %v\n%s", id, err, rest[:j])
+	}
+	return m
+}
+
+func TestPickerMarksOnBothForms(t *testing.T) {
+	hs := newHarness(t)
+	staff, head, hr := hs.signIn("staff1"), hs.signIn("headops"), hs.signIn("hr")
+	hostile := "</script><b>x"
+	if err := hs.svc.AddHoliday(context.Background(), "2026-11-20", hostile); err != nil {
+		t.Fatal(err)
+	}
+	hs.approveAs(head, hs.apply(staff, "annual", "2026-10-12", "2026-10-14"))
+	hs.apply(staff, "annual", "2026-10-26", "2026-10-27")
+	// Someone else's leave must never show on staff1's picker.
+	hs.apply(head, "annual", "2026-11-02", "2026-11-03")
+
+	_, body := hs.get(staff, "/leave/new")
+	if !strings.Contains(body, `marks="#apply-marks"`) {
+		t.Fatalf("picker has no marks attribute:\n%s", body)
+	}
+	m := marksBlock(t, body, "apply-marks")
+	if m.Holidays["2026-12-25"] != "Christmas Day" || m.Holidays["2026-11-20"] != hostile {
+		t.Errorf("holidays = %v", m.Holidays)
+	}
+	want := []markedRange{{"2026-10-26", "2026-10-27", "pending"}, {"2026-10-12", "2026-10-14", "approved"}}
+	if len(m.Booked) != 2 || m.Booked[0] != want[0] || m.Booked[1] != want[1] {
+		t.Errorf("booked = %v, want %v", m.Booked, want)
+	}
+	// The hostile name must not break out of the block: the only literal
+	// closing tag is the block's own.
+	if strings.Contains(body, hostile) {
+		t.Error("holiday name appears unescaped")
+	}
+
+	// The admin's picker is about the person being recorded for.
+	pid := hs.staffID("staff1")
+	_, body = hs.get(hr, "/admin/users/"+itoa(pid))
+	m = marksBlock(t, body, "record-marks")
+	if len(m.Booked) != 2 || m.Holidays["2026-11-20"] != hostile {
+		t.Errorf("admin marks = %v", m)
+	}
+	if !strings.Contains(body, `marks="#record-marks"`) {
+		t.Error("record picker has no marks attribute")
+	}
+	hid := hs.staffID("headops")
+	_, body = hs.get(hr, "/admin/users/"+itoa(hid))
+	if m = marksBlock(t, body, "record-marks"); len(m.Booked) != 1 || m.Booked[0].Start != "2026-11-02" {
+		t.Errorf("headops marks = %v", m.Booked)
 	}
 }

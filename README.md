@@ -59,6 +59,11 @@ every type defaults to 92, about three months, the most the policy allows). 0 me
 cannot start in the past. The apply form's date picker greys out earlier days, and the
 server refuses them whichever way a request arrives.
 
+The picker also marks public holidays (a dot) and the person's own pending and approved
+leave (hatching, lighter when pending), on the apply form and, for the person being
+recorded for, on the admin Record leave form. The marks are advisory: they come from a
+JSON data block (today minus 92 days to today plus a year) and never disable a day.
+
 **Weekends off** are the way to have the restricted day off by itself. A weekend off
 runs Saturday to Sunday and costs one weekend from the yearly allowance. An admin can
 give someone **long weekends** (on their page under **Admin → People**), which run

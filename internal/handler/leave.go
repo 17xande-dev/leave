@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -141,6 +142,8 @@ type applyData struct {
 	// Labels maps a type's ID to its option text: the name, with what is left
 	// of the balance when the type has one.
 	Labels map[int64]string
+	// Marks is the picker's advisory marks: holidays and the person's own leave.
+	Marks pickerMarks
 }
 
 // typeLabel is the select's option text: "Annual leave (11 left)". Unlimited
@@ -164,6 +167,59 @@ func typeLabel(b leave.Balance) string {
 	return fmt.Sprintf("%s (%d left this cycle)", b.Type.Name, n)
 }
 
+// pickerMarks is the JSON data block behind the date picker's marks: public
+// holidays by date, and the person's live leave as ranges. It is advisory
+// only (the server still validates), so it covers a window rather than all
+// time: 92 days back, for recording leave just taken or checking a recent
+// booking, to a year ahead, the furthest anyone plans.
+type pickerMarks struct {
+	Holidays map[string]string `json:"holidays"`
+	Booked   []markedRange     `json:"booked"`
+}
+
+type markedRange struct {
+	Start  string `json:"start"`
+	End    string `json:"end"`
+	Status string `json:"status"`
+}
+
+func (h *Handler) pickerMarks(ctx context.Context, userID int64) (pickerMarks, error) {
+	today := h.leave.Today()
+	from, to := leave.FormatDate(today.AddDate(0, 0, -92)), leave.FormatDate(today.AddDate(1, 0, 0))
+	m := pickerMarks{Holidays: map[string]string{}, Booked: []markedRange{}}
+	for y := today.AddDate(0, 0, -92).Year(); y <= today.AddDate(1, 0, 0).Year(); y++ {
+		if err := h.leave.EnsureHolidays(ctx, y); err != nil {
+			return m, err
+		}
+		hs, err := h.leave.HolidaysInYear(ctx, y)
+		if err != nil {
+			return m, err
+		}
+		for _, hd := range hs {
+			if hd.Date >= from && hd.Date <= to {
+				m.Holidays[hd.Date] = hd.Name
+			}
+		}
+	}
+	rs, err := h.leave.ForUser(ctx, userID)
+	if err != nil {
+		return m, err
+	}
+	for _, r := range rs {
+		// Drafts are not booked, and a cancellation request is not itself leave.
+		if r.Kind != leave.KindLeave || r.End < from || r.Start > to {
+			continue
+		}
+		switch r.Status {
+		case leave.StatusApproved:
+			m.Booked = append(m.Booked, markedRange{r.Start, r.End, "approved"})
+		case leave.StatusPending, leave.StatusAwaitingHR:
+			m.Booked = append(m.Booked, markedRange{r.Start, r.End, "pending"})
+		}
+	}
+	return m, nil
+}
+
 func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors) (applyData, error) {
 	// One balances lookup serves both the type list (active types, in display
 	// order) and the "n left" in each option.
@@ -178,6 +234,9 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 		d.Labels[b.Type.ID] = typeLabel(b)
 	}
 	d.Types = types
+	if d.Marks, err = h.pickerMarks(r.Context(), currentUser(r).ID); err != nil {
+		return applyData{}, err
+	}
 	// The same cut-off the server enforces (Service.EarliestStart), so the
 	// picker greys out exactly what a submit would refuse. YYYY-MM-DD
 	// compares as text.

@@ -45,7 +45,7 @@
          keep whatever was typed. locale="en-GB" puts the day before the month,
          as the server's own dates do ("Mon 2 Jan 2006"). */}}
     <date-range-input label="Dates" start-name="start" end-name="end" required
-        months="2" first-day-of-week="1" with-clear locale="en-GB"{{if .MinDate}} min="{{.MinDate}}"{{end}}
+        months="2" first-day-of-week="1" with-clear locale="en-GB" {{- if .MinDate}} min="{{.MinDate}}"{{end}} marks="#apply-marks"
         {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
       <div class="field-row">
         <div class="field">
@@ -58,6 +58,10 @@
         </div>
       </div>
     </date-range-input>
+    {{/* Data, not script: the CSP never sees it as code. The picker reads it and
+         marks days; nothing here disables a day. */}}
+    <script type="application/json" id="apply-marks">{{.Marks}}</script>
+    <p class="legend muted"><span class="mark-holiday">public holiday</span> <span class="mark-booked">you are already away</span></p>
     {{template "err" index .Errors "start"}}
     {{template "err" index .Errors "end"}}
   </div>

@@ -635,6 +635,43 @@ date-range-input {
   }
 }
 
+/* Key to the marks in the date picker's calendar; they are drawn inside the
+   component, so these swatches repeat its dot and hatching. */
+.legend {
+  font-size: var(--text-small);
+  margin-block: var(--gap-xs) 0;
+
+  /* Without the script the marks never appear, so neither does the key. */
+  date-range-input:not(:defined) ~ & {
+    display: none;
+  }
+
+  & span::before {
+    display: inline-block;
+    vertical-align: -0.15em;
+    margin-inline-end: 0.4em;
+  }
+  & span + span {
+    margin-inline-start: var(--gap);
+  }
+  & .mark-holiday::before {
+    content: "";
+    inline-size: 0.5em;
+    block-size: 0.5em;
+    margin-inline: 0.2em 0.6em;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  & .mark-booked::before {
+    content: "";
+    inline-size: 1em;
+    block-size: 1em;
+    border-radius: 2px;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 45%, transparent) 0 2px, transparent 2px 5px);
+    outline: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  }
+}
+
 /* A set of tick boxes read as a list rather than a column of blocks:
    categories on a product, variants on a file. */
 .checks {

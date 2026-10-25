@@ -4,6 +4,15 @@
  * host page loads separately; this module deliberately does not import it.
  *
  * Value format: "YYYY-MM-DD/YYYY-MM-DD" (start/end, inclusive).
+ *
+ * Marks (advisory, never disable a day): `marks="#id"` names an element in the same tree
+ * holding JSON, normally <script type="application/json">:
+ *   {"holidays": {"2026-12-25": "Christmas Day"},
+ *    "booked": [{"start": "2026-12-14", "end": "2026-12-18", "status": "approved"}]}
+ * Each such day's button gets the parts `holiday`, and `booked` plus `booked-<status>`,
+ * exported as day-holiday, day-booked and day-booked-<status> for styling. It is read
+ * each time the calendar opens, so a page may rewrite the block. Cally has no tooltip hook
+ * for a day button, so the holiday name is not shown here.
  */
 
 const CSS = /* css */ `
@@ -173,6 +182,27 @@ calendar-month {
   &::part(range-end) { border-start-start-radius: 0; border-end-start-radius: 0; }
   &::part(range-start range-end) { border-radius: var(--_border-radius); }
   &::part(outside) { opacity: 0.4; }
+  /* Marks (see the header). Neither is by colour alone: a holiday is a dot under the
+     number, a booked day is hatched, and a pending booking is hatched more lightly. */
+  &::part(holiday) {
+    background-image: radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem);
+  }
+  &::part(booked) {
+    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 40%, transparent) 0 2px, transparent 2px 6px);
+  }
+  &::part(booked-pending) {
+    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 24%, transparent) 0 2px, transparent 2px 8px);
+  }
+  &::part(holiday booked) {
+    background-image:
+      radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem),
+      repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 40%, transparent) 0 2px, transparent 2px 6px);
+  }
+  &::part(holiday booked-pending) {
+    background-image:
+      radial-gradient(circle at 50% 85%, currentColor 0 0.14rem, transparent 0.16rem),
+      repeating-linear-gradient(135deg, color-mix(in srgb, currentColor 24%, transparent) 0 2px, transparent 2px 8px);
+  }
   &::part(disallowed) { opacity: 0.4; cursor: default; text-decoration: line-through; }
   &::part(disallowed):hover { background: transparent; }
   &::part(button):focus-visible {
@@ -241,7 +271,10 @@ const localDate = (iso) => {
 const toIso = (d) =>
   `${String(d.getFullYear()).padStart(4, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-const STRING_ATTRS = ['label', 'hint', 'placeholder', 'min', 'max', 'locale', 'name', 'start-name', 'end-name', 'disabled-days-of-week'];
+// Cally hands day parts a Date at UTC midnight.
+const utcIso = (d) => d.toISOString().slice(0, 10);
+
+const STRING_ATTRS = ['label', 'hint', 'placeholder', 'min', 'max', 'locale', 'name', 'start-name', 'end-name', 'disabled-days-of-week', 'marks'];
 const BOOL_ATTRS = ['required', 'disabled', 'readonly', 'with-clear'];
 const camel = (s) => s.replace(/-(\w)/g, (_, c) => c.toUpperCase());
 
@@ -249,7 +282,7 @@ const UPGRADE_PROPS = [
   'value', 'valueAsRange', 'isDateDisabled', 'open', 'months', 'firstDayOfWeek', 'disabledDaysOfWeek',
   ...[...STRING_ATTRS, ...BOOL_ATTRS].map(camel),
 ];
-const CALENDAR_ATTRS = ['min', 'max', 'locale', 'months', 'first-day-of-week', 'disabled-days-of-week'];
+const CALENDAR_ATTRS = ['min', 'max', 'locale', 'months', 'first-day-of-week', 'disabled-days-of-week', 'marks'];
 const FALLBACK_CONTROLS = 'input, select, textarea, button[name]';
 
 /** Accepts a string, or `{from, to}` with Dates or ISO strings. */
@@ -577,7 +610,8 @@ export class DateRangeInput extends HTMLElement {
       m.setAttribute('exportparts',
         'heading:month-heading,table:month-table,th:weekday,td:day-cell,button:day-button,selected:day-selected,' +
         'today:day-today,disallowed:day-disallowed,outside:day-outside,range-start:day-range-start,' +
-        'range-end:day-range-end,range-inner:day-range-inner');
+        'range-end:day-range-end,range-inner:day-range-inner,holiday:day-holiday,booked:day-booked,' +
+        'booked-approved:day-booked-approved,booked-pending:day-booked-pending');
       m.setAttribute('part', 'calendar-month');
       m.offset = i;
       wrap.append(m);
@@ -590,6 +624,8 @@ export class DateRangeInput extends HTMLElement {
     cal.locale = this.#locale;
     cal.firstDayOfWeek = this.firstDayOfWeek;
     cal.isDateDisallowed = this.#isDisallowed;
+    const dayParts = this.#dayParts();
+    if (dayParts) cal.getDayParts = dayParts;
     if (this.#value) cal.value = this.#value;
     const today = toIso(new Date());
     cal.focusedDate = this.start || (min && today < min ? min : max && today > max ? max : undefined);
@@ -629,6 +665,35 @@ export class DateRangeInput extends HTMLElement {
     if (!this.open) return;
     this.#installCalendar();
     this.#focusCalendar();
+  }
+
+  /** Cally's getDayParts for the `marks` data, or null when there is none or it is not valid JSON. */
+  #dayParts() {
+    const id = this.marks.replace(/^#/, '');
+    const el = id && this.getRootNode().getElementById?.(id);
+    let data;
+    try { data = el && JSON.parse(el.textContent); } catch { return null; }
+    if (!data || typeof data !== 'object') return null;
+    const holidays = data.holidays && typeof data.holidays === 'object' ? data.holidays : {};
+    const booked = new Map();
+    for (const r of Array.isArray(data.booked) ? data.booked : []) {
+      if (!r || !isoValid(r.start) || !isoValid(r.end)) continue;
+      // Status becomes part of a token list, so keep it to plain word characters.
+      const status = String(r.status ?? '').replace(/[^a-z-]/gi, '');
+      const last = utcDate(r.end).getTime();
+      for (let t = utcDate(r.start).getTime(), n = 0; t <= last && n < 800; t += 864e5, n++) {
+        const k = utcIso(new Date(t));
+        // Approved wins over pending when ranges overlap on a day.
+        if (booked.get(k) !== 'approved') booked.set(k, status);
+      }
+    }
+    return (d) => {
+      const k = utcIso(d);
+      const out = [];
+      if (Object.hasOwn(holidays, k)) out.push('holiday');
+      if (booked.has(k)) out.push('booked', booked.get(k) && `booked-${booked.get(k)}`);
+      return out.filter(Boolean).join(' ');
+    };
   }
 
   #isDisallowed = (d) => {
