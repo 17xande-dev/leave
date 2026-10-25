@@ -816,6 +816,122 @@ table {
   overflow-x: auto;
 }
 
+/* --- The team page's month grid ------------------------------------------- */
+
+.month-nav {
+  display: flex;
+  gap: var(--gap-md);
+  font-size: var(--text-small);
+  margin-block-end: var(--gap-sm);
+}
+
+.month-grid {
+  --away: var(--ink);
+  --shade: color-mix(in srgb, var(--ink) 8%, var(--paper));
+  --holiday: color-mix(in srgb, var(--ink) 20%, var(--paper));
+  width: max-content;
+  min-width: 100%;
+  font-size: var(--text-small);
+
+  caption {
+    text-align: start;
+    font-weight: 600;
+    padding-block-end: var(--gap-sm);
+    /* Stays put while the days scroll underneath. */
+    position: sticky;
+    inset-inline-start: 0;
+  }
+
+  :where(th, td) {
+    padding: var(--gap-xs) 0;
+    text-align: center;
+    min-inline-size: 1.75rem;
+    border-inline-end: 1px solid var(--rule);
+  }
+
+  td {
+    position: relative; /* anchors the visually hidden text */
+  }
+
+  /* The first column holds the names, and stays while the days scroll. */
+  :where(th:first-child) {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 1;
+    background: var(--paper);
+    text-align: start;
+    padding-inline: var(--gap-sm);
+    min-inline-size: 7rem;
+    max-inline-size: 12rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  thead th .wd {
+    display: block;
+    font-weight: 400;
+  }
+
+  .off {
+    background: var(--shade);
+  }
+
+  .holiday {
+    background: var(--holiday);
+  }
+
+  /* Solid for approved, hatched for pending, so the two differ without colour. */
+  td.away {
+    background: var(--away);
+  }
+
+  td.pending {
+    background: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
+  }
+
+  th.today {
+    box-shadow: inset 0 -3px 0 var(--pending);
+    font-weight: 700;
+  }
+
+  td.today {
+    border-inline: 2px solid var(--pending);
+  }
+}
+
+.grid-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs) var(--gap-md);
+  font-size: var(--text-small);
+
+  .key {
+    display: inline-block;
+    inline-size: 1rem;
+    block-size: 1rem;
+    vertical-align: -0.2em;
+    margin-inline-end: var(--gap-xs);
+    border: 1px solid var(--rule);
+  }
+
+  .away {
+    background: var(--ink);
+  }
+
+  .pending {
+    background: repeating-linear-gradient(135deg, var(--pending) 0 3px, transparent 3px 6px);
+  }
+
+  .off {
+    background: color-mix(in srgb, var(--ink) 8%, var(--paper));
+  }
+
+  .holiday {
+    background: color-mix(in srgb, var(--ink) 20%, var(--paper));
+  }
+}
+
 /* The admin area's own row of links, above each admin page's title. */
 .subnav {
   display: flex;

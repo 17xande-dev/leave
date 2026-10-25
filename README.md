@@ -71,6 +71,18 @@ approved") and approved leave. Each person appears once with all their dates, up
 people, and "and N more" counts people. It shows names and dates only, never the type, so
 sick leave stays private. It is information: it does not change the coverage limit.
 
+**Team** (`/team`, in the navigation for everyone) is a month grid of who is away: one row
+per person, one column per day, for your department, the volunteer teams you share, and the
+people who report to you, plus a row marked "You" for your own leave. Solid cells are
+approved and hatched cells are awaiting approval (each also has hidden text for screen
+readers); weekends and non-working days (**Admin → Settings**) and public holidays (named
+on hover) are shaded, and today's column is marked. `?month=YYYY-MM` picks the month, with
+Previous, Next and This month links; a bad value shows the current month, and the range is
+12 months back to 24 forward. Everyone with leave in the month gets a row (no cap). Like
+the apply hint, the grid never shows the leave type, whoever is looking; approvers still
+get the existing list with types below it, "Leave of the people you approve for". No
+JavaScript.
+
 **Weekends off** are the way to have the restricted day off by itself. A weekend off
 runs Saturday to Sunday and costs one weekend from the yearly allowance. An admin can
 give someone **long weekends** (on their page under **Admin → People**), which run

@@ -1,7 +1,40 @@
 {{define "content"}}
-<h1>Team leave</h1>
-<p class="muted">Current and upcoming leave for the people whose leave you approve.</p>
+<h1>Team</h1>
 {{with .Data}}
+{{$g := .Grid}}
+<nav class="month-nav" aria-label="Month">
+  {{if $g.Prev}}<a href="{{$g.Prev}}" rel="prev">Previous</a>{{else}}<span class="muted">Previous</span>{{end}}
+  {{if $g.This}}<a href="{{$g.This}}">This month</a>{{end}}
+  {{if $g.Next}}<a href="{{$g.Next}}" rel="next">Next</a>{{else}}<span class="muted">Next</span>{{end}}
+</nav>
+<div class="scroll-x">
+<table class="month-grid">
+  <caption>{{$g.Caption}}</caption>
+  <thead><tr>
+    <th scope="col">Who</th>
+    {{range $g.Days}}<th scope="col" class="{{.Class}}" title="{{.Title}}"><span class="wd">{{.Initial}}</span>{{.Num}}</th>{{end}}
+  </tr></thead>
+  <tbody>
+  {{range $g.Rows}}
+    <tr>
+      <th scope="row">{{if .You}}You{{else}}{{.Name}}{{end}}</th>
+      {{range .Cells}}<td class="{{.Class}}"{{with .Title}} title="{{.}}"{{end}}>{{with .Label}}<span class="visually-hidden">{{.}}</span>{{end}}</td>{{end}}
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{if not $g.Rows}}<p class="muted">Nobody you work with is away this month.</p>{{end}}
+<p class="muted grid-key">
+  <span><span class="key away"></span>away</span>
+  <span><span class="key pending"></span>awaiting approval</span>
+  <span><span class="key off"></span>weekend or non-working day</span>
+  <span><span class="key holiday"></span>public holiday</span>
+</p>
+<p class="muted">Your department, the volunteer teams you share, and the people who report to you. Leave types are not shown here.</p>
+
+{{with .Reports}}
+<h2>Leave of the people you approve for</h2>
 <div class="scroll-x">
 <table>
   <thead><tr><th>Who</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th></tr></thead>
@@ -18,7 +51,6 @@
   </tbody>
 </table>
 </div>
-{{else}}
-<p class="muted">Nobody on your team has leave coming up.</p>
+{{end}}
 {{end}}
 {{end}}

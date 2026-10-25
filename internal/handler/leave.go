@@ -774,15 +774,6 @@ func (h *Handler) Approvals(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, http.StatusOK, "approvals.html", view{Title: "Approvals", Data: queueData{Queue: rows}})
 }
 
-func (h *Handler) Team(w http.ResponseWriter, r *http.Request) {
-	rs, err := h.leave.Team(r.Context(), currentUser(r))
-	if err != nil {
-		h.serverError(w, r, err)
-		return
-	}
-	h.render(w, r, http.StatusOK, "team.html", view{Title: "Team leave", Data: rs})
-}
-
 // statusClass maps a status to its badge style.
 func statusClass(s string) string {
 	switch s {
