@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -102,23 +103,44 @@ func (hs *harness) headopsJoinsKids() {
 
 func TestQueueAlsoAway(t *testing.T) {
 	hs := newHarness(t)
-	hs.headopsJoinsKids()
-	staff, head, kids := hs.signIn("staff1"), hs.signIn("headops"), hs.signIn("headkids")
+	staff, head, kids, pastor := hs.signIn("staff1"), hs.signIn("headops"), hs.signIn("headkids"), hs.signIn("pastor")
 
-	// Sam (headops's report) is off sick; Thandi (a colleague on a shared team,
-	// not a report) is off sick too.
+	// Sam (headops's report, Operations) and Thandi (Kids) are off sick;
+	// Kagiso (Kids, the pastor's report) is on annual leave.
 	hs.approveAs(head, hs.apply(staff, "sick", "2026-10-12", "2026-10-13"))
 	hs.approveAs(kids, hs.apply(hs.signIn("staff2"), "sick", "2026-10-13", "2026-10-14"))
+	hs.approveAs(pastor, hs.apply(kids, "annual", "2026-10-13", "2026-10-14"))
 	hannah := hs.apply(hs.signIn("hr"), "annual", "2026-10-12", "2026-10-14")
+	olivia := hs.apply(head, "annual", "2026-10-12", "2026-10-14")
 
+	// The scope is the requester's department: Hannah's row lists Sam, with the
+	// type because he reports to the approver, and neither of the Kids people.
 	_, body := hs.get(head, "/approvals")
 	row := rowFor(t, body, hannah)
-	if !strings.Contains(row, "Also away: Sam Staff, Sick leave (12–13 Oct), Thandi Teacher (13–14 Oct)") {
-		t.Errorf("also away:\n%s", row)
+	if !strings.Contains(row, "Sam Staff, Sick leave (12–13 Oct)</small>") ||
+		strings.Contains(row, "Thandi") || strings.Contains(row, "Kagiso") {
+		t.Errorf("Hannah's row:\n%s", row)
 	}
-	// Thandi's type is private to her approver; the row has "Sick leave" once, for Sam.
-	if strings.Count(row, "Sick leave") != 1 {
-		t.Errorf("type leaked or missing:\n%s", row)
+	// The pastor approves Olivia's: Sam is listed (her department) without the
+	// type, which is not the pastor's to see; Kagiso is another department.
+	_, body = hs.get(pastor, "/approvals")
+	row = rowFor(t, body, olivia)
+	if !strings.Contains(row, "Sam Staff (12–13 Oct)</small>") || strings.Contains(row, "Sick") ||
+		strings.Contains(row, "Kagiso") || strings.Contains(row, "Thandi") {
+		t.Errorf("Olivia's row for the pastor:\n%s", row)
+	}
+
+	// Sharing a team brings people in from other departments; the type still
+	// follows the viewer: Kagiso is the pastor's report, Thandi is not.
+	if _, err := hs.db.Exec(`INSERT INTO team_members (team_id, user_id) VALUES (?, ?)`,
+		hs.teamID("Kids team"), hs.staffID("headops")); err != nil {
+		t.Fatal(err)
+	}
+	_, body = hs.get(pastor, "/approvals")
+	row = rowFor(t, body, olivia)
+	if !strings.Contains(row, "Kagiso Kids, Annual leave (13–14 Oct)") || !strings.Contains(row, "Thandi Teacher (13–14 Oct)") ||
+		strings.Contains(row, "Sick") {
+		t.Errorf("Olivia's row after joining Kids team:\n%s", row)
 	}
 
 	// The requester is left out: Sam's own cancellation request must not list
@@ -134,8 +156,59 @@ func TestQueueAlsoAway(t *testing.T) {
 	}
 	_, body = hs.get(head, "/approvals")
 	row = rowFor(t, body, fmt.Sprintf("/leave/%d", cancel.ID))
-	if strings.Contains(row, "Also away") || !strings.Contains(row, "Cancel: Annual leave") {
-		t.Errorf("a requester listed as away from their own request:\n%s", row)
+	if strings.Contains(row, "Also away") || !strings.Contains(row, "Cancel: Annual leave") ||
+		!strings.Contains(row, `aria-label="Select Cancel: Sam Staff`) {
+		t.Errorf("cancellation row:\n%s", row)
+	}
+}
+
+// groupAway with withType false is what keeps the apply hint type-free.
+func TestGroupAwayBlanksTheTypeUnlessAsked(t *testing.T) {
+	away := []leave.Away{{UserID: 1, Name: "A", Start: "2026-10-12", End: "2026-10-12", LeaveType: "Sick leave"},
+		{UserID: 2, Name: "S", Start: "2026-10-12", End: "2026-10-12", LeaveType: "Sick leave"}}
+	if g := groupAway(away, false, 2); len(g) != 1 || g[0].Ranges[0].Type != "" {
+		t.Errorf("withType false: %+v", g)
+	}
+	if g := groupAway(away, true, 0); len(g) != 2 || g[0].Ranges[0].Type != "Sick leave" {
+		t.Errorf("withType true: %+v", g)
+	}
+}
+
+// Two pending requests of one type are both counted in what is left, so the
+// row cannot say "afterwards" for either.
+func TestQueueSharedBalanceWording(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	a := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
+	_, body := hs.get(head, "/approvals")
+	if row := rowFor(t, body, a); !strings.Contains(row, "12 working days left in this cycle afterwards") {
+		t.Errorf("one pending:\n%s", row)
+	}
+	b := hs.apply(staff, "annual", "2026-11-02", "2026-11-06")
+	_, body = hs.get(head, "/approvals")
+	for _, p := range []string{a, b} {
+		if row := rowFor(t, body, p); !strings.Contains(row, "7 working days left in this cycle if all their pending requests are approved") ||
+			strings.Contains(row, "afterwards") {
+			t.Errorf("two pending, %s:\n%s", p, row)
+		}
+	}
+}
+
+// The escalation check is inside Decide's transaction: a request that became
+// escalated after the page read it is still refused, and does not move.
+func TestBulkRefusesARequestEscalatedAfterTheRead(t *testing.T) {
+	hs := newHarness(t)
+	p := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	id := mustAtoi(t, idOf(p))
+	if _, err := hs.db.Exec(`UPDATE requests SET escalate = 1 WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	_, err := hs.svc.DecideOrdinary(context.Background(), mustUser(t, hs, "headops"), id)
+	if !errors.Is(err, leave.ErrNeedsOverride) {
+		t.Fatalf("DecideOrdinary on an escalated request: %v", err)
+	}
+	if r, _ := hs.svc.Get(context.Background(), id); r.Status != "pending" || r.ApproverID != hs.staffID("headops") {
+		t.Errorf("request moved: %s approver %d", r.Status, r.ApproverID)
 	}
 }
 
@@ -255,6 +328,10 @@ func TestBulkApproveNeverOverrides(t *testing.T) {
 	}
 	if !strings.Contains(body, "Sam Staff, Annual leave (12–14 Oct): needs special permission.") {
 		t.Errorf("failure not named:\n%s", body)
+	}
+	// Only the escalated row is left: nothing to tick, so no bulk button.
+	if strings.Contains(body, "Approve selected") {
+		t.Error("Approve selected shown with nothing tickable")
 	}
 	// No step was logged: it did not move up.
 	if r, _ := hs.svc.Get(context.Background(), mustAtoi(t, idOf(special))); r.ApproverID != hs.staffID("headops") {

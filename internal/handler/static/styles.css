@@ -1071,6 +1071,55 @@ details.decline {
 
   > form {
     margin-block-start: var(--gap-sm);
+  }
+}
+
+table.queue .dates {
+  white-space: nowrap;
+}
+
+@media (min-width: 40rem) {
+  details.decline > form {
     min-width: 14rem;
+  }
+}
+
+/* On a phone each request is a block, so Approve and Details are on screen
+   instead of in a table scrolled sideways. */
+@media (max-width: 40rem) {
+  table.queue {
+    thead {
+      display: none;
+    }
+
+    :where(tr, td) {
+      display: block;
+    }
+
+    tr {
+      border-block-end: 1px solid var(--rule);
+      padding-block: var(--gap-sm);
+    }
+
+    td {
+      border-block-end: 0;
+      padding-block: 2px;
+    }
+
+    td.tick:empty {
+      display: none;
+    }
+
+    td.num {
+      text-align: start;
+
+      &::before {
+        content: "Days: ";
+      }
+    }
+
+    td.acts {
+      padding-block-start: var(--gap-sm);
+    }
   }
 }

@@ -57,6 +57,10 @@ type After struct {
 	// containing today.
 	CycleName string
 	Unit      string
+	// Shared: the person has other pending requests of this type in this
+	// cycle, which Left also assumes approved (Available subtracts every
+	// pending one), so "afterwards" would be too strong a word.
+	Shared bool
 }
 
 // AfterApproval is the requester's balance after approving req, which must be
@@ -83,6 +87,7 @@ func (s *Service) AfterApproval(ctx context.Context, req Request) (After, error)
 		return After{}, err
 	}
 	out := After{Unit: t.Unit, CycleName: cycleName(cs, s.today(), t, st.SickCycleAnchor)}
+	out.Shared = req.Kind == KindLeave && b.Pending > req.Days
 	if left := b.Available(); left != nil {
 		if req.Kind == KindCancellation {
 			*left += req.Days

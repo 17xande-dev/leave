@@ -149,3 +149,35 @@ func TestAwayOneRowPerRequest(t *testing.T) {
 		}
 	}
 }
+
+// The scope comes from the subject, the type from the viewer, and the subject
+// is never listed.
+func TestAwayForUsesTheSubjectsScope(t *testing.T) {
+	f := newFixture(t)
+	f.dept("Ops", "staff", "orphan", "head")
+	f.dept("Kids", "hr", "pastor")
+	f.insertAway("staff", "sick", "2026-10-12", "2026-10-13", "approved")
+	f.insertAway("hr", "sick", "2026-10-12", "2026-10-13", "approved")
+	f.insertAway("orphan", "annual", "2026-10-12", "2026-10-13", "approved")
+	pastor, orphan := f.people["pastor"], f.people["orphan"]
+
+	got, err := f.svc.AwayFor(f.ctx, pastor, orphan, "2026-10-12", "2026-10-13")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Orphan's department, not pastor's (Kids: hr stays out); orphan not listed;
+	// and pastor is neither admin, approver nor manager of staff, so no type.
+	want := []Away{{UserID: f.people["staff"].ID, Name: "staff", Start: "2026-10-12", End: "2026-10-13", Status: "approved"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	// The viewer's own authority still decides the type: pastor as the request's approver.
+	f.exec(`UPDATE requests SET approver_id = ? WHERE user_id = ?`, pastor.ID, f.people["staff"].ID)
+	if got, _ = f.svc.AwayFor(f.ctx, pastor, orphan, "2026-10-12", "2026-10-13"); len(got) != 1 || got[0].LeaveType != "Sick leave" {
+		t.Errorf("approver sees %+v", got)
+	}
+	// Away is AwayFor with the viewer as subject: pastor's own scope (Kids) is hr.
+	if got := f.away("pastor", "2026-10-12", "2026-10-13"); !reflect.DeepEqual(names(got), []string{"hr"}) {
+		t.Errorf("Away = %v", names(got))
+	}
+}

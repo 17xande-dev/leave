@@ -179,6 +179,22 @@ func (s *Service) PendingCancellation(ctx context.Context, id int64) (*Request, 
 // each approval is logged and, unless the approver is the final one, passes the
 // request to their own approver. Declining at any level ends it.
 func (s *Service) Decide(ctx context.Context, actor users.User, id int64, approve bool, note string) (Request, error) {
+	return s.decide(ctx, actor, id, approve, note, false)
+}
+
+// ErrNeedsOverride is DecideOrdinary's refusal of a request needing special permission.
+var ErrNeedsOverride = errors.New("leave: needs special permission")
+
+// DecideOrdinary approves a request as an ordinary approval only: the same as
+// Decide(approve), but it refuses (ErrNeedsOverride) a request needing special
+// permission, judged inside the transaction on the row as it stands then.
+// Bulk approval uses it, because an override must be a deliberate act on one
+// request, and a request can become escalated after the list was read.
+func (s *Service) DecideOrdinary(ctx context.Context, actor users.User, id int64) (Request, error) {
+	return s.decide(ctx, actor, id, true, "", true)
+}
+
+func (s *Service) decide(ctx context.Context, actor users.User, id int64, approve bool, note string, ordinary bool) (Request, error) {
 	note = strings.TrimSpace(note)
 	if !approve && note == "" {
 		return Request{}, FieldErrors{"note": "Say why, so they know what to change."}
@@ -204,6 +220,9 @@ func (s *Service) Decide(ctx context.Context, actor users.User, id int64, approv
 		}
 		if !CanDecide(actor, r) || r.ApproverID != before.ApproverID {
 			return ErrNotAllowed
+		}
+		if ordinary && r.Escalate && r.Kind == KindLeave {
+			return ErrNeedsOverride
 		}
 		if r.Escalate {
 			decision := "approved"

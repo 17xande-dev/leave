@@ -720,13 +720,13 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.As(err, &fe) && r.PostFormValue("from") == "queue":
 		// Declined from a row without a note: back to the queue, that row's
-		// details open with what they typed and the error beside it.
+		// details open with the error beside it.
 		d, derr := h.queueData(r)
 		if derr != nil {
 			h.serverError(w, r, derr)
 			return
 		}
-		d.OpenID, d.OpenNote, d.OpenErrors = req.ID, note, fe
+		d.OpenID, d.OpenErrors = req.ID, fe
 		h.render(w, r, http.StatusUnprocessableEntity, "approvals.html", view{Title: "Approvals", Data: d})
 		return
 	case errors.As(err, &fe):
@@ -784,18 +784,22 @@ type queueAfter struct {
 	Left, Below int
 	CycleName   string
 	Unit        string
+	// Shared: other pending requests of theirs are counted too.
+	Shared bool
 }
 
 type queueData struct {
 	Queue []queueRow
+	// AnyBulk: some row has a checkbox, so "Approve selected" has a use.
+	AnyBulk bool
 	// Approved and Failures report a bulk approval that did not all go
 	// through (the page is re-rendered, never built from the query string).
 	Approved int
 	Failures []string
 	// OpenID is a row whose decline was refused for want of a note: its
-	// details stay open with OpenNote and OpenErrors.
+	// details stay open with OpenErrors. (A refusal means the note was blank,
+	// so there is no text to give back.)
 	OpenID     int64
-	OpenNote   string
 	OpenErrors leave.FieldErrors
 }
 
@@ -822,6 +826,7 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 		return queueData{}, err
 	}
 	rows := make([]queueRow, 0, len(q))
+	anyBulk := false
 	for _, req := range q {
 		row := queueRow{Request: req, Bulk: !(req.Escalate && req.Kind == leave.KindLeave)}
 		if req.Escalate {
@@ -841,16 +846,24 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 			return queueData{}, err
 		}
 		if af.Left != nil {
-			row.After = &queueAfter{Left: *af.Left, Below: max(0, -*af.Left), CycleName: af.CycleName, Unit: af.Unit}
+			row.After = &queueAfter{Left: *af.Left, Below: max(0, -*af.Left), CycleName: af.CycleName, Unit: af.Unit, Shared: af.Shared}
 		}
-		away, err := h.leave.Away(r.Context(), u, req.Start, req.End)
+		// The scope is the requester's own department, teams and reports: who
+		// else is out around them. What the approver may see of each is the
+		// approver's own, whatever the scope.
+		requester, err := h.users.ByID(r.Context(), req.UserID)
+		if err != nil {
+			return queueData{}, err
+		}
+		away, err := h.leave.AwayFor(r.Context(), u, requester, req.Start, req.End)
 		if err != nil {
 			return queueData{}, err
 		}
 		row.Away, row.AwayMore = queueAway(away, req.UserID)
+		anyBulk = anyBulk || row.Bulk
 		rows = append(rows, row)
 	}
-	return queueData{Queue: rows}, nil
+	return queueData{Queue: rows, AnyBulk: anyBulk}, nil
 }
 
 func (h *Handler) Approvals(w http.ResponseWriter, r *http.Request) {
@@ -913,7 +926,9 @@ func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 			failures = append(failures, label+": needs special permission. Use its own Override button.")
 			continue
 		}
-		switch _, err := h.leave.Decide(r.Context(), u, id, true, ""); {
+		switch _, err := h.leave.DecideOrdinary(r.Context(), u, id); {
+		case errors.Is(err, leave.ErrNeedsOverride):
+			failures = append(failures, label+": needs special permission. Use its own Override button.")
 		case errors.Is(err, leave.ErrNotAllowed):
 			failures = append(failures, label+": no longer waiting for you.")
 		case err != nil:

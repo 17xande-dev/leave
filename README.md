@@ -76,16 +76,20 @@ left of the requester's balance for the request's own cycle once it is approved 
 working days left in this cycle afterwards", "2 working days below zero afterwards";
 nothing for unlimited types, and the cycle is named, "in 2027", when it is not the
 current one). A pending request is already reserved against the balance, so this is the
-balance as it stands now, not the balance minus the request again; approving a
+balance as it stands now, not the balance minus the request again; when the person has
+other pending requests of that type in that cycle they are counted too, and the row says
+"if all their pending requests are approved" instead of "afterwards". Approving a
 cancellation gives the days back. Each row also lists who else is away on those dates
-("Also away: Thandi, Sick leave (12–14 Mar), ..."), from your own department, teams and
-reports, up to five people then "and N more", pending marked. You see the leave type
-only for the people `Away` reveals it for (your reports, requests you are the approver
-of, everyone for an admin); the requester themself is left out. **Approve selected**
+("Also away: Thandi, Sick leave (12–14 Mar), ..."), from the *requester's* department,
+teams and reports (not the approver's own), up to five people then "and N more", pending
+marked, the requester left out. What you may see of each is still yours: the leave type
+shows only for your reports, requests you are the approver of, or everyone if you are an
+admin (`Service.AwayFor`). **Approve selected**
 approves the ticked rows in one post, each through the normal approval; ticked rows that
 fail (already decided, not yours) are listed on the page and the rest stay approved.
 Rows needing special permission have no tick box: each needs its own "Override"
-button, and the bulk post refuses them too. At most 50 per post. **Decline...** on a row
+button, and the bulk post refuses them too (inside the decision's transaction). On a phone each
+request is a block rather than a table row. At most 50 per post. **Decline...** on a row
 opens a reason box (required) and declines from the queue; **Details** opens the
 request. No JavaScript.
 
