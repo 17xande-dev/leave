@@ -64,6 +64,12 @@ leave (hatching, lighter when pending), on the apply form and, for the person be
 recorded for, on the admin Record leave form. The marks are advisory: they come from a
 JSON data block (today minus 92 days to today plus a year) and never disable a day.
 
+Under the day count the form says who else is away in the chosen dates ("Also away
+then: Thandi (12–14 Mar), Sam (13 Mar), and 2 more"): people in your department, in a
+volunteer team you share, or who report to you, with pending (marked "not yet approved")
+and approved leave. It shows names and dates only, never the type, so sick leave stays
+private. It is information: it does not change the coverage limit.
+
 **Weekends off** are the way to have the restricted day off by itself. A weekend off
 runs Saturday to Sunday and costs one weekend from the yearly allowance. An admin can
 give someone **long weekends** (on their page under **Admin → People**), which run

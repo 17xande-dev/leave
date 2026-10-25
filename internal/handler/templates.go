@@ -81,6 +81,9 @@ var funcs = template.FuncMap{
 		}
 		return t.Format("Mon 2 Jan 2006")
 	},
+	// shortrange renders two YYYY-MM-DD strings as "13 Mar", "12–14 Mar" or
+	// "30 Mar – 2 Apr" (with years when they differ).
+	"shortrange": shortRange,
 	"plural": func(n int, one, many string) string {
 		if n == 1 || n == -1 {
 			return one
@@ -244,4 +247,20 @@ func unitLabel(n int, unit string) string {
 		return "working day"
 	}
 	return "working days"
+}
+
+func shortRange(start, end string) string {
+	s, err1 := time.Parse(time.DateOnly, start)
+	e, err2 := time.Parse(time.DateOnly, end)
+	switch {
+	case err1 != nil || err2 != nil:
+		return start + " to " + end
+	case s.Equal(e):
+		return s.Format("2 Jan")
+	case s.Year() != e.Year():
+		return s.Format("2 Jan 2006") + " – " + e.Format("2 Jan 2006")
+	case s.Month() != e.Month():
+		return s.Format("2 Jan") + " – " + e.Format("2 Jan")
+	}
+	return s.Format("2") + "–" + e.Format("2 Jan")
 }

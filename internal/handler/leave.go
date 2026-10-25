@@ -258,7 +258,9 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 		qt, err := h.leave.Preview(r.Context(), currentUser(r), in)
 		var fe leave.FieldErrors
 		if err == nil || errors.As(err, &fe) {
-			d.Preview = newQuoteData(&qt, fe)
+			if d.Preview, err = h.withAway(r, newQuoteData(&qt, fe), in.Start, in.End); err != nil {
+				return applyData{}, err
+			}
 			d.Preview.Errors = leave.FieldErrors{}
 			if msg := fe["coverage"]; msg != "" {
 				d.Preview.Errors["coverage"] = msg
@@ -305,6 +307,44 @@ type quoteData struct {
 	// offers asking HR to go below zero: the balance is the only thing wrong
 	// (a coverage limit does not matter until the request is submitted).
 	CanOverride, CanNegative bool
+	// Away is who else is away in the chosen dates (at most awayShown of
+	// them), and AwayMore how many more there are. It has no leave type by
+	// construction: this hint is the same for an approver and a colleague.
+	Away     []awayView
+	AwayMore int
+}
+
+// awayShown caps the names in the "Also away then" hint.
+const awayShown = 5
+
+// awayView is one person in the hint: name and dates, nothing private.
+type awayView struct {
+	Name    string
+	Start   string
+	End     string
+	Pending bool
+}
+
+// withAway adds who else is away between start and end, for the chosen dates.
+// It is information only: unusable dates just leave the hint out.
+func (h *Handler) withAway(r *http.Request, d quoteData, start, end string) (quoteData, error) {
+	s, err1 := leave.ParseDate(start)
+	e, err2 := leave.ParseDate(end)
+	if err1 != nil || err2 != nil || e.Before(s) {
+		return d, nil
+	}
+	away, err := h.leave.Away(r.Context(), currentUser(r), start, end)
+	if err != nil {
+		return d, err
+	}
+	for i, a := range away {
+		if i == awayShown {
+			d.AwayMore = len(away) - awayShown
+			break
+		}
+		d.Away = append(d.Away, awayView{Name: a.Name, Start: a.Start, End: a.End, Pending: a.Status == "pending"})
+	}
+	return d, nil
 }
 
 // newQuoteData reads what a refused quote leaves open to the person; see
@@ -337,7 +377,12 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	// A missing note is not worth shouting about while someone is still
 	// picking dates; Apply will say so if it is still missing.
 	delete(fe, "note")
-	h.renderPartial(w, r, "quote", newQuoteData(&qt, fe))
+	d, err := h.withAway(r, newQuoteData(&qt, fe), in.Start, in.End)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	h.renderPartial(w, r, "quote", d)
 }
 
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {

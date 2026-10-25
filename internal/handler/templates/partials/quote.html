@@ -19,6 +19,9 @@
     </ul>
     {{end}}
   {{end}}{{end}}
+  {{with .Away}}
+  <p class="hint">Also away then: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a.Name}} ({{shortrange $a.Start $a.End}}){{if $a.Pending}} (not yet approved){{end}}{{end}}{{with $.AwayMore}}, and {{.}} more{{end}}</p>
+  {{end}}
   {{/* Buttons inside the swapped partial, which is inside the form: they post
        the form's fields with override=1 or negative=1, and work after a swap. */}}
   {{if .CanOverride}}

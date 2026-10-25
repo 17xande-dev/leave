@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/leave"
 )
 
@@ -725,5 +726,63 @@ func TestPickerMarksFilter(t *testing.T) {
 	}
 	if !reflect.DeepEqual(m.Booked, want) {
 		t.Errorf("booked = %v\nwant     %v", m.Booked, want)
+	}
+}
+
+func TestQuoteAlsoAway(t *testing.T) {
+	hs := newHarness(t)
+	ctx := context.Background()
+	staff := hs.signIn("staff1")
+	annual := hs.typeID("annual")
+	quote := func(start, end string) string {
+		_, body := hs.get(staff, fmt.Sprintf("/leave/quote?type=%s&start=%s&end=%s", annual, start, end))
+		return body
+	}
+	book := func(i int, name, start, end string) {
+		u, err := hs.us.Upsert(ctx, directory.User{ID: fmt.Sprintf("cn=p%d", i), DN: fmt.Sprintf("cn=p%d", i),
+			Username: fmt.Sprintf("p%d", i), Name: name, Email: fmt.Sprintf("p%d@example.test", i), Department: "Operations"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ty, _ := strconv.ParseInt(annual, 10, 64)
+		if _, err := hs.svc.Submit(ctx, u, leave.Input{TypeID: ty, Start: start, End: end, Note: "n"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if body := quote("2026-10-12", "2026-10-14"); strings.Contains(body, "Also away") {
+		t.Fatalf("hint with nobody away:\n%s", body)
+	}
+	book(1, "Zoe", "2026-10-12", "2026-10-14")
+	book(2, "<b>x</b>", "2026-10-13", "2026-10-13")
+	body := quote("2026-10-12", "2026-10-14")
+	for _, want := range []string{"Also away then: Zoe (12–14 Oct) (not yet approved), &lt;b&gt;x&lt;/b&gt; (13 Oct) (not yet approved)"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("hint lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<b>x") || strings.Contains(body, "more") {
+		t.Errorf("unescaped name or spurious 'more':\n%s", body)
+	}
+	for i := 3; i <= 8; i++ {
+		book(i, fmt.Sprintf("Pat%d", i), "2026-10-13", "2026-10-13")
+	}
+	body = quote("2026-10-12", "2026-10-14")
+	if !strings.Contains(body, "and 3 more") || strings.Contains(body, "Pat8") || strings.Count(body, "(13 Oct)")+strings.Count(body, "(12–14 Oct)") != 5 {
+		t.Errorf("cap:\n%s", body)
+	}
+	// Outside the range, and with no dates, nothing is said.
+	if strings.Contains(quote("2026-10-20", "2026-10-21"), "Also away") {
+		t.Error("hint for a quiet week")
+	}
+	_, body = hs.get(staff, "/leave/quote?type=&start=")
+	if strings.Contains(body, "Also away") {
+		t.Error("hint with no dates")
+	}
+	// The viewer being an approver of these people does not add the type.
+	head := hs.signIn("headops")
+	_, body = hs.get(head, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-14", annual))
+	if strings.Contains(body, "Annual") || strings.Contains(body, "Zoe") == false {
+		t.Errorf("approver's hint:\n%s", body)
 	}
 }
