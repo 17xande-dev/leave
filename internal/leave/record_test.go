@@ -233,7 +233,7 @@ func TestRecordLeaveInPreviousCycle(t *testing.T) {
 		t.Fatalf("recorded = %+v", r)
 	}
 	cycle, _ := ParseDate("2025-01-01")
-	b, err := f.svc.balance(f.ctx, f.db, f.people["staff"].ID, f.types["annual"], cycle)
+	b, err := f.svc.balance(f.ctx, f.db, f.people["staff"].ID, f.types["annual"], cycle, 0)
 	if err != nil || *b.Available() != -5 {
 		t.Fatalf("2025 balance = %+v, %v", b, err)
 	}

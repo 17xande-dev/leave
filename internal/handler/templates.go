@@ -201,6 +201,8 @@ var notices = map[string]string{
 	"signed-out":         "You have been signed out.",
 	"submitted":          "Your leave request has been submitted for approval.",
 	"withdrawn":          "Your request has been withdrawn.",
+	"edited":             "Your request has been updated. If anything changed, whoever approves it has been emailed.",
+	"not-editable":       leave.MsgNotEditable,
 	"cancel-requested":   "Your cancellation request has been sent for approval.",
 	"approved":           "Request approved.",
 	"approved-many":      "The selected requests are approved.",

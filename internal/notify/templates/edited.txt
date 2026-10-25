@@ -1,0 +1,16 @@
+{{define "subject"}}Leave request changed by {{.Request.UserName}}: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Request.UserName}} has changed a request that was waiting for you.
+
+Was: {{.Was}}
+Now: {{.Now}}
+{{if .NoteChanged}}{{with .Request.Note}}
+Their note now reads: {{.}}
+{{else}}
+They removed the note.
+{{end}}{{end}}
+{{if .Request.Escalate}}
+This needs special permission.{{range .Coverage}} {{.}}{{end}} It goes up through each level, so approving it sends it on to the next person; declining ends it.
+{{end}}
+Please approve or decline it as changed.{{end}}

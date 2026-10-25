@@ -405,7 +405,7 @@ func (s *Service) shortfall(ctx context.Context, q querier, r Request) (int, err
 	if err != nil {
 		return 0, err
 	}
-	b, err := s.balance(ctx, q, r.UserID, t, cycle)
+	b, err := s.balance(ctx, q, r.UserID, t, cycle, 0)
 	if err != nil {
 		return 0, err
 	}

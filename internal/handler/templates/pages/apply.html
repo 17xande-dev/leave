@@ -4,9 +4,9 @@
 <script type="module" src="{{asset "apply.js"}}"></script>
 {{end}}
 {{define "content"}}
-<h1>Apply for leave</h1>
+<h1>{{if .Data.EditID}}Edit your request{{else}}Apply for leave{{end}}</h1>
 {{with .Data}}
-<p class="muted">Your request will go to <strong>{{.Approver}}</strong> for approval.</p>
+<p class="muted">{{if .EditID}}Your request is with{{else}}Your request will go to{{end}} <strong>{{.Approver}}</strong> for approval.{{if .EditID}} Saving your changes emails them.{{end}}</p>
 {{/*
   A plain POST form that works without JavaScript. htmx adds only the preview:
   any change inside the form re-fetches #quote, sending the form's fields as a
@@ -27,10 +27,13 @@
   when the change fires and drops later changes, so quick edits could leave a
   stale preview. Replace aborts the in-flight request and sends the newest.
 */}}
-<form method="post" action="/leave" id="apply"
+<form method="post" action="{{if .EditID}}/leave/{{.EditID}}/edit{{else}}/leave{{end}}" id="apply"
       hx-get="/leave/quote" hx-trigger="change" hx-target="#quote" hx-swap="outerHTML"
       hx-validate="false" hx-sync="replace">
   {{template "csrf" $.CSRF}}
+  {{/* Names the request to leave out of the preview's sums; the server honours
+       it only for an editable request of the signed-in person's own. */}}
+  {{if .EditID}}<input type="hidden" name="edit" value="{{.EditID}}">{{end}}
   <div class="field">
     <label for="type">Type of leave</label>
     <select id="type" name="type" required>
@@ -72,8 +75,8 @@
   </div>
   {{template "quote" .Preview}}
   <div class="actions">
-    <button type="submit">Submit request</button>
-    <a href="/">Cancel</a>
+    <button type="submit">{{if .EditID}}Save changes{{else}}Submit request{{end}}</button>
+    <a href="{{if .EditID}}/leave/{{.EditID}}{{else}}/{{end}}">Cancel</a>
   </div>
 </form>
 {{end}}

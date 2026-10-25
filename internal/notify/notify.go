@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -112,6 +112,14 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{r.ID}); err != nil {
 			return err
 		}
+	case leave.EventEdited:
+		to, err := approvers(ctx, tx, r)
+		if err != nil {
+			return err
+		}
+		if err := n.send(ctx, tx, "edited", to, r, false, "Review the request", "", special(e), changes(e)); err != nil {
+			return err
+		}
 	case leave.EventWithdrawn:
 		to, err := approvers(ctx, tx, r)
 		if err != nil {
@@ -184,6 +192,26 @@ type msgData struct {
 	Note      string
 	// Actor is who made the change, where it is not on the request.
 	Actor string
+	// Was and Now describe an edited request before and after; NoteChanged
+	// says the note differs too.
+	Was, Now    string
+	NoteChanged bool
+}
+
+// changes fills in what an edit changed, so the approver sees the old and the
+// new side by side. The note is quoted only when it changed.
+func changes(e leave.Event) func(*msgData) {
+	return func(d *msgData) {
+		if e.Before == nil {
+			return
+		}
+		b := *e.Before
+		d.Was = fmt.Sprintf("%s, %s (%s)", b.TypeName, Dates(b.Start, b.End), days(b))
+		d.Now = fmt.Sprintf("%s, %s (%s)", e.Request.TypeName, d.Dates, d.Days)
+		if b.Note != e.Request.Note {
+			d.NoteChanged = true
+		}
+	}
 }
 
 // special fills in what a special-permission message says: why, and who has

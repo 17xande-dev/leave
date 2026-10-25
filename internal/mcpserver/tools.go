@@ -187,6 +187,7 @@ type RequestDetail struct {
 	Cancels             *RequestInfo `json:"cancels,omitempty" jsonschema:"for a cancellation: the leave it would cancel"`
 	PendingCancellation int64        `json:"pending_cancellation_id,omitempty" jsonschema:"id of a cancellation waiting on this leave"`
 	CanWithdraw         bool         `json:"can_withdraw"`
+	CanEdit             bool         `json:"can_edit" jsonschema:"edit_request would be accepted for this request"`
 	CanRequestCancel    bool         `json:"can_request_cancellation"`
 	CanDecide           bool         `json:"can_decide"`
 	CanSubmit           bool         `json:"can_submit"`
@@ -204,6 +205,9 @@ func (d *deps) getRequest(ctx context.Context, u users.User, in IDIn) (RequestDe
 		CanRequestCancel: d.leave.CanRequestCancellation(u, req),
 		CanDecide:        leave.CanDecide(u, req),
 		CanSubmit:        req.UserID == u.ID && req.Status == leave.StatusDraft,
+	}
+	if out.CanEdit, err = d.leave.CanEdit(ctx, u, req); err != nil {
+		return out, "", err
 	}
 	if out.Steps, err = d.steps(ctx, req.ID); err != nil {
 		return out, "", err
@@ -463,6 +467,40 @@ func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut,
 		msg = "Sent to HR. They need to allow this before it can be submitted, and the person will be emailed."
 	}
 	return RequestOut{Request: requestInfo(req), Message: msg}, msg, nil
+}
+
+type EditIn struct {
+	ID       int64  `json:"id" jsonschema:"the pending request's id"`
+	Type     string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start    string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End      string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Note     string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+}
+
+// edit changes a pending request of the person's own, as the Edit form does.
+// There is no ask_hr: an edit never asks HR, and a balance problem is refused
+// with the standard message.
+func (d *deps) edit(ctx context.Context, u users.User, in EditIn) (RequestOut, string, error) {
+	req, err := d.load(ctx, u, in.ID)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note})
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	li.Override = in.Override
+	if _, err := d.leave.Edit(ctx, u, req.ID, li); errors.Is(err, leave.ErrNotAllowed) {
+		return RequestOut{}, "", userError(leave.MsgNotEditable)
+	} else if err != nil {
+		return RequestOut{}, "", err
+	}
+	msg := "Request updated."
+	if req.ApproverName != "" {
+		msg = "Request updated, and " + req.ApproverName + " has been emailed if anything changed."
+	}
+	return d.after(ctx, req.ID, msg)
 }
 
 // --- Requests: act on one ---------------------------------------------------

@@ -134,6 +134,8 @@ func (h *Handler) protectedRoutes() []route {
 		u("GET /leave/quote", h.Quote),
 		u("POST /leave", h.Apply),
 		u("GET /leave/{id}", h.RequestPage),
+		u("GET /leave/{id}/edit", h.EditForm),
+		u("POST /leave/{id}/edit", h.Edit),
 		u("POST /leave/{id}/withdraw", h.Withdraw),
 		u("POST /leave/{id}/submit", h.SubmitDraft),
 		u("POST /leave/{id}/cancel", h.RequestCancellation),

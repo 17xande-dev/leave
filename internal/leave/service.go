@@ -27,6 +27,9 @@ type Service struct {
 	// committed runs after every successful state change, outside the
 	// transaction: the place to wake whatever reads what the hook wrote.
 	committed func()
+	// beforeEditTx lets a test land a decision between Edit's first read and
+	// its transaction; nil outside tests.
+	beforeEditTx func()
 	// Now is replaceable so tests can pin "today".
 	Now func() time.Time
 }
@@ -65,12 +68,17 @@ const (
 	// EventRevoked: an admin removed leave they had recorded. Request is the
 	// now-cancelled leave.
 	EventRevoked EventKind = "revoked"
+	// EventEdited: the requester changed a pending request. Request is as it
+	// is now and Before as it was; the approver is told.
+	EventEdited EventKind = "edited"
 )
 
 type Event struct {
 	Kind EventKind
 	// Request is the request as it stands after the change.
 	Request Request
+	// Before is the request as it stood before an edit.
+	Before *Request
 	// Cancelled is the leave a just-approved cancellation cancelled.
 	Cancelled *Request
 	Actor     users.User

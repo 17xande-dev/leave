@@ -151,6 +151,20 @@ submit, and the usual rules (including the coverage limit) apply again then.
 leave stays booked until the cancellation is approved. Pending requests can simply be
 withdrawn.
 
+**Editing a pending request.** The person who made a request can change its type, dates
+and note instead of withdrawing it and applying again (**Edit this request** on its page,
+or `edit_request` over MCP), until anyone has started to decide it: it must still be
+pending, ordinary leave (not a shutdown request, not recorded leave) and have no decision
+steps. Anything else is refused with "withdraw it and apply again". The edit runs the same
+checks as a new application, with the request's own old version left out of the overlap,
+coverage and balance sums. An edit that is over a coverage limit is refused unless the
+person asks for special permission, as for a new request, and one that is no longer over a
+limit stops needing it. An edit never asks HR to go below zero: withdraw and apply again.
+The request stays with the approver it was sent to and keeps its place in the queue; that
+approver (or the admins, for the admins' queue) is emailed what changed, and the person is
+not. An edit that changes nothing sends nothing. There is no "edited on" mark: it would
+need a new column.
+
 **Settings** (**Admin → Settings**) hold the policy an admin may change without a
 deploy, and each change applies to the next request: the working days, the restricted
 day and its minimum, the final approver, and the year the 36-month sick cycle counts
@@ -218,6 +232,7 @@ anything unless the person has asked.
 | `public_holidays` | Holidays for a year |
 | `preview_request` | Day count, which days in the range are not charged and why, balance afterwards and every rule that would stop a request (dates, restricted day, overlap, coverage, balance), and whether special permission or asking HR is available. Changes nothing |
 | `apply_for_leave` | Submit a request. `override` asks for special permission and `ask_hr` asks HR to allow a negative balance, like the two buttons on the form |
+| `edit_request` | Change the type, dates or note of their own pending request that nobody has started to decide (`can_edit` on `get_request` says whether it can be). Same checks as `apply_for_leave`, with the request's old version left out of overlap, coverage and balance; `override` as there; no `ask_hr` (a balance problem is refused: withdraw and ask HR). The approver is emailed what changed |
 | `withdraw_request` | Withdraw their own undecided request |
 | `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |
 | `request_cancellation` | Ask for approved, not-yet-started leave to be cancelled |

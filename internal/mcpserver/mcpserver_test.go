@@ -174,7 +174,7 @@ func TestToolAnnotations(t *testing.T) {
 	// (the request is a draft they may submit), so clients are told to ask first.
 	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true,
 		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true, "grant_negative": true}
-	changing := map[string]bool{"apply_for_leave": true, "submit_draft": true, "request_cancellation": true,
+	changing := map[string]bool{"apply_for_leave": true, "edit_request": true, "submit_draft": true, "request_cancellation": true,
 		"record_leave": true, "adjust_balance": true}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
@@ -808,4 +808,34 @@ func TestNobodyAdjustsOrUnrecordsTheirOwn(t *testing.T) {
 	r := f.ok(other, "record_leave", map[string]any{"person": "hr", "type": "annual", "start": "2026-10-01", "note": "x"})
 	f.refused(hr, "remove_recorded_leave", map[string]any{"id": id(r)}, "Person: Another admin removes leave recorded for you.")
 	f.ok(other, "remove_recorded_leave", map[string]any{"id": id(r)})
+}
+
+func TestEditRequestTool(t *testing.T) {
+	f := newFixture(t)
+	staff := f.as("staff1")
+	r := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-14"})
+	rid := id(r)
+	if d := f.ok(staff, "get_request", map[string]any{"id": rid}); d.Data["can_edit"] != true {
+		t.Fatalf("get_request = %v", d.Data)
+	}
+
+	// Onto its own old days and beyond: its old version does not count.
+	e := f.ok(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-12", "end": "2026-10-16", "note": "longer"})
+	if get(e.Data, "request", "days").(float64) != 5 || get(e.Data, "request", "status") != "pending" ||
+		get(e.Data, "request", "approver") != "Olivia Operations" || !strings.Contains(e.Text, "Olivia Operations") {
+		t.Fatalf("edit = %v / %s", e.Data, e.Text)
+	}
+	// Same rules as applying, same messages.
+	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-06-01"}, "can start at most 92 days ago")
+	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-12", "end": "2026-12-30"}, "withdraw this request and ask HR")
+	// Not yours: no such request. Someone who can see it but not edit it: the standard message.
+	f.refused(f.as("staff2"), "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-19"}, "No such request")
+	f.refused(f.as("headops"), "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-19"}, "can no longer be edited")
+
+	// Decided: refused, and can_edit says so.
+	f.ok(f.as("headops"), "decide_request", map[string]any{"id": rid, "decision": "approve"})
+	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-19"}, "can no longer be edited")
+	if d := f.ok(staff, "get_request", map[string]any{"id": rid}); d.Data["can_edit"] != false {
+		t.Fatalf("get_request after approval = %v", d.Data)
+	}
 }

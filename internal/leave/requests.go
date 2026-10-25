@@ -462,7 +462,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// than a split, and the admin can adjust if it matters.
 	qt.CycleStart = CycleStart(start, t.CycleMonths, st.SickCycleAnchor)
 	qt.CycleName = cycleName(qt.CycleStart, today, t, st.SickCycleAnchor)
-	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart); err != nil {
+	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart, opt.excludeID); err != nil {
 		return Quote{}, err
 	}
 	if avail := qt.Balance.Available(); avail != nil {

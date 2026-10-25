@@ -145,6 +145,8 @@ type applyData struct {
 	Labels map[int64]string
 	// Marks is the picker's advisory marks: holidays and the person's own leave.
 	Marks pickerMarks
+	// EditID is the request being edited; 0 for a new one.
+	EditID int64
 }
 
 // typeLabel is the select's option text: "Annual leave (11 left)". Unlimited
@@ -217,7 +219,10 @@ func (h *Handler) pickerMarks(ctx context.Context, rs []leave.Request) (pickerMa
 	return m, nil
 }
 
-func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors) (applyData, error) {
+// applyData builds the apply form. edit is the request being edited, nil for a
+// new one: it is then left out of the picker's marks and the preview, and the
+// approver shown is the one it is already with.
+func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors, edit *leave.Request) (applyData, error) {
 	// One balances lookup serves both the type list (active types, in display
 	// order) and the "n left" in each option.
 	bs, err := h.leave.Balances(r.Context(), currentUser(r).ID)
@@ -234,6 +239,11 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	mine, err := h.leave.ForUser(r.Context(), currentUser(r).ID)
 	if err != nil {
 		return applyData{}, err
+	}
+	if edit != nil {
+		d.EditID = edit.ID
+		// Its own days would be marked as booked, on the very days being changed.
+		mine = slices.DeleteFunc(mine, func(m leave.Request) bool { return m.ID == edit.ID })
 	}
 	if d.Marks, err = h.pickerMarks(r.Context(), mine); err != nil {
 		return applyData{}, err
@@ -256,10 +266,16 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	// errors are already beside their fields; only the coverage warning, which
 	// has no field, is shown with the preview.
 	if in.TypeID != 0 && in.Start != "" && in.End != "" {
-		qt, err := h.leave.Preview(r.Context(), currentUser(r), in)
+		var qt leave.Quote
+		var err error
+		if edit != nil {
+			qt, _, err = h.leave.PreviewEdit(r.Context(), currentUser(r), edit.ID, in)
+		} else {
+			qt, err = h.leave.Preview(r.Context(), currentUser(r), in)
+		}
 		var fe leave.FieldErrors
 		if err == nil || errors.As(err, &fe) {
-			if d.Preview, err = h.withAway(r, newQuoteData(&qt, fe), in.Start, in.End); err != nil {
+			if d.Preview, err = h.withAway(r, newQuoteData(&qt, fe, edit != nil), in.Start, in.End); err != nil {
 				return applyData{}, err
 			}
 			d.Preview.Errors = leave.FieldErrors{}
@@ -268,8 +284,10 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 			}
 		}
 	}
-	id, err := h.leave.ResolveApprover(r.Context(), currentUser(r))
-	if err != nil {
+	id := int64(0)
+	if edit != nil {
+		id = edit.ApproverID // frozen: an edit does not re-route the request
+	} else if id, err = h.leave.ResolveApprover(r.Context(), currentUser(r)); err != nil {
 		return applyData{}, err
 	}
 	d.Approver = "the leave administrators"
@@ -282,7 +300,7 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 }
 
 func (h *Handler) ApplyForm(w http.ResponseWriter, r *http.Request) {
-	d, err := h.applyData(r, leave.Input{}, nil)
+	d, err := h.applyData(r, leave.Input{}, nil, nil)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
@@ -392,9 +410,13 @@ func (h *Handler) withAway(r *http.Request, d quoteData, start, end string) (quo
 
 // newQuoteData reads what a refused quote leaves open to the person; see
 // leave.Offers.
-func newQuoteData(qt *leave.Quote, fe leave.FieldErrors) quoteData {
+// An edit cannot ask HR (see leave.MsgEditNegative), so editing hides that button.
+func newQuoteData(qt *leave.Quote, fe leave.FieldErrors, editing bool) quoteData {
 	d := quoteData{Quote: qt, Errors: fe}
 	d.CanOverride, d.CanNegative = leave.Offers(*qt, fe)
+	if editing {
+		d.CanNegative = false
+	}
 	return d
 }
 
@@ -411,7 +433,10 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	if in.End == "" {
 		in.End = in.Start
 	}
-	qt, err := h.leave.Preview(r.Context(), currentUser(r), in)
+	// edit names the request being edited so it is left out of the sums; the
+	// service honours it only for an editable request of this person's own.
+	editID, _ := strconv.ParseInt(q.Get("edit"), 10, 64)
+	qt, editing, err := h.leave.PreviewEdit(r.Context(), currentUser(r), editID, in)
 	var fe leave.FieldErrors
 	if err != nil && !errors.As(err, &fe) {
 		h.serverError(w, r, err)
@@ -420,7 +445,7 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	// A missing note is not worth shouting about while someone is still
 	// picking dates; Apply will say so if it is still missing.
 	delete(fe, "note")
-	d, err := h.withAway(r, newQuoteData(&qt, fe), in.Start, in.End)
+	d, err := h.withAway(r, newQuoteData(&qt, fe, editing), in.Start, in.End)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
@@ -433,7 +458,7 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 	req, err := h.leave.Submit(r.Context(), currentUser(r), in)
 	var fe leave.FieldErrors
 	if errors.As(err, &fe) {
-		d, derr := h.applyData(r, in, fe)
+		d, derr := h.applyData(r, in, fe, nil)
 		if derr != nil {
 			h.serverError(w, r, derr)
 			return
@@ -452,6 +477,69 @@ func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, requestURL(r, req.ID, notice), http.StatusSeeOther)
 }
 
+// EditForm shows the apply form filled in with a pending request, to change it.
+func (h *Handler) EditForm(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.editable(w, r)
+	if !ok {
+		return
+	}
+	in := leave.Input{TypeID: req.TypeID, Start: req.Start, End: req.End, Note: req.Note}
+	d, err := h.applyData(r, in, nil, &req)
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	h.render(w, r, http.StatusOK, "apply.html", view{Title: "Edit your request", Data: d})
+}
+
+// Edit saves the form of EditForm. A refusal for a rule re-renders it with the
+// field errors, as Apply does; a request that is no longer editable goes back
+// to its page with a message.
+func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
+	req, ok := h.loadRequest(w, r)
+	if !ok {
+		return
+	}
+	in := inputFrom(r, r.PostFormValue)
+	_, err := h.leave.Edit(r.Context(), currentUser(r), req.ID, in)
+	var fe leave.FieldErrors
+	switch {
+	case errors.As(err, &fe):
+		d, derr := h.applyData(r, in, fe, &req)
+		if derr != nil {
+			h.serverError(w, r, derr)
+			return
+		}
+		h.render(w, r, http.StatusUnprocessableEntity, "apply.html", view{Title: "Edit your request", Data: d})
+	case errors.Is(err, leave.ErrNotAllowed):
+		http.Redirect(w, r, requestURL(r, req.ID, "not-editable"), http.StatusSeeOther)
+	case err != nil:
+		h.serverError(w, r, err)
+	default:
+		http.Redirect(w, r, requestURL(r, req.ID, "edited"), http.StatusSeeOther)
+	}
+}
+
+// editable loads the request in the path for editing. Not being able to see it
+// is a 404 as everywhere; being able to see it but not edit it (someone else's,
+// or already being decided) sends the person to its page with the reason.
+func (h *Handler) editable(w http.ResponseWriter, r *http.Request) (leave.Request, bool) {
+	req, ok := h.loadRequest(w, r)
+	if !ok {
+		return req, false
+	}
+	can, err := h.leave.CanEdit(r.Context(), currentUser(r), req)
+	if err != nil {
+		h.serverError(w, r, err)
+		return req, false
+	}
+	if !can {
+		http.Redirect(w, r, requestURL(r, req.ID, "not-editable"), http.StatusSeeOther)
+		return req, false
+	}
+	return req, true
+}
+
 type requestData struct {
 	Request leave.Request
 	// Back is where the page's back link goes, from where the person came, and
@@ -464,6 +552,7 @@ type requestData struct {
 	// PendingCancellation is a cancellation waiting on this leave.
 	PendingCancellation *leave.Request
 	CanWithdraw         bool
+	CanEdit             bool
 	CanCancel           bool
 	CanDecide           bool
 	// CanUnrecord: an admin may remove this recorded leave.
@@ -530,6 +619,9 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		d.Back, d.From = backLinks[k], k
 	}
 	var err error
+	if d.CanEdit, err = h.leave.CanEdit(r.Context(), u, req); err != nil {
+		return d, err
+	}
 	if d.Steps, err = h.leave.Steps(r.Context(), req.ID); err != nil {
 		return d, err
 	}

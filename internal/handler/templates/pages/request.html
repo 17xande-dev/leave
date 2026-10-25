@@ -99,6 +99,10 @@
 </form>
 {{end}}
 
+{{if .CanEdit}}
+<p class="actions"><a class="button quiet" href="/leave/{{.Request.ID}}/edit">Edit this request</a></p>
+{{end}}
+
 {{if .CanWithdraw}}
 <form method="post" action="/leave/{{.Request.ID}}/withdraw{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="actions">
   {{template "csrf" $.CSRF}}

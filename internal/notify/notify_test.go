@@ -436,3 +436,52 @@ func TestRecordedLeaveNotifications(t *testing.T) {
 		t.Fatalf("revoked email:\n%s", m.Text)
 	}
 }
+
+func TestEditedNotifiesApproverOnly(t *testing.T) {
+	e := setup(t)
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Note: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+	if _, err := e.svc.Edit(e.ctx, e.people["staff"], r.ID, leave.Input{TypeID: e.annual, Start: "2026-10-19", End: "2026-10-23", Note: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	if len(jobs) != 1 || jobs[0].kind != "email" {
+		t.Fatalf("edit jobs = %+v", jobs)
+	}
+	m := email(t, jobs[0])
+	// To the approver only, never the requester, and the body says what changed.
+	if len(m.To) != 1 || m.To[0] != "head@x.test" {
+		t.Fatalf("recipients = %v", m.To)
+	}
+	for _, want := range []string{"Hi Olivia", "Sam Staff has changed", "Was: Annual leave, Mon 12 Oct – Wed 14 Oct 2026 (3 working days)",
+		"Now: Annual leave, Mon 19 Oct – Fri 23 Oct 2026 (5 working days)", "Their note now reads: second", "https://leave.test/leave/"} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("email lacks %q:\n%s", want, m.Text)
+		}
+	}
+	if !strings.Contains(m.Subject, "changed") || !strings.Contains(m.Subject, "Sam Staff") {
+		t.Errorf("subject = %q", m.Subject)
+	}
+
+	// Removing the note is said so, not left blank.
+	if _, err := e.svc.Edit(e.ctx, e.people["staff"], r.ID, leave.Input{TypeID: e.annual, Start: "2026-10-19", End: "2026-10-23", Note: ""}); err != nil {
+		t.Fatal(err)
+	}
+	if m := email(t, e.drain(t)[0]); !strings.Contains(m.Text, "removed the note") {
+		t.Errorf("note removal not mentioned:\n%s", m.Text)
+	}
+
+	// The final approver's own leave goes to the admins' queue, and so does an edit of it.
+	p, _ := e.svc.Submit(e.ctx, e.people["pastor"], leave.Input{TypeID: e.annual, Start: "2026-11-02", End: "2026-11-02"})
+	e.drain(t)
+	if _, err := e.svc.Edit(e.ctx, e.people["pastor"], p.ID, leave.Input{TypeID: e.annual, Start: "2026-11-03", End: "2026-11-03"}); err != nil {
+		t.Fatal(err)
+	}
+	jobs = e.drain(t)
+	if len(jobs) != 1 || email(t, jobs[0]).To[0] != "hr@x.test" {
+		t.Fatalf("admin-queue edit jobs = %+v", jobs)
+	}
+}

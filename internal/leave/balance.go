@@ -28,23 +28,26 @@ func (b Balance) Available() *int {
 	return &n
 }
 
-func (s *Service) balance(ctx context.Context, q querier, userID int64, t Type, cycle time.Time) (Balance, error) {
+// balance reads one cycle's figures. excludeID leaves one request out of what
+// is taken or pending (0: none), for an edit, whose old version must not count
+// against its own replacement.
+func (s *Service) balance(ctx context.Context, q querier, userID int64, t Type, cycle time.Time, excludeID int64) (Balance, error) {
 	b := Balance{Type: t, Allowance: t.Allowance, CycleStart: fmtDate(cycle),
 		CycleEnd: fmtDate(CycleEnd(cycle, t.CycleMonths))}
 	err := q.QueryRowContext(ctx, `SELECT
 		COALESCE((SELECT sum(days) FROM balance_adjustments WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3), 0),
 		COALESCE((SELECT sum(days) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
-			AND kind = 'leave' AND status = 'approved'), 0),
+			AND kind = 'leave' AND status = 'approved' AND id <> ?4), 0),
 		COALESCE((SELECT sum(days) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
-			AND kind = 'leave' AND status = 'pending'), 0)`,
-		userID, t.ID, b.CycleStart).Scan(&b.Adjustments, &b.Taken, &b.Pending)
+			AND kind = 'leave' AND status = 'pending' AND id <> ?4), 0)`,
+		userID, t.ID, b.CycleStart, excludeID).Scan(&b.Adjustments, &b.Taken, &b.Pending)
 	return b, err
 }
 
 // BalanceIn is a person's balance for one type in the cycle starting at cycle,
 // for a cycle that is not the current one (leave recorded for last year).
 func (s *Service) BalanceIn(ctx context.Context, userID int64, t Type, cycle time.Time) (Balance, error) {
-	return s.balance(ctx, s.db, userID, t, cycle)
+	return s.balance(ctx, s.db, userID, t, cycle, 0)
 }
 
 // After is what a pending request leaves its person: the balance of the
@@ -82,7 +85,7 @@ func (s *Service) AfterApproval(ctx context.Context, req Request) (After, error)
 	if err != nil {
 		return After{}, err
 	}
-	b, err := s.balance(ctx, s.db, req.UserID, t, cs)
+	b, err := s.balance(ctx, s.db, req.UserID, t, cs, 0)
 	if err != nil {
 		return After{}, err
 	}
@@ -110,7 +113,7 @@ func (s *Service) Balances(ctx context.Context, userID int64) ([]Balance, error)
 	today := s.today()
 	out := make([]Balance, 0, len(types))
 	for _, t := range types {
-		b, err := s.balance(ctx, s.db, userID, t, CycleStart(today, t.CycleMonths, st.SickCycleAnchor))
+		b, err := s.balance(ctx, s.db, userID, t, CycleStart(today, t.CycleMonths, st.SickCycleAnchor), 0)
 		if err != nil {
 			return nil, err
 		}

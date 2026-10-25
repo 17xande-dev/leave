@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -820,4 +821,152 @@ func TestQuoteAlsoAwayGroupsPeople(t *testing.T) {
 	if !strings.Contains(body, "Olivia Operations (12 Oct) (not yet approved), Hannah HR (13 Oct, 15 Oct) (not yet approved)") {
 		t.Errorf("grouping:\n%s", body)
 	}
+}
+
+// The edit form is the apply form, filled in, pointing at its own route.
+func TestEditFormAndSave(t *testing.T) {
+	hs := newHarness(t)
+	staff, head := hs.signIn("staff1"), hs.signIn("headops")
+	path := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
+
+	// The request page offers Edit to its owner, not to the approver.
+	if _, body := hs.get(staff, path); !strings.Contains(body, `href="`+path+`/edit"`) {
+		t.Fatalf("owner is not offered Edit:\n%s", body)
+	}
+	if _, body := hs.get(head, path); strings.Contains(body, path+"/edit") {
+		t.Fatal("the approver is offered Edit")
+	}
+
+	code, body := hs.get(staff, path+"/edit")
+	for _, want := range []string{"<h1>Edit your request</h1>", `action="` + path + `/edit"`, "Save changes",
+		`value="2026-10-12/2026-10-14"`, `name="edit" value="` + strings.TrimPrefix(path, "/leave/") + `"`,
+		`href="` + path + `"`, `name="csrf_token"`, "Olivia Operations"} {
+		if code != 200 || !strings.Contains(body, want) {
+			t.Fatalf("edit form lacks %q (status %d):\n%s", want, code, body)
+		}
+	}
+	// Its own days are not marked as booked on its own picker.
+	if m := marksBlock(t, body, "apply-marks"); len(m.Booked) != 0 {
+		t.Errorf("the request being edited is marked booked: %v", m.Booked)
+	}
+	// ...while the new-request form does mark them.
+	if _, nb := hs.get(staff, "/leave/new"); len(marksBlock(t, nb, "apply-marks").Booked) != 1 {
+		t.Error("new form should mark the pending request")
+	}
+
+	// Save: new dates, notice, and the approver's queue shows them.
+	res, rbody := hs.post(staff, path+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-13"}, "end": {"2026-10-16"}, "note": {"moved"}})
+	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != path+"?notice=edited" {
+		t.Fatalf("save: %d %s\n%s", res.StatusCode, res.Header.Get("Location"), rbody)
+	}
+	if _, body := hs.get(staff, path+"?notice=edited"); !strings.Contains(body, "Your request has been updated") {
+		t.Fatalf("no notice:\n%s", body)
+	}
+	if _, body := hs.get(head, "/approvals"); !strings.Contains(body, "13 Oct") || strings.Contains(body, "12 Oct") {
+		t.Fatalf("queue does not show the new dates:\n%s", body)
+	}
+
+	// A refused rule re-renders the form with the error, status 422, input kept.
+	res, body = hs.post(staff, path+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-10"}, "end": {"2026-10-11"}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "all days off or public holidays") ||
+		!strings.Contains(body, "<h1>Edit your request</h1>") || !strings.Contains(body, `value="2026-10-10"`) {
+		t.Fatalf("refused edit: %d\n%s", res.StatusCode, body)
+	}
+
+	// Decided: the form and the POST both send the person back with the message.
+	hs.approveAs(head, path)
+	for _, do := range []func() *http.Response{
+		func() *http.Response { r, _ := hs.get2(staff, path+"/edit"); return r },
+		func() *http.Response {
+			r, _ := hs.post(staff, path+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-20"}, "end": {"2026-10-20"}})
+			return r
+		},
+	} {
+		if r := do(); r.StatusCode != http.StatusSeeOther || r.Header.Get("Location") != path+"?notice=not-editable" {
+			t.Errorf("after a decision: %d %s", r.StatusCode, r.Header.Get("Location"))
+		}
+	}
+	if _, body := hs.get(staff, path+"?notice=not-editable"); !strings.Contains(body, "withdraw it and apply again") {
+		t.Fatalf("no not-editable message:\n%s", body)
+	}
+	if _, body := hs.get(staff, path); strings.Contains(body, path+"/edit") {
+		t.Error("an approved request still offers Edit")
+	}
+}
+
+func TestEditIsOwnersOnly(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	form := url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-20"}, "end": {"2026-10-20"}}
+	// Someone who cannot see the request: 404, nothing confirmed.
+	other := hs.signIn("staff2")
+	if code, _ := hs.get(other, path+"/edit"); code != http.StatusNotFound {
+		t.Errorf("stranger GET edit: %d", code)
+	}
+	if res, _ := hs.post(other, path+"/edit", form); res.StatusCode != http.StatusNotFound {
+		t.Errorf("stranger POST edit: %d", res.StatusCode)
+	}
+	// The approver and an admin can see it; neither may edit it.
+	for _, who := range []string{"headops", "hr"} {
+		c := hs.signIn(who)
+		if res, _ := hs.get2(c, path+"/edit"); res.StatusCode != http.StatusSeeOther {
+			t.Errorf("%s GET edit: %d", who, res.StatusCode)
+		}
+		if res, _ := hs.post(c, path+"/edit", form); res.StatusCode != http.StatusSeeOther ||
+			!strings.HasSuffix(res.Header.Get("Location"), "notice=not-editable") {
+			t.Errorf("%s POST edit: %d %s", who, res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+	r, _ := hs.svc.Get(context.Background(), 1)
+	if r.Start != "2026-10-12" {
+		t.Fatalf("someone else's edit went through: %+v", r)
+	}
+}
+
+// The preview leaves out the request being edited, but only when edit names an
+// editable request of the signed-in person's own.
+func TestQuoteEditExclusion(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	path := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
+	id := strings.TrimPrefix(path, "/leave/")
+	q := fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-14", hs.typeID("annual"))
+
+	_, body := hs.get(staff, q)
+	if !strings.Contains(body, "already have leave booked") {
+		t.Fatalf("plain preview misses the overlap:\n%s", body)
+	}
+	_, body = hs.get(staff, q+"&edit="+id)
+	if strings.Contains(body, "already have leave booked") || !strings.Contains(body, "3 working days") {
+		t.Fatalf("edit preview still counts the request itself:\n%s", body)
+	}
+
+	// Another person's id excludes nothing for them; a made-up value is ignored.
+	other := hs.signIn("headops")
+	hs.apply(other, "annual", "2026-10-12", "2026-10-14")
+	_, body = hs.get(other, q+"&edit="+id)
+	if !strings.Contains(body, "already have leave booked") {
+		t.Fatalf("someone else's edit id was honoured:\n%s", body)
+	}
+	for _, v := range []string{"abc", "-1", "0", "99999"} {
+		if _, body = hs.get(staff, q+"&edit="+v); !strings.Contains(body, "already have leave booked") {
+			t.Errorf("edit=%s was honoured", v)
+		}
+	}
+	// The balance error of an edit points at withdrawing, and offers no HR button.
+	big := fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-11-30&edit=%s", hs.typeID("annual"), id)
+	if _, body = hs.get(staff, big); !strings.Contains(body, "withdraw this request and ask HR") || strings.Contains(body, `name="negative"`) {
+		t.Fatalf("over-balance edit preview:\n%s", body)
+	}
+}
+
+func (hs *harness) get2(c *http.Client, path string) (*http.Response, string) {
+	hs.t.Helper()
+	res, err := c.Get(hs.srv.URL + path)
+	if err != nil {
+		hs.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res, string(b)
 }
