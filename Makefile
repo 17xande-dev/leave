@@ -6,6 +6,13 @@ TAG ?= $(shell git rev-parse --short HEAD)
 # architecture-specific; naming the platform keeps an arm workstation honest.
 PLATFORM ?= linux/amd64
 
+# Pinned so a local mail sink does not change under the developer.
+MAILPIT_VERSION ?= v1.32.0
+
+# govulncheck is pinned here rather than in go.mod: it is a build-time tool.
+# v1.1.x crashes on Go 1.27; v1.9.0 works.
+GOVULNCHECK_VERSION ?= v1.9.0
+
 # Local development: the fake directory (any password), plain http, and mail
 # captured by mailpit. None of this is valid for a deployment -- config refuses
 # DIRECTORY=fake with secure cookies.
@@ -24,7 +31,7 @@ DEPLOY_DIR ?= ~/leave
 # that has never connected to github.com (nobody is there to accept the key).
 REPO ?= https://github.com/17xande-dev/leave.git
 
-.PHONY: run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit deploy check-pushed
+.PHONY: vulncheck vulncheck-install run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit deploy check-pushed
 
 ## run: the server on :8082 with the fake directory (testdata/directory.json)
 run:
@@ -45,11 +52,26 @@ build:
 test:
 	go test -count=1 ./...
 
-## check: the gate before a commit
+## check: the gate before a commit (tests with -race, then the vulnerability scan)
+# The skip count is printed because the live LDAP/Graph tests are opt-in and
+# skip silently otherwise; two skips is the expected number.
 check:
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go vet ./...
-	go test -count=1 ./...
+	@go test -count=1 -race -v ./... 2>&1 | tee /tmp/leave-check.out | grep -E '^(FAIL|ok|---\s+FAIL|panic)' ; \
+	  rc=$${PIPESTATUS[0]}; \
+	  echo "skipped tests: $$(grep -c -E '^\s*--- SKIP' /tmp/leave-check.out)"; \
+	  rm -f /tmp/leave-check.out; exit $$rc
+	$(MAKE) vulncheck
+
+## vulncheck-install: install the pinned govulncheck
+vulncheck-install:
+	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
+## vulncheck: fail if a reachable known vulnerability affects the build
+vulncheck:
+	@command -v govulncheck >/dev/null || { echo "govulncheck missing: make vulncheck-install" >&2; exit 1; }
+	govulncheck ./...
 
 vet:
 	go vet ./...
@@ -62,7 +84,7 @@ tidy:
 
 ## mailpit: local SMTP sink and viewer at http://localhost:8025
 mailpit:
-	docker run --rm -p 1025:1025 -p 8025:8025 axllent/mailpit
+	docker run --rm -p 1025:1025 -p 8025:8025 axllent/mailpit:$(MAILPIT_VERSION)
 
 image:
 	docker build --platform $(PLATFORM) -t $(IMAGE):$(TAG) -t $(IMAGE):latest .
