@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/netip"
 	"sync"
 	"time"
 
@@ -23,6 +24,40 @@ type Limiter struct {
 	every   rate.Limit
 	burst   int
 	lastGC  time.Time
+	// capSwept is when a sweep forced by the cap last ran; see capSweepEvery.
+	capSwept time.Time
+	// max caps len(buckets); zero means maxBuckets. A field so a test can lower
+	// it instead of creating ten thousand entries.
+	max int
+}
+
+// maxBuckets is the most buckets one limiter holds. A key can be attacker
+// chosen (the submitted username, an address in a header), and the lazy sweep
+// only runs every ten minutes, so without a cap the map's size is a hope, not a
+// bound.
+const maxBuckets = 10_000
+
+// capSweepEvery is the least time between sweeps forced by hitting the cap. A
+// sweep scans every bucket under the lock; at the cap every refused newcomer
+// would otherwise run one.
+const capSweepEvery = 5 * time.Second
+
+// IPKey is the identity a client address is throttled under. IPv4 is keyed by
+// the full address; IPv6 by its /64, the smallest block an ISP gives one
+// subscriber, because keying on the full address hands anyone with IPv6 a fresh
+// bucket per address. An IPv4-mapped address (::ffff:a.b.c.d) is unmapped so it
+// shares a bucket with the plain form. Anything unparseable keeps its raw string.
+func IPKey(ip string) string {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	// Drop any zone: fe80::1%eth0 and fe80::1%eth1 are one client to us.
+	return netip.PrefixFrom(addr.WithZone(""), 64).Masked().String()
 }
 
 type limitBucket struct {
@@ -34,7 +69,13 @@ func NewLimiter(every time.Duration, burst int) *Limiter {
 	return &Limiter{buckets: map[string]*limitBucket{}, every: rate.Every(every), burst: burst, lastGC: time.Now()}
 }
 
-// Allow reports whether key may proceed now, spending a token if so.
+// AllowIP is Allow for a client address, keyed by IPKey.
+func (l *Limiter) AllowIP(ip string) bool { return l.Allow(IPKey(ip)) }
+
+// Allow reports whether key may proceed now, spending a token if so. A key not
+// yet in the map is refused when the map is full of live buckets: failing open
+// would let a flood of fresh keys switch the limiter off, and existing keys are
+// unaffected.
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -42,18 +83,41 @@ func (l *Limiter) Allow(key string) bool {
 	// Sweep on use rather than from a goroutine: nothing to leak or stop, and
 	// an idle limiter costs nothing.
 	if now.Sub(l.lastGC) > 10*time.Minute {
-		for k, b := range l.buckets {
-			if now.Sub(b.seen) > 30*time.Minute {
-				delete(l.buckets, k)
-			}
-		}
+		l.sweep(now)
 		l.lastGC = now
 	}
 	b, ok := l.buckets[key]
 	if !ok {
+		limit := l.max
+		if limit <= 0 {
+			limit = maxBuckets
+		}
+		if len(l.buckets) >= limit && (l.capSwept.IsZero() || now.Sub(l.capSwept) >= capSweepEvery) {
+			l.sweep(now)
+			l.lastGC = now
+			l.capSwept = now
+		}
+		if len(l.buckets) >= limit {
+			return false
+		}
 		b = &limitBucket{l: rate.NewLimiter(l.every, l.burst)}
 		l.buckets[key] = b
 	}
 	b.seen = now
 	return b.l.AllowN(now, 1)
+}
+
+func (l *Limiter) sweep(now time.Time) {
+	for k, b := range l.buckets {
+		if now.Sub(b.seen) > 30*time.Minute {
+			delete(l.buckets, k)
+		}
+	}
+}
+
+// size reports how many buckets are held, for tests.
+func (l *Limiter) size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.buckets)
 }

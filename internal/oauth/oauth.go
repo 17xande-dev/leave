@@ -422,7 +422,7 @@ func postForm(w http.ResponseWriter, r *http.Request) (url.Values, *oauthError) 
 }
 
 func (s *Server) limited(w http.ResponseWriter, r *http.Request, l *middleware.Limiter) bool {
-	if l.Allow(middleware.ClientIP(r, s.cfg.TrustedProxies)) {
+	if l.AllowIP(middleware.ClientIP(r, s.cfg.TrustedProxies)) {
 		return false
 	}
 	w.Header().Set("Retry-After", "5")

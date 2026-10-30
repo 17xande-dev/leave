@@ -38,7 +38,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		h.render(w, r, status, "login.html", view{Title: "Sign in", Data: data})
 	}
 
-	if !h.loginByIP.Allow(middleware.ClientIP(r, h.cfg.TrustedProxies)) || !h.loginByUser.Allow(username) {
+	if !h.loginByIP.AllowIP(middleware.ClientIP(r, h.cfg.TrustedProxies)) || !h.loginByUser.Allow(username) {
 		fail(http.StatusTooManyRequests, "Too many sign-in attempts. Please wait a few minutes and try again.")
 		return
 	}
