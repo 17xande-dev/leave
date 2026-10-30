@@ -31,7 +31,7 @@ DEPLOY_DIR ?= ~/leave
 # that has never connected to github.com (nobody is there to accept the key).
 REPO ?= https://github.com/17xande-dev/leave.git
 
-.PHONY: vulncheck vulncheck-install run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit deploy check-pushed
+.PHONY: fmt-check vulncheck vulncheck-install run run-mail build test check vet fmt tidy image publish check-clean recreate-db mailpit deploy check-pushed
 
 ## run: the server on :8082 with the fake directory (testdata/directory.json)
 run:
@@ -55,14 +55,19 @@ test:
 ## check: the gate before a commit (tests with -race, then the vulnerability scan)
 # The skip count is printed because the live LDAP/Graph tests are opt-in and
 # skip silently otherwise; two skips is the expected number.
-check:
-	@test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+check: fmt-check
 	go vet ./...
-	@go test -count=1 -race -v ./... 2>&1 | tee /tmp/leave-check.out | grep -E '^(FAIL|ok|---\s+FAIL|panic)' ; \
+	@out="$$(mktemp)"; trap 'rm -f "$$out"' EXIT; \
+	  go test -count=1 -race -v ./... 2>&1 | tee "$$out" | grep -E '^(FAIL|ok|---\s+FAIL|panic)' ; \
 	  rc=$${PIPESTATUS[0]}; \
-	  echo "skipped tests: $$(grep -c -E '^\s*--- SKIP' /tmp/leave-check.out)"; \
-	  rm -f /tmp/leave-check.out; exit $$rc
+	  echo "skipped tests: $$(grep -c -E '^\s*--- SKIP' "$$out")"; exit $$rc
 	$(MAKE) vulncheck
+
+## fmt-check: fail, listing the files, if any tracked Go source is not gofmt-clean
+# Scoped to tracked files so untracked scratch cannot fail the gate.
+fmt-check:
+	@bad="$$(gofmt -l $$(git ls-files '*.go') 2>&1)"; rc=$$?; \
+	if [ $$rc -ne 0 ] || [ -n "$$bad" ]; then echo "not gofmt-clean (or not parseable):"; echo "$$bad"; exit 1; fi
 
 ## vulncheck-install: install the pinned govulncheck
 vulncheck-install:

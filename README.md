@@ -347,8 +347,8 @@ GRAPH_LIVE=1 go test -run Live ./internal/calendar/   # creates and deletes one 
   more every 3 minutes. That is at most 6 attempts in 3 minutes and 10 in 15 minutes,
   and about 20 more per hour after that. Set AD's threshold above the count for the
   lockout observation window you use (a 15-minute window needs a threshold of 11 or
-  more). A separate limit per client address (burst 20, one every 10 seconds) slows
-  spraying many usernames from one place.
+  more). A separate limit per client address (an IPv6 client is counted per /64; burst 20, one
+  every 10 seconds) slows spraying many usernames from one place.
 
 ### 2. Microsoft Entra app registration
 
