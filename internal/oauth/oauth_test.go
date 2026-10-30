@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -569,6 +570,31 @@ func TestTokenIssuanceIsRateLimited(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("70th request: %d, want 429", last)
+	}
+}
+
+// The token endpoint's limit keys IPv6 by /64: addresses in one prefix share a
+// bucket, a different prefix has its own.
+func TestTokenLimitSharesAnIPv6Prefix(t *testing.T) {
+	e := newEnv(t)
+	post := func(addr string) int {
+		req := httptest.NewRequest("POST", "/oauth/token", strings.NewReader("grant_type=nope"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "[" + addr + "]:4000"
+		rec := httptest.NewRecorder()
+		e.s.Token(rec, req)
+		return rec.Code
+	}
+	for i := range 60 {
+		if post("2001:db8:0:1::"+strconv.Itoa(i+1)) == http.StatusTooManyRequests {
+			t.Fatalf("request %d refused before the burst was spent", i)
+		}
+	}
+	if post("2001:db8:0:1:ffff::1") != http.StatusTooManyRequests {
+		t.Error("another address in the same /64 was not refused")
+	}
+	if post("2001:db8:0:2::1") == http.StatusTooManyRequests {
+		t.Error("an address in a different /64 shared the bucket")
 	}
 }
 

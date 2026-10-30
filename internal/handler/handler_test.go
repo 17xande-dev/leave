@@ -538,3 +538,30 @@ func TestLoginRefusesOversizedBody(t *testing.T) {
 		t.Fatalf("oversized login body: %d, want 400", r.StatusCode)
 	}
 }
+
+// The per-address sign-in limit keys IPv6 by /64, so a client cannot walk
+// around it by changing the low bits of its address.
+func TestLoginIPLimitSharesAnIPv6Prefix(t *testing.T) {
+	hs := newHarness(t)
+	post := func(addr string, n int) int {
+		form := url.Values{"username": {"nobody" + strconv.Itoa(n)}, "password": {"x"}}
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "[" + addr + "]:4000"
+		rec := httptest.NewRecorder()
+		hs.h.Login(rec, req)
+		return rec.Code
+	}
+	// A fresh username each time keeps the per-username limit out of it.
+	for i := range 20 {
+		if code := post("2001:db8:0:1::"+strconv.FormatInt(int64(i+1), 16), i); code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d refused before the burst was spent", i)
+		}
+	}
+	if code := post("2001:db8:0:1:ffff::1", 100); code != http.StatusTooManyRequests {
+		t.Errorf("another address in the same /64: %d, want 429", code)
+	}
+	if code := post("2001:db8:0:2::1", 101); code == http.StatusTooManyRequests {
+		t.Error("an address in a different /64 shared the bucket")
+	}
+}
