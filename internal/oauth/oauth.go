@@ -77,8 +77,8 @@ type Server struct {
 func New(db *sql.DB, cfg Config) *Server {
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	return &Server{db: db, cfg: cfg, Now: time.Now,
-		tokenLimit:    middleware.NewLimiter(time.Second, 60),
-		registerLimit: middleware.NewLimiter(6*time.Second, 20),
+		tokenLimit:    middleware.NewLimiter("oauth-token", time.Second, 60),
+		registerLimit: middleware.NewLimiter("oauth-register", 6*time.Second, 20),
 	}
 }
 

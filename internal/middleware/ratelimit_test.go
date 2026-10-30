@@ -1,12 +1,14 @@
 package middleware
 
 import (
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestLimiterPerKey(t *testing.T) {
-	l := NewLimiter(time.Hour, 2)
+	l := NewLimiter("test", time.Hour, 2)
 	if !l.Allow("a") || !l.Allow("a") {
 		t.Fatal("burst of 2 refused")
 	}
@@ -37,7 +39,7 @@ func TestIPKey(t *testing.T) {
 }
 
 func TestAllowIPSharesOneBucketPerPrefix(t *testing.T) {
-	l := NewLimiter(time.Hour, 2)
+	l := NewLimiter("test", time.Hour, 2)
 	if !l.AllowIP("2001:db8::1") || !l.AllowIP("2001:db8::2") {
 		t.Fatal("burst of 2 refused")
 	}
@@ -53,7 +55,7 @@ func TestAllowIPSharesOneBucketPerPrefix(t *testing.T) {
 }
 
 func TestLimiterCapRefusesNewKeys(t *testing.T) {
-	l := NewLimiter(time.Hour, 1)
+	l := NewLimiter("test", time.Hour, 1)
 	l.max = 3
 	for _, k := range []string{"a", "b", "c"} {
 		if !l.Allow(k) {
@@ -73,7 +75,7 @@ func TestLimiterCapRefusesNewKeys(t *testing.T) {
 }
 
 func TestLimiterCapHealsAfterSweep(t *testing.T) {
-	l := NewLimiter(time.Hour, 1)
+	l := NewLimiter("test", time.Hour, 1)
 	l.max = 2
 	l.Allow("a")
 	l.Allow("b")
@@ -91,5 +93,25 @@ func TestLimiterCapHealsAfterSweep(t *testing.T) {
 	l.Allow("d")
 	if !l.capSwept.Equal(before) {
 		t.Fatal("cap sweep ran again inside capSweepEvery")
+	}
+}
+
+func TestLimiterLogsOnceWhenFull(t *testing.T) {
+	var logged strings.Builder
+	l := NewLimiter("test", time.Hour, 1)
+	l.max = 2
+	l.log = slog.New(slog.NewTextHandler(&logged, nil))
+	l.Allow("a")
+	l.Allow("b")
+	for range 3 {
+		if l.Allow("c") {
+			t.Fatal("a new key was admitted at the cap")
+		}
+	}
+	if n := strings.Count(logged.String(), "rate limiter full"); n != 1 {
+		t.Errorf("logged %d times for 3 refusals, want 1", n)
+	}
+	if !strings.Contains(logged.String(), "limiter=test") {
+		t.Errorf("log line does not name the limiter: %s", logged.String())
 	}
 }

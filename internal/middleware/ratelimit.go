@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/netip"
 	"sync"
 	"time"
@@ -29,6 +30,11 @@ type Limiter struct {
 	// max caps len(buckets); zero means maxBuckets. A field so a test can lower
 	// it instead of creating ten thousand entries.
 	max int
+	// capLogged is when a full map last logged, so a flood is one line per sweep
+	// interval rather than one per request.
+	capLogged time.Time
+	name      string
+	log       *slog.Logger
 }
 
 // maxBuckets is the most buckets one limiter holds. A key can be attacker
@@ -65,8 +71,11 @@ type limitBucket struct {
 	seen time.Time
 }
 
-func NewLimiter(every time.Duration, burst int) *Limiter {
-	return &Limiter{buckets: map[string]*limitBucket{}, every: rate.Every(every), burst: burst, lastGC: time.Now()}
+// NewLimiter's name appears in the log line written when the limiter is full,
+// so the surface under attack can be told apart.
+func NewLimiter(name string, every time.Duration, burst int) *Limiter {
+	return &Limiter{buckets: map[string]*limitBucket{}, every: rate.Every(every), burst: burst, lastGC: time.Now(),
+		name: name, log: slog.Default()}
 }
 
 // AllowIP is Allow for a client address, keyed by IPKey.
@@ -98,6 +107,10 @@ func (l *Limiter) Allow(key string) bool {
 			l.capSwept = now
 		}
 		if len(l.buckets) >= limit {
+			if l.log != nil && (l.capLogged.IsZero() || now.Sub(l.capLogged) >= 10*time.Minute) {
+				l.capLogged = now
+				l.log.Warn("rate limiter full; refusing new keys", "limiter", l.name, "buckets", len(l.buckets))
+			}
 			return false
 		}
 		b = &limitBucket{l: rate.NewLimiter(l.every, l.burst)}

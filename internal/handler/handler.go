@@ -86,8 +86,8 @@ func New(cfg Config, d Deps) (*Handler, error) {
 		// Five tries per username per 15 minutes -- below AD's usual lockout
 		// threshold, so a guesser meets this wall before a colleague is locked
 		// out of Windows. The IP ceiling is looser for a shared office NAT.
-		loginByUser: middleware.NewLimiter(3*time.Minute, 5),
-		loginByIP:   middleware.NewLimiter(10*time.Second, 20),
+		loginByUser: middleware.NewLimiter("login-user", 3*time.Minute, 5),
+		loginByIP:   middleware.NewLimiter("login-ip", 10*time.Second, 20),
 	}, nil
 }
 
