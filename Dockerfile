@@ -1,4 +1,4 @@
-FROM golang:1.27-alpine AS build
+FROM golang:1.27.3-alpine AS build
 # gcc and musl-dev: go-sqlite3 needs cgo.
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
@@ -9,7 +9,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/leave .
 
 # alpine rather than distroless/static: the cgo binary links musl. sqlite is
 # included so an operator can inspect /data/leave.db with docker exec.
-FROM alpine:3
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata sqlite \
  && adduser -D -H -u 10001 leave \
  && mkdir /data && chown leave /data
