@@ -341,9 +341,14 @@ GRAPH_LIVE=1 go test -run Live ./internal/calendar/   # creates and deletes one 
   name in `LDAP_URL`, because that is what its certificate names. Check the setup with
   the `LDAP_LIVE=1` test rather than `ldapsearch` or `openssl`: recent OpenSSL refuses
   a 1024-bit DC key that the app itself accepts.
-- Keep AD's account-lockout threshold above 5 attempts. The app's own sign-in limit
-  (5 per username per ~15 minutes) is set lower, so a guesser hits the app's limit
-  before a colleague is locked out of Windows.
+- Keep AD's account-lockout threshold above what the app's own sign-in limit lets
+  through, so a guesser hits the app's limit before a colleague is locked out of
+  Windows. The limit is a token bucket per username: a burst of 5 attempts, then one
+  more every 3 minutes. That is at most 6 attempts in 3 minutes and 10 in 15 minutes,
+  and about 20 more per hour after that. Set AD's threshold above the count for the
+  lockout observation window you use (a 15-minute window needs a threshold of 11 or
+  more). A separate limit per client address (burst 20, one every 10 seconds) slows
+  spraying many usernames from one place.
 
 ### 2. Microsoft Entra app registration
 

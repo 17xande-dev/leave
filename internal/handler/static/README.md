@@ -49,30 +49,23 @@ bypass the content-hashed URL).
 
 ## date-range-input
 
-The `<date-range-input>` web component on the apply page and the admin Record leave form. It is our own, kept in a
-separate repository, which is the source of truth: do not edit the copy here.
+The `<date-range-input>` web component on the apply page and the admin Record leave form. It
+started as our own standalone component (originally taken at commit `33999ff` of a
+separate repository) and is now a vendored copy maintained here: edit it in place, there
+is no upstream to sync from.
 
-- Source: `/home/alex/dev/date-range-input/date-range-input.js`, commit `33999ff`
 - Licence: MIT (`date-range-input.LICENSE`)
-- Size: 28 987 bytes
-- SHA-256: `6a755403da4860a5d869ec661dd93486ef95567d76e740e24cb688b9d5ab24d0`
+- Size: 32 691 bytes
+- SHA-256: `810848d17b3a249e412b0493a0d1ba6bf1679e4d86bc8421365b9def3ab08ecd`
 
-The size and hash above are the upstream source at `33999ff`, not the copy here, which
-has diverged (below). The local copy is 32 691 bytes, SHA-256
-`810848d17b3a249e412b0493a0d1ba6bf1679e4d86bc8421365b9def3ab08ecd`.
+**Local changes:** the `marks` attribute (holiday and booked-day parts via Cally's
+`getDayParts`, documented at the top of the file) and the `::part(holiday)` /
+`::part(booked*)` styles (plus background-color in the hover rules, and a selected-day
+hover rule).
 
-**Local divergence:** this copy adds the `marks` attribute (holiday and booked-day parts
-via Cally's `getDayParts`, documented at the top of the file) and the `::part(holiday)`
-/ `::part(booked*)` styles (plus background-color in the hover rules, and a selected-day hover rule), which are not in the source repo yet. Port them there before
-the next copy over, or the next update will silently drop the marks.
-
-To update, copy from that repo and record the new commit, size and hash above:
+After changing `date-range-input.js` or `cally.js`, record the new size and hash above:
 
 ```sh
-S=/home/alex/dev/date-range-input
-cp $S/date-range-input.js internal/handler/static/
-cp $S/vendor/cally.js internal/handler/static/      # only if Cally changed
-git -C $S rev-parse --short HEAD
 sha256sum internal/handler/static/date-range-input.js internal/handler/static/cally.js
 ```
 
