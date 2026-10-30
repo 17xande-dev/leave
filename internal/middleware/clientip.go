@@ -32,14 +32,14 @@ func ClientIP(r *http.Request, trusted []*net.IPNet) string {
 		return peer
 	}
 
-	if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" && net.ParseIP(cf) != nil {
+	if cf := bareIP(strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))); net.ParseIP(cf) != nil {
 		return cf
 	}
 
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		for _, raw := range slices.Backward(parts) {
-			candidate := strings.TrimSpace(raw)
+			candidate := bareIP(strings.TrimSpace(raw))
 			if net.ParseIP(candidate) == nil {
 				continue
 			}
@@ -71,4 +71,23 @@ func isTrusted(ip string, trusted []*net.IPNet) bool {
 		}
 	}
 	return false
+}
+
+// bareIP reduces a header value to the address alone. Some load balancers write
+// "ip:port" or "[v6]:port"; left alone that is not an address, so it would be
+// skipped for the peer's address, or key a rate limiter per source port. A value
+// that is neither an address nor host:port is returned unchanged.
+func bareIP(s string) string {
+	if net.ParseIP(unbracket(s)) != nil {
+		return unbracket(s)
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		return host
+	}
+	return s
+}
+
+// unbracket strips the brackets an IPv6 address may arrive wrapped in.
+func unbracket(ip string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(ip, "["), "]")
 }

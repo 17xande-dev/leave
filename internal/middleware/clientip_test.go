@@ -42,6 +42,21 @@ func TestClientIP(t *testing.T) {
 		}
 	})
 
+	t.Run("header values with a port are reduced to the address", func(t *testing.T) {
+		for _, c := range []struct{ cf, xff, want string }{
+			{"1.2.3.4:5555", "", "1.2.3.4"},
+			{"[2001:db8::1]:443", "", "2001:db8::1"},
+			{"[2001:db8::1]", "", "2001:db8::1"},
+			{"", "9.9.9.9:80, 1.2.3.4:4000, 10.0.0.2:1", "1.2.3.4"},
+			{"", "[2001:db8::7]:9", "2001:db8::7"},
+		} {
+			r := newReq("10.0.0.1:1234", c.cf, c.xff)
+			if got := middleware.ClientIP(r, trusted); got != c.want {
+				t.Errorf("cf %q xff %q: ClientIP = %q, want %q", c.cf, c.xff, got, c.want)
+			}
+		}
+	})
+
 	t.Run("garbage header values fall back to the peer", func(t *testing.T) {
 		r := newReq("10.0.0.1:1234", "not-an-ip", "also-not-an-ip")
 		if got := middleware.ClientIP(r, trusted); got != "10.0.0.1" {
