@@ -103,17 +103,23 @@ func TestCSRFRefusesTokenlessBulkApprove(t *testing.T) {
 
 // nosurf parses the form before any handler runs, and net/http allows 10 MB for
 // that, so the body cap must sit in front of the CSRF layer to mean anything.
+// Through the whole app: an over-cap body carrying a valid token must not sign
+// anyone in.
 func TestBodyCapReachesCSRFLayer(t *testing.T) {
-	var sawErr bool
-	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawErr = r.ParseForm() != nil
-	})
-	h := middleware.MaxBody(probe)
-	body := "a=" + strings.Repeat("x", middleware.MaxFormBytes)
-	req := httptest.NewRequest("POST", "http://leave.test/login", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	h.ServeHTTP(httptest.NewRecorder(), req)
-	if !sawErr {
-		t.Fatal("an over-cap body parsed as a form")
+	e := newE2E(t)
+	b := e.browser()
+	_, page := b.get("/login")
+	f := fields(page)
+	f.Set("username", "staff1")
+	f.Set("password", "anything")
+	f.Set("pad", strings.Repeat("x", 2*middleware.MaxFormBytes))
+	res, _ := b.post("/login", f)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("over-cap login with a valid token: %d, want 403", res.StatusCode)
+	}
+	// The same post without the padding signs in, so the 403 is the cap.
+	f.Del("pad")
+	if res, _ := b.post("/login", f); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("normal login: %d, want 303", res.StatusCode)
 	}
 }
