@@ -118,7 +118,10 @@ func run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       2 * time.Minute,
+		// The default is 1 MB per request, and some limiter keys come from a
+		// header. Nothing this app sends or sets comes near 64 KiB.
+		MaxHeaderBytes: 64 << 10,
+		IdleTimeout:    2 * time.Minute,
 	}
 	errc := make(chan error, 1)
 	go func() {
@@ -149,7 +152,7 @@ func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.
 		ResourceMetadataURL: o.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})
 }
 
-// newApp is the whole HTTP stack: the routes, then CSRF, then the headers and
+// newApp is the whole HTTP stack: the routes, then CSRF behind a body cap, then the headers and
 // the log around everything. Tests build it the same way, so what they hit is
 // what is served.
 func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
@@ -163,7 +166,7 @@ func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	h.Routes(mux)
-	return middleware.Logging(middleware.SecurityHeaders(csrf(mux, cfg))), nil
+	return middleware.Logging(middleware.SecurityHeaders(middleware.MaxBody(csrf(mux, cfg)))), nil
 }
 
 func newDirectory(c config.Directory) (directory.Directory, error) {

@@ -63,8 +63,8 @@ func TestLimiterCapRefusesNewKeys(t *testing.T) {
 	if l.Allow("d") {
 		t.Fatal("new key admitted at the cap (limiter failed open)")
 	}
-	if l.size() != 3 {
-		t.Fatalf("size = %d, want 3", l.size())
+	if l.Len() != 3 {
+		t.Fatalf("size = %d, want 3", l.Len())
 	}
 	// Existing keys are unaffected by a full map: still limited, not refused as new.
 	if l.Allow("a") {

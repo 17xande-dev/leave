@@ -160,6 +160,10 @@ type ctxKey int
 
 const userKey ctxKey = 0
 
+// maxFormBytes bounds a form body read in a handler; the whole app is capped by
+// middleware.MaxBody, this keeps each handler safe on its own.
+const maxFormBytes = middleware.MaxFormBytes
+
 // signedIn requires a session. A GET without one is sent to the sign-in page
 // and returns here afterwards; anything else is refused, since replaying a
 // POST after sign-in would act on a form the person never saw submitted.

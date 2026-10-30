@@ -28,7 +28,17 @@ func (h *Handler) LoginForm(w http.ResponseWriter, r *http.Request) {
 		Data: loginData{Next: safeNext(r.URL.Query().Get("next"))}})
 }
 
+// maxUsernameBytes bounds what the per-username limiter will key on. Real
+// account names are far shorter; the limiter stores the key before the password
+// is checked, so an unbounded one is memory an attacker chooses.
+const maxUsernameBytes = 256
+
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad form.", http.StatusBadRequest)
+		return
+	}
 	username := directory.NormalizeUsername(r.PostFormValue("username"))
 	password := r.PostFormValue("password")
 	data := loginData{Username: r.PostFormValue("username"), Next: safeNext(r.PostFormValue("next"))}
@@ -38,6 +48,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		h.render(w, r, status, "login.html", view{Title: "Sign in", Data: data})
 	}
 
+	// Before Allow: a name nobody has is not worth a bucket, and costs the
+	// directory nothing, so it is refused without being counted.
+	if len(username) > maxUsernameBytes {
+		data.Username = ""
+		fail(http.StatusUnauthorized, "That username and password did not match. Use your usual Windows sign-in.")
+		return
+	}
 	if !h.loginByIP.AllowIP(middleware.ClientIP(r, h.cfg.TrustedProxies)) || !h.loginByUser.Allow(username) {
 		fail(http.StatusTooManyRequests, "Too many sign-in attempts. Please wait a few minutes and try again.")
 		return

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/17xande-dev/leave/internal/config"
+	"github.com/17xande-dev/leave/internal/middleware"
 )
 
 // The handler tests run without the CSRF layer, so this pins that the real
@@ -97,5 +98,22 @@ func TestCSRFRefusesTokenlessBulkApprove(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("tokenless bulk approve: %d, want 403", rec.Code)
+	}
+}
+
+// nosurf parses the form before any handler runs, and net/http allows 10 MB for
+// that, so the body cap must sit in front of the CSRF layer to mean anything.
+func TestBodyCapReachesCSRFLayer(t *testing.T) {
+	var sawErr bool
+	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawErr = r.ParseForm() != nil
+	})
+	h := middleware.MaxBody(probe)
+	body := "a=" + strings.Repeat("x", middleware.MaxFormBytes)
+	req := httptest.NewRequest("POST", "http://leave.test/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !sawErr {
+		t.Fatal("an over-cap body parsed as a form")
 	}
 }

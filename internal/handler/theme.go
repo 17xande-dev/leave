@@ -25,6 +25,7 @@ func themeFrom(r *http.Request) string {
 // "dark" to force a theme, or "system" when flipping lands back on what the
 // system already prefers, so the cookie is dropped and the page follows it again.
 func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad request.", http.StatusBadRequest)
 		return

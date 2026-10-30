@@ -115,8 +115,8 @@ func (l *Limiter) sweep(now time.Time) {
 	}
 }
 
-// size reports how many buckets are held, for tests.
-func (l *Limiter) size() int {
+// Len reports how many buckets are held.
+func (l *Limiter) Len() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.buckets)

@@ -46,3 +46,18 @@ func SecurityHeaders(next http.Handler) http.Handler {
 func CSPWithFormAction(source string) string {
 	return strings.Replace(CSP, "form-action 'self'", "form-action 'self' "+source, 1)
 }
+
+// MaxFormBytes is the most any request body may be. Nothing here posts more:
+// forms are a few fields, the OAuth and MCP bodies are small JSON. net/http's
+// own form parsing allows 10 MB, and CSRF middleware parses the form before any
+// handler runs, so the limit has to sit in front of it.
+const MaxFormBytes = 256 << 10
+
+// MaxBody caps every request body at MaxFormBytes. An over-long body makes the
+// reader fail, which form parsing reports as an error the handler refuses.
+func MaxBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
+		next.ServeHTTP(w, r)
+	})
+}

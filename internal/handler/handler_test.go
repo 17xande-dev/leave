@@ -509,3 +509,32 @@ func TestThemeNextAfterRefusedPost(t *testing.T) {
 		}
 	}
 }
+
+// A username is the per-username limiter's key and is stored before the password
+// is checked, so a long one is refused without being counted, and without being
+// echoed back into the form.
+func TestLoginRefusesOverlongUsername(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.client()
+	long := strings.Repeat("a", maxUsernameBytes+1)
+	for range 10 {
+		r, body := hs.post(c, "/login", url.Values{"username": {long}, "password": {"x"}})
+		if r.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("overlong username: %d, want 401 (not 429: it must not spend a bucket)", r.StatusCode)
+		}
+		if strings.Contains(body, long) {
+			t.Fatal("overlong username echoed back")
+		}
+	}
+	if n := hs.h.loginByUser.Len(); n != 0 {
+		t.Fatalf("overlong usernames created %d buckets", n)
+	}
+}
+
+func TestLoginRefusesOversizedBody(t *testing.T) {
+	hs := newHarness(t)
+	r, _ := hs.post(hs.client(), "/login", url.Values{"username": {"staff1"}, "password": {strings.Repeat("p", maxFormBytes+1)}})
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("oversized login body: %d, want 400", r.StatusCode)
+	}
+}

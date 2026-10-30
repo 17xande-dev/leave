@@ -104,6 +104,7 @@ func parseWhole(s string) (int, bool) {
 }
 
 func (h *Handler) AdminSaveSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad form.", http.StatusBadRequest)
 		return

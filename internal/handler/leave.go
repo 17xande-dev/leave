@@ -1009,6 +1009,7 @@ var fingerprintRE = regexp.MustCompile(`^[0-9a-f]{24}$`)
 
 func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Those requests could not be read.", http.StatusBadRequest)
 		return
