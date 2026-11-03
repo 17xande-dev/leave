@@ -401,9 +401,10 @@ what would be deployed.
 
 The schema has no migrations. If the app refuses to start against an old database, the
 logs say so. Back up the database (below) while the old version is still running, then
-run `kamal app stop` (the volume is in use until the container is stopped, and a deploy
-creates a fresh `leave.db` in it), remove the `leave-data` volume on the host and
-redeploy; that deletes everything in it, so copy the backup out first.
+run `kamal app remove` (a stopped container still holds the volume, and Docker refuses
+`docker volume rm` while any container, running or stopped, references it; Kamal also keeps
+old stopped containers), then `docker volume rm leave-data` on the host and redeploy. That
+deletes everything in the volume, so copy the backup out first.
 
 The database lives in the `leave-data` named volume. Back it up and copy it out:
 
@@ -420,11 +421,26 @@ the `leave-data` volume. A leftover `-journal`/`-wal` file next to a copied data
 corrupt it, so copy the database in with no stale sidecar files, then `kamal app boot`.
 
 **Cutover / data migration from the old compose stack.** The old compose volume is
-`leave_leave-data`; the new one is `leave-data`. The first Kamal deploy creates an empty
-`leave.db` in the new volume. To bring the old data over: `kamal app stop`, stop the old
-stack (so nothing writes to the source), copy `leave.db` from `leave_leave-data` into
-`leave-data`, `chown 10001` it (the app's uid), then `kamal app boot`. The LDAP CA bundle
-lives in `/home/it_admin/leave/certs`; never delete that directory.
+`leave_leave-data`; the new one is `leave-data`. Keep the old volume until the new app is
+signed off. Do the copy **before** moving the hostname to the shared tunnel, so nothing
+written to the empty new database is overwritten:
+
+```sh
+# on work-docker, after the first `make deploy` has created `leave-data`
+docker compose -f ~/leave/compose.yaml stop leave        # nothing writes to the source
+docker run --rm -v leave_leave-data:/from:ro -v "$PWD":/b alpine tar czf /b/leave-data-premigrate.tgz -C /from .
+# on the workstation: stop the new app so nothing writes to the target
+kamal app stop
+# on work-docker: copy EVERYTHING (leave.db and any -journal), then own it as the app's uid
+docker run --rm -v leave_leave-data:/from:ro -v leave-data:/to alpine \
+  sh -c 'cp -a /from/. /to/ && chown -R 10001 /to'
+# on the workstation
+kamal app boot
+```
+
+`cp -a /from/.` copies a leftover `leave.db-journal` too, which SQLite needs if the old app
+was killed mid-write. The LDAP CA bundle lives in `/home/it_admin/leave/certs`; never
+delete that directory (it is also the old compose `./certs`).
 
 **Known limitation.** During each deploy the old and new containers briefly overlap. The
 outbox worker in both may rarely run the same job twice (a duplicate email, for

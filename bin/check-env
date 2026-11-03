@@ -43,7 +43,10 @@ format() {
 	*'$'*) err "$k contains a '\$'; Kamal would expand it as a variable. Avoid '\$' in deployed values (regenerate the secret if needed)." ;;
 	esac
 	case $v in
-	*' #'*) err "$k contains ' #'; Kamal keeps inline comments literally. Remove the comment." ;;
+	[[:space:]]*) err "$k has leading whitespace; Kamal keeps it literally. Remove it." ;;
+	esac
+	case $v in
+	*[[:space:]]'#'*) err "$k contains ' #'; Kamal keeps inline comments literally. Remove the comment." ;;
 	esac
 	if printf '%s' "$v" | grep -q '[[:space:]]$'; then
 		err "$k has trailing whitespace or a carriage return."
