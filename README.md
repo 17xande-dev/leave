@@ -9,7 +9,7 @@ Microsoft 365 calendar.
 - **htmx** only for the live preview on the apply form (days charged, and which days are not and why). Every form is a plain
   POST that works without JavaScript.
 - **SQLite** in a single file. **One plain CSS file**, no framework or build step.
-- One binary with everything embedded, running in Docker on-prem next to the DC.
+- One binary with everything embedded, running in Docker on the on-prem work-docker host next to the DC, deployed with Kamal.
 
 ## How it works
 
@@ -276,8 +276,8 @@ check (the list is pinned by a test); the consent form at `/oauth/authorize` kee
 **Behind a reverse proxy.** The SDK refuses a request that *arrives on a loopback address*
 with a non-loopback `Host` header, to defeat DNS rebinding. The check looks at the
 address the connection was accepted on, not where the proxy is. The documented
-deployment is safe: the container listens on its own network address (the published
-`127.0.0.1:8082` is the host side) and gets the public `Host`. It breaks if the binary
+deployment is safe: the container listens on its own network address on the `kamal`
+docker network (nothing is published on the host) and gets the public `Host`. It breaks if the binary
 instead listens on loopback and the proxy forwards the public `Host` to it, for example
 a proxy on the same machine running the binary outside Docker. Every `/mcp` call then
 gets `403 Forbidden: invalid Host header`. Fix it by listening on a non-loopback
@@ -336,8 +336,8 @@ GRAPH_LIVE=1 go test -run Live ./internal/calendar/   # creates and deletes one 
   are easy to spot.
 - The DC must offer **LDAPS (636)**, or StartTLS on 389. The app refuses to send
   passwords in the clear. If the DC's certificate comes from an internal CA, copy the
-  CA's PEM into `certs/` next to `compose.yaml` on the server (git-ignored, mounted
-  read-only at `/certs`) and set `LDAP_CA_FILE=/certs/<file>.pem`. Use the DC's full
+  CA's PEM into `/home/it_admin/leave/certs/` on the server (mounted read-only at
+  `/certs` by `config/deploy.yml`) and set `LDAP_CA_FILE=/certs/<file>.pem`. Use the DC's full
   name in `LDAP_URL`, because that is what its certificate names. Check the setup with
   the `LDAP_LIVE=1` test rather than `ldapsearch` or `openssl`: recent OpenSSL refuses
   a 1024-bit DC key that the app itself accepts.
@@ -364,94 +364,71 @@ New-ApplicationAccessPolicy -AppId <client-id> -PolicyScopeGroupId "Leave app ma
 Test-ApplicationAccessPolicy -AppId <client-id> -Identity someone.else@example.org  # expect Denied
 ```
 
-Create a client secret and put it in `.env`. It expires, so set a calendar reminder to
+Create a client secret and put it in your local `.env` (then redeploy). It expires, so set a calendar reminder to
 renew it. When it lapses, every email and calendar update piles up on the Outbox page
 until the new secret is in place, then Retry clears them.
 
-### 3. The server
+### 3. Deploying (Kamal)
 
-`make deploy` updates the server from a workstation. It clones or pulls the repo on the
-server, then rebuilds and restarts the container with `docker compose up -d --build`. It
-refuses to run with uncommitted or unpushed changes, because the server pulls from GitHub.
+The app runs on `work-docker` behind a shared `kamal-proxy`, reached through one shared
+Cloudflare Tunnel. Host-side setup (kamal-proxy and the tunnel's `cloudflared`) lives in
+`~/dev/riverschurch/infra`; this repo only deploys the app. `make deploy` runs the check
+gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
+`ghcr.io/17xande-dev/leave`, and swap it in behind kamal-proxy once `GET /healthz`
+answers. It refuses to run with uncommitted changes, because Kamal builds from `HEAD`.
 
-One-time setup:
+One-time setup, on your workstation:
 
-1. **Name the server in `~/.ssh/config`** on your workstation. The address stays out of the
-   repo, and the Makefile uses only the alias (`DEPLOY_HOST`, default `docker-server`):
-   ```
-   Host docker-server
-     HostName <the server's address>
-     User <your user on the server>
-   ```
-2. **Nothing to set up for GitHub.** The repo is public, so the server clones it over
-   HTTPS (`REPO`) with no key. If the repo ever goes private again, switch `REPO` back to
-   the `git@github.com:` form and give the server a read-only deploy key. Also run
-   `ssh -T git@github.com` on the server once to accept GitHub's host key, or the clone
-   fails with "Host key verification failed".
-3. **Run `make deploy` once.** It clones into `~/leave` (`DEPLOY_DIR`) and stops, because
-   there's no `.env` yet. On the server, run `cp ~/leave/.env.example ~/leave/.env` and fill
-   it in, then deploy again.
+1. **`work-docker` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
+   user too). That user needs passwordless `docker`.
+2. **`gh` logged in** with a token that can write packages: `.kamal/secrets` uses
+   `gh auth token` as the ghcr.io password.
+3. **A local `.env`** (git-ignored) copied from `.env.example` and filled in. `.kamal/secrets`
+   reads the LDAP and Graph values from it with `grep`, so run `make` / `kamal` from the repo
+   root. The non-secret settings (`BASE_URL`, `COOKIE_SECURE`, `TRUSTED_PROXIES`, `TZ_NAME`)
+   are in `config/deploy.yml`. An optional setting (`LDAP_TEAMS_BASE_DN`, ...) reaches the
+   server only if you add it to `env.secret` and `.kamal/secrets`.
+4. **The LDAP CA on the server**: put the PEM in `/home/it_admin/leave/certs/` (bind-mounted
+   read-only at `/certs`, and untouched by deploys) and set `LDAP_CA_FILE=/certs/<file>.pem`.
 
-After that, every deploy is: commit, push, `make deploy`. Logs are at
-`ssh docker-server 'cd ~/leave && docker compose logs -f'`.
+Then `make deploy`. Logs: `make logs-prod`. Other commands (`kamal app details`,
+`kamal rollback <version>`, `kamal app exec -i sh`) work as usual; `kamal config` shows
+what would be deployed.
 
 The schema has no migrations. If the app refuses to start against an old database, the
-logs say so. Back up the database (below) while the old version is still running -- the
-new one will not start against it, so `exec` will not work after the deploy -- then
-recreate it with `docker compose down -v` and `make deploy`. `down -v` deletes the
-`leave-data` volume and everything in it, so copy the backup out of the volume first.
+logs say so. Back up the database (below) while the old version is still running, then
+remove the `leave-data` volume on the host and redeploy; that deletes everything in it, so
+copy the backup out first.
 
-`make publish` (build on a workstation, push to GHCR, `docker compose pull` on the server)
-is still there for when you'd rather the server never build anything.
-
-The database lives in the `leave-data` volume. Back it up and copy it out of the volume:
+The database lives in the `leave-data` named volume. Back it up and copy it out:
 
 ```sh
-docker compose exec leave sqlite3 /data/leave.db ".backup /data/backup.db"
-docker compose cp leave:/data/backup.db ./leave-backup-$(date +%F).db
+kamal app exec --reuse 'sqlite3 /data/leave.db ".backup /data/backup.db"'
+ssh work-docker 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/backup.db" -' > leave-backup-$(date +%F).tar
 ```
 
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
 torn state.
 
-The container listens on 8080 and is published only on `127.0.0.1:8082` (`HOST_PORT`), for
-checking from the server itself. Public access goes through the tunnel below.
-
-### 4. Public access: a Cloudflare Tunnel
+### 4. Public access: the shared Cloudflare Tunnel
 
 The app must be served over HTTPS: its session cookies are `Secure`, and `BASE_URL`
 (the public address) is used for CSRF checks, email links and the AI connector's OAuth
-issuer. `compose.yaml` runs `cloudflared` next to the app. It makes an outbound-only
-connection to Cloudflare, so no inbound port is opened, and Cloudflare provides the
-certificate.
+issuer. Cloudflare terminates TLS; the tunnel (run by `~/dev/riverschurch/infra`) makes an
+outbound-only connection to Cloudflare, so no inbound port is opened, and forwards each
+hostname to `http://kamal-proxy:80`, which routes by `Host` to the app. kamal-proxy
+serves plain http (`proxy.ssl: false`).
 
-What has to exist (once):
+What has to exist (once): a public hostname `leave.rivers.tools` on the shared tunnel,
+service `http://kamal-proxy:80`, in Cloudflare Zero Trust, with its DNS record.
 
-1. **A remotely-managed tunnel** in the Cloudflare account that owns your domain, with a
-   public hostname routing `leave.example.org` to the service `http://leave:8080`
-   (the compose service name, on the compose network), and the DNS record for it:
-   a proxied `CNAME` to `<tunnel-id>.cfargotunnel.com`. With the `cf` CLI:
-   ```sh
-   cf tunnels create --name leave --config-source cloudflare
-   cf tunnels config update <tunnel-id> --body '{"config":{"ingress":[
-     {"hostname":"leave.example.org","service":"http://leave:8080"},
-     {"service":"http_status:404"}]}}'
-   cf dns records create --zone <your domain> --body '{"type":"CNAME","name":"leave",
-     "content":"<tunnel-id>.cfargotunnel.com","proxied":true,"ttl":1}'
-   ```
-   A tunnel and its DNS record must be in the same Cloudflare account.
-2. **The tunnel token in `tunnel.env`** next to `compose.yaml` on the server, one line,
-   `TUNNEL_TOKEN=...` (`cf tunnels token get <tunnel-id>`). It is a secret: the file is
-   git-ignored, docker-ignored, and should be mode 600. It is separate from `.env` so
-   it is not loaded into the app's own environment.
-3. **`BASE_URL=https://leave.example.org` and `TRUSTED_PROXIES=172.30.16.10/32`** in
-   `.env`. The second is the `cloudflared` container's fixed address on the compose
-   network (the subnet is fixed in `compose.yaml`). The app trusts forwarding headers
-   only from that one address, which is how the sign-in rate limit sees real client IPs
-   instead of the tunnel's. If you change the subnet, change this to match.
-
-Then `make deploy`. Check it with `docker compose logs cloudflared` (look for
-"Registered tunnel connection") and open `BASE_URL`.
+`TRUSTED_PROXIES=172.30.17.0/24` (set in `config/deploy.yml`) is the `kamal` docker
+network's fixed subnet on the host. The peer the app sees is kamal-proxy, which passes
+Cloudflare's `CF-Connecting-IP` through; the app honours forwarding headers only from a
+peer in that subnet, which is how the sign-in rate limit sees real client IPs instead of
+the proxy's. This is safe only while the tunnel is the sole way in: nothing may publish a
+port on the host that reaches the app or kamal-proxy. If the subnet changes, change this
+to match.
 
 Note that this puts the AD sign-in page on the internet. The app rate-limits sign-in per
 username and per address, but consider putting **Cloudflare Access** in front, which

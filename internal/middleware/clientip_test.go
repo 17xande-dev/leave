@@ -71,3 +71,30 @@ func TestClientIP(t *testing.T) {
 		}
 	})
 }
+
+// The production path: kamal-proxy sits in the `kamal` docker network's fixed
+// subnet and passes Cloudflare's CF-Connecting-IP through (config/deploy.yml).
+func TestClientIPKamalNetwork(t *testing.T) {
+	trusted := middleware.ParseTrustedProxies([]string{"172.30.17.0/24"})
+
+	newReq := func(remoteAddr string) *http.Request {
+		r := &http.Request{RemoteAddr: remoteAddr, Header: http.Header{}}
+		r.Header.Set("CF-Connecting-IP", "198.51.100.7")
+		return r
+	}
+
+	for _, peer := range []string{"172.30.17.2:5555", "172.30.17.254:5555"} {
+		if got := middleware.ClientIP(newReq(peer), trusted); got != "198.51.100.7" {
+			t.Errorf("peer %s in the kamal subnet: ClientIP = %q, want the CF-Connecting-IP", peer, got)
+		}
+	}
+
+	// Outside the subnet, including the old cloudflared address and the
+	// neighbouring /24, the header is attacker-controlled and ignored.
+	for _, peer := range []string{"172.30.16.10:5555", "172.30.18.2:5555", "203.0.113.9:5555"} {
+		want := peer[:len(peer)-len(":5555")]
+		if got := middleware.ClientIP(newReq(peer), trusted); got != want {
+			t.Errorf("peer %s outside the kamal subnet: ClientIP = %q, want the peer %q", peer, got, want)
+		}
+	}
+}

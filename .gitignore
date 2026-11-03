@@ -10,8 +10,6 @@
 
 /bin/
 
-# Internal CA certificates for LDAPS, mounted by compose.yaml: the server's, not the repo's.
+# Internal CA certificates for LDAPS, bind-mounted by config/deploy.yml: the server's, not the repo's.
 /certs/
 
-# The Cloudflare Tunnel token (a secret), read by the cloudflared service.
-/tunnel.env

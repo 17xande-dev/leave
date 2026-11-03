@@ -1,0 +1,79 @@
+# Kamal deploy for the work Docker host (work-docker). `make deploy` runs the check
+# gate, then `kamal deploy`: build the image locally, push it to ghcr.io, and swap it
+# in behind kamal-proxy with a health check. Host-side setup (kamal-proxy and the
+# shared Cloudflare tunnel) lives in ~/dev/riverschurch/infra.
+service: leave
+
+image: 17xande-dev/leave
+
+registry:
+  server: ghcr.io
+  username: 17xande
+  # Read from .kamal/secrets.
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# The host is linux/amd64 and go-sqlite3 needs cgo, so the image is architecture-
+# specific. Building for it explicitly keeps an arm laptop honest.
+builder:
+  arch: amd64
+
+ssh:
+  user: it_admin
+
+servers:
+  web:
+    hosts:
+      - work-docker
+    options:
+      # A small Go binary plus SQLite; this is ample and stops a runaway from
+      # taking the shared host.
+      memory: 256m
+
+# Cloudflare terminates TLS and the one shared tunnel forwards the hostname to
+# http://kamal-proxy:80, so kamal-proxy serves plain http and asks for no cert.
+# kamal-proxy's HTTP check of /healthz is the health check.
+proxy:
+  ssl: false
+  host: leave.rivers.tools
+  app_port: 8080
+  healthcheck:
+    path: /healthz
+
+env:
+  clear:
+    # The browser always sees https (Cloudflare terminates it), so the public
+    # address is https and the session cookie is Secure.
+    BASE_URL: https://leave.rivers.tools
+    COOKIE_SECURE: "true"
+    DIRECTORY: ldap
+    TZ_NAME: Africa/Johannesburg
+    # The `kamal` docker network (fixed subnet 172.30.17.0/24 on work-docker) holds
+    # kamal-proxy and the app. The peer is kamal-proxy, which passes Cloudflare's
+    # CF-Connecting-IP through; trusting the subnet is what makes the app honour it,
+    # so the sign-in rate limit sees real client addresses. Safe only while the
+    # shared tunnel is the sole way in: nothing publishes a port on the host.
+    TRUSTED_PROXIES: 172.30.17.0/24
+  # Everything org-specific or credential-like comes from the gitignored .env
+  # through .kamal/secrets, so no value is committed.
+  secret:
+    - LDAP_URL
+    - LDAP_BIND_DN
+    - LDAP_BIND_PASSWORD
+    - LDAP_BASE_DN
+    - LDAP_USER_FILTER
+    - LDAP_ADMIN_GROUP
+    - LDAP_CA_FILE
+    - GRAPH_TENANT_ID
+    - GRAPH_CLIENT_ID
+    - GRAPH_CLIENT_SECRET
+    - EMAIL_FROM
+    - LEAVE_CALENDAR_MAILBOX
+
+volumes:
+  # The SQLite database (DB_PATH=/data/leave.db, set by the image). The image's
+  # /data is owned by uid 10001, which Docker copies into a fresh named volume.
+  - "leave-data:/data"
+  # The internal CA that signed the DCs' LDAPS certificates, for LDAP_CA_FILE
+  # (e.g. /certs/root-ca.pem). Lives on the server only, git-ignored, read-only.
+  - "/home/it_admin/leave/certs:/certs:ro"
