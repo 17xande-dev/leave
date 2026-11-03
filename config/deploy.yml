@@ -40,6 +40,10 @@ proxy:
   healthcheck:
     path: /healthz
 
+# The app's srv.Shutdown allows 15s for in-flight requests; Kamal's default stop
+# timeout is 10s, which would SIGKILL it mid-shutdown.
+stop_timeout: 20
+
 env:
   clear:
     # The browser always sees https (Cloudflare terminates it), so the public
