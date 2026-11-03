@@ -8,7 +8,8 @@
 # Secrets
 .env
 
-/bin/
+/bin/*
+!/bin/check-env
 
 # Internal CA certificates for LDAPS, bind-mounted by config/deploy.yml: the server's, not the repo's.
 /certs/

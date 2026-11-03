@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs before Kamal connects to anything, so a bad local .env aborts a raw
+# `kamal deploy` too (a non-zero exit raises HookError). Same check as `make deploy`.
+exec "$(dirname "$0")/../../bin/check-env"

@@ -1,0 +1,91 @@
+#!/bin/sh
+# Validate the local .env for the keys `kamal deploy` ships (see config/deploy.yml and
+# .kamal/secrets). Kamal's dotenv-style secrets parser rewrites or mangles some values
+# silently: it expands $NAME after the command runs, keeps quotes and inline comments
+# literally, turns a duplicated key into a two-line value, and turns an absent key into
+# an empty string. This fails loudly instead. It names keys, never values.
+#
+# Usage: bin/check-env        (checks ./.env at the repo root)
+#        ENV_FILE=path bin/check-env
+set -u
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+file=${ENV_FILE:-$root/.env}
+
+if [ ! -f "$file" ]; then
+	echo "check-env: $file not found (copy .env.example and fill it in)" >&2
+	exit 1
+fi
+
+required="LDAP_URL LDAP_BIND_DN LDAP_BIND_PASSWORD LDAP_BASE_DN LDAP_ADMIN_GROUP"
+graph="EMAIL_FROM LEAVE_CALENDAR_MAILBOX GRAPH_TENANT_ID GRAPH_CLIENT_ID GRAPH_CLIENT_SECRET"
+optional="LDAP_CA_FILE LDAP_USER_FILTER"
+
+fail=0
+err() { echo "check-env: $1" >&2; fail=1; }
+
+count() { grep -c "^$1=" "$file"; }
+value() { sed -n "s/^$1=//p" "$file" | head -n 1; }
+
+# format KEY: rules for a key that is present at least once.
+format() {
+	k=$1
+	n=$(count "$k")
+	if [ "$n" -gt 1 ]; then
+		err "$k appears $n times; Kamal would join them into one two-line value. Keep one."
+		return
+	fi
+	v=$(value "$k")
+	case $v in
+	\"* | \'*) err "$k starts with a quote character; Kamal keeps quotes literally. Write the value unquoted." ;;
+	esac
+	case $v in
+	*'$'*) err "$k contains a '\$'; Kamal would expand it as a variable. Avoid '\$' in deployed values (regenerate the secret if needed)." ;;
+	esac
+	case $v in
+	*' #'*) err "$k contains ' #'; Kamal keeps inline comments literally. Remove the comment." ;;
+	esac
+	if printf '%s' "$v" | grep -q '[[:space:]]$'; then
+		err "$k has trailing whitespace or a carriage return."
+	fi
+}
+
+# present KEY: exactly once and non-empty.
+present() {
+	k=$1
+	n=$(count "$k")
+	if [ "$n" -eq 0 ]; then
+		err "$k is missing from .env (Kamal would deploy it as an empty string)."
+		return 1
+	fi
+	if [ "$n" -eq 1 ] && [ -z "$(value "$k")" ]; then
+		err "$k is empty."
+	fi
+	format "$k"
+}
+
+for k in $required; do present "$k"; done
+
+# Mail and calendar: all or none. Leaving all out deliberately turns mail off.
+set_n=0
+for k in $graph; do
+	if [ "$(count "$k")" -gt 0 ] && [ -n "$(value "$k")" ]; then set_n=$((set_n + 1)); fi
+done
+if [ "$set_n" -ne 0 ]; then
+	for k in $graph; do present "$k"; done
+else
+	for k in $graph; do
+		# Present-but-empty is fine; a duplicate or a bad format is not.
+		if [ "$(count "$k")" -gt 0 ]; then format "$k"; fi
+	done
+fi
+
+for k in $optional; do
+	if [ "$(count "$k")" -gt 0 ]; then format "$k"; fi
+done
+
+if [ "$fail" -ne 0 ]; then
+	echo "check-env: .env is not safe to deploy; fix the keys above." >&2
+	exit 1
+fi
+echo "check-env: ok"
