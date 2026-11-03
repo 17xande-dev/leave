@@ -386,7 +386,11 @@ One-time setup, on your workstation:
 3. **A local `.env`** (git-ignored) copied from `.env.example` and filled in. `.kamal/secrets`
    reads the LDAP and Graph values from it with `grep`, so run `make` / `kamal` from the repo
    root. The non-secret settings (`BASE_URL`, `COOKIE_SECURE`, `TRUSTED_PROXIES`, `TZ_NAME`)
-   are in `config/deploy.yml`. An optional setting (`LDAP_TEAMS_BASE_DN`, ...) reaches the
+   are in `config/deploy.yml`. Values must be unquoted, with no inline `# comment`, no
+   trailing spaces, no duplicate keys and no `$`: Kamal's secrets parser would otherwise
+   rewrite them silently. `bin/check-env` checks this (and that required keys are set); it
+   runs from `make deploy` and from the `.kamal/hooks/pre-connect` hook, so a raw
+   `kamal deploy` is covered too. An optional setting (`LDAP_TEAMS_BASE_DN`, ...) reaches the
    server only if you add it to `env.secret` and `.kamal/secrets`.
 4. **The LDAP CA on the server**: put the PEM in `/home/it_admin/leave/certs/` (bind-mounted
    read-only at `/certs`, and untouched by deploys) and set `LDAP_CA_FILE=/certs/<file>.pem`.
@@ -397,8 +401,9 @@ what would be deployed.
 
 The schema has no migrations. If the app refuses to start against an old database, the
 logs say so. Back up the database (below) while the old version is still running, then
-remove the `leave-data` volume on the host and redeploy; that deletes everything in it, so
-copy the backup out first.
+run `kamal app stop` (the volume is in use until the container is stopped, and a deploy
+creates a fresh `leave.db` in it), remove the `leave-data` volume on the host and
+redeploy; that deletes everything in it, so copy the backup out first.
 
 The database lives in the `leave-data` named volume. Back it up and copy it out:
 
@@ -409,6 +414,21 @@ ssh work-docker 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/b
 
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
 torn state.
+
+To restore or roll the data back, `kamal app stop` first, before copying into or removing
+the `leave-data` volume. A leftover `-journal`/`-wal` file next to a copied database can
+corrupt it, so copy the database in with no stale sidecar files, then `kamal app boot`.
+
+**Cutover / data migration from the old compose stack.** The old compose volume is
+`leave_leave-data`; the new one is `leave-data`. The first Kamal deploy creates an empty
+`leave.db` in the new volume. To bring the old data over: `kamal app stop`, stop the old
+stack (so nothing writes to the source), copy `leave.db` from `leave_leave-data` into
+`leave-data`, `chown 10001` it (the app's uid), then `kamal app boot`. The LDAP CA bundle
+lives in `/home/it_admin/leave/certs`; never delete that directory.
+
+**Known limitation.** During each deploy the old and new containers briefly overlap. The
+outbox worker in both may rarely run the same job twice (a duplicate email, for
+example). It is low risk and accepted.
 
 ### 4. Public access: the shared Cloudflare Tunnel
 
