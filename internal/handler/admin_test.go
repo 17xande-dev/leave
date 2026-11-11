@@ -550,3 +550,58 @@ func TestPeopleAnnualIgnoresInactiveType(t *testing.T) {
 		t.Error("inactive annual type still shown")
 	}
 }
+
+// Balances are fractional, so the adjustment and allowance forms take decimals,
+// and the pages show them as decimals: "2.5", never the stored hundredths.
+func TestAdjustmentAndAllowanceFormsTakeDecimals(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	staff := hs.staffID("staff1")
+	page := "/admin/users/" + itoa(staff)
+	target := hs.typeID("annual") + ":2026-01-01"
+
+	res, _ := hs.post(hr, page+"/adjustments", url.Values{"target": {target}, "days": {"2.5"}, "reason": {"payroll"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("2.5: %d", res.StatusCode)
+	}
+	res, _ = hs.post(hr, page+"/adjustments", url.Values{"target": {target}, "days": {"-1.44"}, "reason": {"payroll"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("-1.44: %d", res.StatusCode)
+	}
+	_, body := hs.get(hr, page)
+	// 15 + 2.5 - 1.44 = 16.06 available; the adjustments list shows each figure.
+	for _, want := range []string{"<td class=\"num\">2.5</td>", "<td class=\"num\">-1.44</td>", "<td class=\"num\">1.06</td>", "<td class=\"num\">16.06</td>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("user page lacks %q", want)
+		}
+	}
+	for _, raw := range []string{">250<", ">-144<", ">106<", ">1606<"} {
+		if strings.Contains(body, raw) {
+			t.Errorf("user page shows a raw hundredths figure %q", raw)
+		}
+	}
+
+	// A figure that is not a decimal is refused and comes back as typed.
+	for _, bad := range []string{"1.234", "1,5", "abc", "1e2"} {
+		res, body = hs.post(hr, page+"/adjustments", url.Values{"target": {target}, "days": {bad}, "reason": {"x"}})
+		if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at most two decimals") ||
+			!strings.Contains(body, `value="`+bad+`"`) {
+			t.Errorf("days %q: %d, want 422 with a field error that keeps the input", bad, res.StatusCode)
+		}
+	}
+
+	// The allowance form takes a decimal too, and shows it back as one.
+	res, _ = hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Study leave"},
+		"allowance": {"7.5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("allowance 7.5: %d", res.StatusCode)
+	}
+	if _, body := hs.get(hr, "/admin/types"); !strings.Contains(body, "<td class=\"num\">7.5</td>") || strings.Contains(body, ">750<") {
+		t.Errorf("types page does not show 7.5:\n%s", body)
+	}
+	res, body = hs.post(hr, "/admin/types", url.Values{"code": {"bad"}, "name": {"Bad"},
+		"allowance": {"7.555"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at most two decimals") {
+		t.Errorf("allowance 7.555: %d", res.StatusCode)
+	}
+}

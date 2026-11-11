@@ -33,12 +33,16 @@ request, so a directory change afterwards cannot strand it. An admin can reassig
 | Family responsibility | 3 days |
 | Maternity | 120 calendar days |
 | Parental | 10 days |
+| Compassionate | no limit; not BCEA, a death in the family, at the employer's discretion (an admin may set an allowance) |
 | Unpaid | no limit |
 | Floating holidays | set by an admin (seeded off, 0 days); never on the restricted day |
 | Weekends off | set by an admin (seeded off, 0 weekends) |
 | Company closure | no limit; used only by shutdowns |
 
-Pending days are reserved, so the same days can't be requested twice. Leave costs only
+Days are stored as whole hundredths of a day (integers, never floating point), so
+balances such as 14.6 or -1.44 add up exactly. Adjustments and allowances are typed as
+decimals with at most two places (`1.5`), and every page, email and MCP result shows
+them as such. Pending days are reserved, so the same days can't be requested twice. Leave costs only
 **working days** (Mon–Fri by default, set on **Admin → Settings**) that aren't SA public
 holidays. With Tuesday to Friday and Sunday ticked, for example, a Monday is free and a
 Sunday costs a day. The holidays are computed from the Public Holidays Act,
@@ -245,7 +249,7 @@ anything unless the person has asked.
 | `permission_queue` | Administrators only: requests waiting for HR to allow a negative balance (`/admin/permissions`), with the shortfall |
 | `record_leave` | Administrators only: record leave a person has already taken (the **Record leave** form): its last day must be today or earlier. A note is required; a retired type is allowed; the balance may go below zero and the result says so. The person is emailed |
 | `remove_recorded_leave` | Administrators only: remove leave an administrator recorded; it no longer counts against their balance and the person is emailed |
-| `adjust_balance` | Administrators only: add or remove days on one type's balance for a cycle (default the current one), with a required reason. Nobody is emailed |
+| `adjust_balance` | Administrators only: add or remove days (fractions allowed, like 1.5) on one type's balance for a cycle (default the current one), with a required reason. Nobody is emailed |
 | `grant_negative` | Administrators only (destructive: it cannot be recalled): allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
 | `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
 | `reassign_request` | Administrators only: move a pending request to another approver, or with none to the leave administrators; the new approver is emailed |

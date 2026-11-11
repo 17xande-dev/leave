@@ -93,7 +93,7 @@ func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending'))) STRICT`)
 	old.Close()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "awaiting_hr") {
@@ -110,7 +110,7 @@ func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
@@ -128,7 +128,7 @@ func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
@@ -147,7 +147,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
 	old.Close()
@@ -158,7 +158,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	path = filepath.Join(t.TempDir(), "old2.db")
 	old, _ = sql.Open("sqlite3", "file:"+path)
 	for _, q := range []string{
-		`CREATE TABLE requests (id INTEGER PRIMARY KEY, shutdown_part_id INTEGER, escalate INTEGER,
+		`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 			allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`,
 		`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`,
@@ -184,6 +184,11 @@ func TestOldBackdatingAndRecordedShapesRefused(t *testing.T) {
 		"no recorded_by_id":      {`ALTER TABLE requests DROP COLUMN recorded_by_id`, "requests.recorded_by_id"},
 		"old backdate flag":      {`ALTER TABLE leave_types ADD COLUMN backdate INTEGER`, "leave_types.backdate"},
 		"old sick_backdate_days": {`ALTER TABLE settings ADD COLUMN sick_backdate_days INTEGER`, "settings.sick_backdate_days"},
+		// Whole-day columns from before every figure became hundredths of a day:
+		// a database from that build would read 15 as 0.15 of a day.
+		"old requests.days":              {`ALTER TABLE requests ADD COLUMN days INTEGER`, "requests.days"},
+		"old balance_adjustments.days":   {`ALTER TABLE balance_adjustments ADD COLUMN days INTEGER`, "balance_adjustments.days"},
+		"old leave_types.allowance_days": {`ALTER TABLE leave_types ADD COLUMN allowance_days INTEGER`, "leave_types.allowance_days"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "old.db")

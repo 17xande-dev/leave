@@ -321,21 +321,4 @@ func Dates(start, end string) string {
 
 func days(r leave.Request) string { return daysOf(r.Days, r.TypeUnit) }
 
-func daysOf(n int, unit string) string {
-	switch unit {
-	case leave.UnitWeekend:
-		if n == 1 {
-			return "1 weekend"
-		}
-		return fmt.Sprintf("%d weekends", n)
-	case leave.UnitCalendar:
-		if n == 1 {
-			return "1 day"
-		}
-		return fmt.Sprintf("%d days", n)
-	}
-	if n == 1 {
-		return "1 working day"
-	}
-	return fmt.Sprintf("%d working days", n)
-}
+func daysOf(n leave.Days, unit string) string { return n.Label(unit) }

@@ -117,8 +117,8 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 	} else {
 		out.Balance = &bi
 	}
-	out.Message = fmt.Sprintf("Recorded %d %s of %s for %s. They have been emailed and it is on the shared calendar.",
-		req.Days, plural(req.Days, "day", "days"), req.TypeName, req.UserName)
+	out.Message = fmt.Sprintf("Recorded %s %s of %s for %s. They have been emailed and it is on the shared calendar.",
+		req.Days, dplural(req.Days, "day", "days"), req.TypeName, req.UserName)
 	if out.BelowZero {
 		out.Message += " Their balance is now below zero."
 	}
@@ -162,12 +162,12 @@ type PersonBalancesIn struct {
 }
 
 type AdjustmentInfo struct {
-	Type       string `json:"type"`
-	CycleStart string `json:"cycle_start"`
-	Days       int    `json:"days" jsonschema:"signed: negative takes days away"`
-	Reason     string `json:"reason"`
-	By         string `json:"by"`
-	CreatedAt  string `json:"created_at"`
+	Type       string     `json:"type"`
+	CycleStart string     `json:"cycle_start"`
+	Days       leave.Days `json:"days" jsonschema:"signed: negative takes days away"`
+	Reason     string     `json:"reason"`
+	By         string     `json:"by"`
+	CreatedAt  string     `json:"created_at"`
 }
 
 type PersonBalancesOut struct {
@@ -207,11 +207,11 @@ func (d *deps) personBalances(ctx context.Context, u users.User, in PersonBalanc
 }
 
 type AdjustIn struct {
-	Person     string `json:"person" jsonschema:"the person's sign-in username, email address or exact full name"`
-	Type       string `json:"type" jsonschema:"the leave type's code or name, as listed by person_balances"`
-	CycleStart string `json:"cycle_start,omitempty" jsonschema:"first day of the cycle to adjust, YYYY-MM-DD, as person_balances shows; default the current cycle"`
-	Days       int    `json:"days" jsonschema:"signed whole days to add (carry-over, pro-rata) or, negative, to remove; not zero"`
-	Reason     string `json:"reason" jsonschema:"why; required, kept on the person's record"`
+	Person     string     `json:"person" jsonschema:"the person's sign-in username, email address or exact full name"`
+	Type       string     `json:"type" jsonschema:"the leave type's code or name, as listed by person_balances"`
+	CycleStart string     `json:"cycle_start,omitempty" jsonschema:"first day of the cycle to adjust, YYYY-MM-DD, as person_balances shows; default the current cycle"`
+	Days       leave.Days `json:"days" jsonschema:"signed number of days to add (carry-over, pro-rata) or, negative, to remove; may be fractional with at most two decimals (1.5, -1.44); not zero"`
+	Reason     string     `json:"reason" jsonschema:"why; required, kept on the person's record"`
 }
 
 type AdjustOut struct {
@@ -261,8 +261,8 @@ func (d *deps) adjustBalance(ctx context.Context, u users.User, in AdjustIn) (Ad
 		return out, "", err
 	}
 	out.Adjustments = adjustmentInfos(as)
-	out.Message = fmt.Sprintf("Adjusted %s's %s balance for the cycle from %s by %+d %s. Nobody is emailed.",
-		who.Name, t.Name, cycle, in.Days, plural(in.Days, "day", "days"))
+	out.Message = fmt.Sprintf("Adjusted %s's %s balance for the cycle from %s by %s %s. Nobody is emailed.",
+		who.Name, t.Name, cycle, signedDays(in.Days), dplural(in.Days, "day", "days"))
 	return out, out.Message, nil
 }
 
@@ -270,7 +270,7 @@ func (d *deps) adjustBalance(ctx context.Context, u users.User, in AdjustIn) (Ad
 
 type PermissionItem struct {
 	Request       RequestInfo `json:"request"`
-	ShortfallDays int         `json:"shortfall_days" jsonschema:"how far below zero it would take the balance, as it stands now"`
+	ShortfallDays leave.Days  `json:"shortfall_days" jsonschema:"how far below zero it would take the balance, as it stands now"`
 }
 
 type PermissionsOut struct {
@@ -391,4 +391,12 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 			"You cannot refuse your own request. Only when the person has told you to."}, d.refuseNegative)
 	add(d, s, &mcp.Tool{Name: "reassign_request", Annotations: destructive("Reassign a request (administrators)"),
 		Description: "Administrators only: move a pending request to another approver (or, with a blank approver, to the leave administrators). The new approver is emailed. Only for requests still pending. Only when the person has told you to."}, d.reassign)
+}
+
+// signedDays is a days figure with its sign always shown: "+1.5", "-2".
+func signedDays(d leave.Days) string {
+	if d >= 0 {
+		return "+" + d.String()
+	}
+	return d.String()
 }

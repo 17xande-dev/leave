@@ -57,16 +57,16 @@ func TestSettingsChangeAppliesImmediately(t *testing.T) {
 	f := newFixture(t)
 	in := Input{TypeID: f.types["annual"].ID, Start: "2026-10-12", End: "2026-10-12", Note: "n"} // a Monday
 	q, err := f.svc.Preview(f.ctx, f.people["staff"], in)
-	if err != nil || q.Days != 1 {
-		t.Fatalf("Monday on the default week: %d days, %v", q.Days, err)
+	if err != nil || q.Days != WholeDays(1) {
+		t.Fatalf("Monday on the default week: %s days, %v", q.Days, err)
 	}
 	f.setSettings(func(st *Settings) { st.Week = WeekOf(time.Tuesday, time.Wednesday, time.Thursday, time.Friday) })
 	if _, err := f.svc.Preview(f.ctx, f.people["staff"], in); !fieldErr(err, "end") {
 		t.Fatalf("Monday after it stopped being a working day: %v", err)
 	}
 	f.setSettings(func(st *Settings) { st.Week = MonFri })
-	if q, err = f.svc.Preview(f.ctx, f.people["staff"], in); err != nil || q.Days != 1 {
-		t.Fatalf("Monday after switching back: %d days, %v", q.Days, err)
+	if q, err = f.svc.Preview(f.ctx, f.people["staff"], in); err != nil || q.Days != WholeDays(1) {
+		t.Fatalf("Monday after switching back: %s days, %v", q.Days, err)
 	}
 
 	// A type's backdating is read the same way: 10 days back is fine at 92

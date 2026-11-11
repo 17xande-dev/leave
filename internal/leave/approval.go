@@ -142,8 +142,8 @@ func (s *Service) RequestCancellation(ctx context.Context, u users.User, id int6
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, cancels_request_id,
-			start_date, end_date, days, cycle_start, note, status, approver_id, created_at)
-			SELECT user_id, type_id, 'cancellation', id, start_date, end_date, days, cycle_start, ?, 'pending', ?, ?
+			start_date, end_date, days_x100, cycle_start, note, status, approver_id, created_at)
+			SELECT user_id, type_id, 'cancellation', id, start_date, end_date, days_x100, cycle_start, ?, 'pending', ?, ?
 			FROM requests WHERE id = ? AND status = 'approved'`,
 			strings.TrimSpace(note), nullID(approver), stampNow(s.Now()), id)
 		if err != nil {
@@ -427,11 +427,11 @@ func (s *Service) AwaitingHR(ctx context.Context) ([]Request, error) {
 // Shortfall is how many days below zero a request awaiting HR would take the
 // balance, as it stands now. It reserves nothing yet, so its days are added to
 // what is already booked.
-func (s *Service) Shortfall(ctx context.Context, r Request) (int, error) {
+func (s *Service) Shortfall(ctx context.Context, r Request) (Days, error) {
 	return s.shortfall(ctx, s.db, r)
 }
 
-func (s *Service) shortfall(ctx context.Context, q querier, r Request) (int, error) {
+func (s *Service) shortfall(ctx context.Context, q querier, r Request) (Days, error) {
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, r.TypeID))
 	if err != nil {
 		return 0, err

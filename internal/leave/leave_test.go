@@ -107,6 +107,8 @@ func (f *fixture) mustSubmit(who, code, start, end string) Request {
 	return r
 }
 
+// available is the balance in whole days; a fractional one fails the test, so
+// the whole-day tests cannot silently round.
 func (f *fixture) available(who, code string) int {
 	f.t.Helper()
 	bs, err := f.svc.Balances(f.ctx, f.people[who].ID)
@@ -115,7 +117,11 @@ func (f *fixture) available(who, code string) int {
 	}
 	for _, b := range bs {
 		if b.Type.Code == code {
-			return *b.Available()
+			n := *b.Available()
+			if n%100 != 0 {
+				f.t.Fatalf("%s balance %s is not a whole number of days", code, n)
+			}
+			return int(n / 100)
 		}
 	}
 	f.t.Fatalf("no %s balance", code)
@@ -206,7 +212,7 @@ func TestSubmitValidation(t *testing.T) {
 func TestPendingReservesBalanceAndBlocksOverlap(t *testing.T) {
 	f := newFixture(t)
 	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-16") // 5 days
-	if r.Days != 5 || r.ApproverID != f.people["head"].ID || r.Status != StatusPending {
+	if r.Days != WholeDays(5) || r.ApproverID != f.people["head"].ID || r.Status != StatusPending {
 		t.Fatalf("submitted = %+v", r)
 	}
 	// Pending days are reserved, so the same days cannot be spent twice.
@@ -350,7 +356,7 @@ func TestHookFailureRollsBack(t *testing.T) {
 func TestAdjustmentsAndSickCycle(t *testing.T) {
 	f := newFixture(t)
 	err := f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
-		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: 5, Reason: "carry-over from 2025"})
+		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: WholeDays(5), Reason: "carry-over from 2025"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,13 +365,13 @@ func TestAdjustmentsAndSickCycle(t *testing.T) {
 	}
 	// The sick cycle started 2025-01-01, so an adjustment dated 2026 is refused.
 	err = f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
-		TypeID: f.types["sick"].ID, CycleStart: "2026-01-01", Days: 1, Reason: "x"})
+		TypeID: f.types["sick"].ID, CycleStart: "2026-01-01", Days: WholeDays(1), Reason: "x"})
 	if !fieldErr(err, "cycle") {
 		t.Fatalf("adjustment to a non-cycle start: %v", err)
 	}
 	// Sick leave taken in 2025 still counts in October 2026: same 36-month cycle.
-	f.db.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days, cycle_start, status,
-		approver_id, created_at) VALUES (?, ?, 'leave', '2025-06-02', '2025-06-06', 5, '2025-01-01', 'approved', ?, '')`,
+	f.db.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, status,
+		approver_id, created_at) VALUES (?, ?, 'leave', '2025-06-02', '2025-06-06', 500, '2025-01-01', 'approved', ?, '')`,
 		f.people["staff"].ID, f.types["sick"].ID, f.people["head"].ID)
 	if got := f.available("staff", "sick"); got != 25 {
 		t.Fatalf("sick available = %d, want 25", got)
@@ -375,7 +381,7 @@ func TestAdjustmentsAndSickCycle(t *testing.T) {
 func TestSeedTypesLeavesEditsAlone(t *testing.T) {
 	f := newFixture(t)
 	a := f.types["annual"]
-	a.Allowance = intp(18)
+	a.Allowance = wholeDays(18)
 	if _, err := f.svc.SaveType(f.ctx, a); err != nil {
 		t.Fatal(err)
 	}
@@ -383,8 +389,8 @@ func TestSeedTypesLeavesEditsAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := f.svc.Type(f.ctx, a.ID)
-	if *got.Allowance != 18 {
-		t.Fatalf("seed overwrote an edit: allowance %d", *got.Allowance)
+	if *got.Allowance != WholeDays(18) {
+		t.Fatalf("seed overwrote an edit: allowance %s", *got.Allowance)
 	}
 	if len(f.types) != len(bceaDefaults) {
 		t.Fatalf("%d types seeded, want %d", len(f.types), len(bceaDefaults))
@@ -403,8 +409,8 @@ func TestHolidayDeletionSticks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.Days != 5 {
-		t.Fatalf("days with 16 Dec deleted = %d, want 5", q.Days)
+	if q.Days != WholeDays(5) {
+		t.Fatalf("days with 16 Dec deleted = %s, want 5", q.Days)
 	}
 }
 

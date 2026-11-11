@@ -25,7 +25,7 @@ type ShutdownPart struct {
 	TypeName string
 	Start    string
 	End      string
-	Days     int
+	Days     Days
 }
 
 type Shutdown struct {
@@ -190,7 +190,7 @@ func (s *Service) GenerateDrafts(ctx context.Context, shutdownID int64) (int, er
 				}
 				start, _ := ParseDate(p.Start)
 				res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date,
-					days, cycle_start, status, shutdown_part_id, created_at)
+					days_x100, cycle_start, status, shutdown_part_id, created_at)
 					SELECT ?, ?, 'leave', ?, ?, ?, ?, 'draft', ?, ?
 					WHERE NOT EXISTS (SELECT 1 FROM requests WHERE shutdown_part_id = ? AND user_id = ?
 						AND status IN ('draft', 'pending', 'approved'))`,
@@ -288,7 +288,7 @@ func (s *Service) shutdowns(ctx context.Context, where string, args ...any) ([]S
 			if err != nil {
 				return nil, err
 			}
-			p.Days = CountDays(start, end, units[i], hol, st.Week)
+			p.Days = WholeDays(CountDays(start, end, units[i], hol, st.Week))
 			i++
 		}
 	}
@@ -399,7 +399,7 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 		if auto {
 			status, decidedAt, decisionNote = StatusApproved, stampNow(s.Now()), "Approved automatically: company shutdown."
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = ?, days = ?, cycle_start = ?, note = ?,
+		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = ?, days_x100 = ?, cycle_start = ?, note = ?,
 			approver_id = ?, escalate = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'draft'`,
 			status, qt.Days, fmtDate(qt.CycleStart), note, nullID(approver), escalate,
 			decidedAt, decisionNote, id)

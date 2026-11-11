@@ -22,17 +22,17 @@ const listCap = 200
 // RequestInfo is a request as the assistant sees it: names, not ids, wherever a
 // person would use a name.
 type RequestInfo struct {
-	ID         int64  `json:"id"`
-	Kind       string `json:"kind" jsonschema:"leave, or cancellation (a request to cancel approved leave)"`
-	Person     string `json:"person"`
-	Department string `json:"department,omitempty"`
-	Type       string `json:"type"`
-	Unit       string `json:"unit" jsonschema:"what days are counted in: workdays, calendar or weekend"`
-	Start      string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End        string `json:"end" jsonschema:"last day, YYYY-MM-DD"`
-	Days       int    `json:"days"`
-	Status     string `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
-	Note       string `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
+	ID         int64      `json:"id"`
+	Kind       string     `json:"kind" jsonschema:"leave, or cancellation (a request to cancel approved leave)"`
+	Person     string     `json:"person"`
+	Department string     `json:"department,omitempty"`
+	Type       string     `json:"type"`
+	Unit       string     `json:"unit" jsonschema:"what days are counted in: workdays, calendar or weekend"`
+	Start      string     `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End        string     `json:"end" jsonschema:"last day, YYYY-MM-DD"`
+	Days       leave.Days `json:"days"`
+	Status     string     `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
+	Note       string     `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
 	// RecordedBy is set when an administrator wrote the leave down after the fact.
 	RecordedBy string `json:"recorded_by,omitempty" jsonschema:"set when an administrator recorded this leave after the fact instead of it being requested"`
 	// Approver is who must decide it while it is pending; empty means any administrator.
@@ -90,6 +90,14 @@ func (d *deps) steps(ctx context.Context, id int64) ([]StepInfo, error) {
 	return out, nil
 }
 
+// dplural is plural for a days figure, which is one only at exactly 1.
+func dplural(n leave.Days, one, many string) string {
+	if n.IsOne() {
+		return one
+	}
+	return many
+}
+
 func plural(n int, one, many string) string {
 	if n == 1 || n == -1 {
 		return one
@@ -100,16 +108,16 @@ func plural(n int, one, many string) string {
 // --- Read -------------------------------------------------------------------
 
 type BalanceInfo struct {
-	Type       string `json:"type"`
-	Code       string `json:"code" jsonschema:"short code of the leave type; usable as the type for requests"`
-	Unit       string `json:"unit"`
-	Allowance  *int   `json:"allowance" jsonschema:"days per cycle; null means unlimited"`
-	Adjustment int    `json:"adjustments" jsonschema:"days added or removed by HR (carry-over, pro-rata)"`
-	Taken      int    `json:"taken" jsonschema:"approved days"`
-	Pending    int    `json:"pending" jsonschema:"days awaiting approval, already reserved"`
-	Available  *int   `json:"available" jsonschema:"days left to request; null means unlimited"`
-	CycleStart string `json:"cycle_start"`
-	CycleEnd   string `json:"cycle_end"`
+	Type       string      `json:"type"`
+	Code       string      `json:"code" jsonschema:"short code of the leave type; usable as the type for requests"`
+	Unit       string      `json:"unit"`
+	Allowance  *leave.Days `json:"allowance" jsonschema:"days per cycle (may be fractional, like 1.5); null means unlimited"`
+	Adjustment leave.Days  `json:"adjustments" jsonschema:"days added or removed by HR (carry-over, pro-rata)"`
+	Taken      leave.Days  `json:"taken" jsonschema:"approved days"`
+	Pending    leave.Days  `json:"pending" jsonschema:"days awaiting approval, already reserved"`
+	Available  *leave.Days `json:"available" jsonschema:"days left to request; null means unlimited"`
+	CycleStart string      `json:"cycle_start"`
+	CycleEnd   string      `json:"cycle_end"`
 }
 
 func balanceInfo(b leave.Balance) BalanceInfo {
@@ -183,7 +191,7 @@ type RequestDetail struct {
 	CoverageWarnings []string `json:"coverage_warnings,omitempty"`
 	// NextApprover is who it goes to if you approve; empty when yours is the last approval.
 	NextApprover        string       `json:"next_approver,omitempty"`
-	ShortfallDays       int          `json:"shortfall_days,omitempty" jsonschema:"for a request awaiting HR: how far below zero it would take the balance"`
+	ShortfallDays       leave.Days   `json:"shortfall_days,omitempty" jsonschema:"for a request awaiting HR: how far below zero it would take the balance"`
 	Cancels             *RequestInfo `json:"cancels,omitempty" jsonschema:"for a cancellation: the leave it would cancel"`
 	PendingCancellation int64        `json:"pending_cancellation_id,omitempty" jsonschema:"id of a cancellation waiting on this leave"`
 	CanWithdraw         bool         `json:"can_withdraw"`
@@ -357,21 +365,21 @@ type Problem struct {
 
 type PreviewOut struct {
 	// OK: the request would be accepted as it is.
-	OK               bool      `json:"ok"`
-	Type             string    `json:"type,omitempty"`
-	Start            string    `json:"start,omitempty"`
-	End              string    `json:"end,omitempty"`
-	Days             int       `json:"days,omitempty"`
-	Unit             string    `json:"unit,omitempty"`
-	AvailableBefore  *int      `json:"available_before,omitempty"`
-	AvailableAfter   *int      `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
-	ShortfallDays    int       `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
-	NotCharged       []string  `json:"not_charged,omitempty" jsonschema:"days in the range that cost nothing (public holidays by name, non-working weekdays), as the apply form shows them"`
-	CoverageWarnings []string  `json:"coverage_warnings,omitempty" jsonschema:"one for each department or team limit the request is over"`
-	Problems         []Problem `json:"problems" jsonschema:"every rule the request breaks; empty when ok"`
-	CanOverride      bool      `json:"can_ask_special_permission" jsonschema:"apply_for_leave with override=true would be accepted"`
-	CanAskHR         bool      `json:"can_ask_hr" jsonschema:"apply_for_leave with ask_hr=true would be accepted"`
-	Approver         string    `json:"approver" jsonschema:"who would decide it"`
+	OK               bool        `json:"ok"`
+	Type             string      `json:"type,omitempty"`
+	Start            string      `json:"start,omitempty"`
+	End              string      `json:"end,omitempty"`
+	Days             leave.Days  `json:"days,omitempty"`
+	Unit             string      `json:"unit,omitempty"`
+	AvailableBefore  *leave.Days `json:"available_before,omitempty"`
+	AvailableAfter   *leave.Days `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
+	ShortfallDays    leave.Days  `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
+	NotCharged       []string    `json:"not_charged,omitempty" jsonschema:"days in the range that cost nothing (public holidays by name, non-working weekdays), as the apply form shows them"`
+	CoverageWarnings []string    `json:"coverage_warnings,omitempty" jsonschema:"one for each department or team limit the request is over"`
+	Problems         []Problem   `json:"problems" jsonschema:"every rule the request breaks; empty when ok"`
+	CanOverride      bool        `json:"can_ask_special_permission" jsonschema:"apply_for_leave with override=true would be accepted"`
+	CanAskHR         bool        `json:"can_ask_hr" jsonschema:"apply_for_leave with ask_hr=true would be accepted"`
+	Approver         string      `json:"approver" jsonschema:"who would decide it"`
 }
 
 // sentences turns coverage warnings into the text an assistant relays; nil
@@ -582,9 +590,9 @@ type QueueItem struct {
 // BalanceAfterInfo is the Approvals page's "N left in 2026 afterwards": negative
 // Left means below zero.
 type BalanceAfterInfo struct {
-	Left  int    `json:"left" jsonschema:"days (or weekends) left afterwards; negative when below zero"`
-	Unit  string `json:"unit" jsonschema:"workdays, calendar or weekend"`
-	Cycle string `json:"cycle" jsonschema:"the cycle's name when it is not the current one (for example 2027); empty for the current cycle"`
+	Left  leave.Days `json:"left" jsonschema:"days (or weekends) left afterwards; negative when below zero"`
+	Unit  string     `json:"unit" jsonschema:"workdays, calendar or weekend"`
+	Cycle string     `json:"cycle" jsonschema:"the cycle's name when it is not the current one (for example 2027); empty for the current cycle"`
 }
 
 type QueueOut struct {

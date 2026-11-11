@@ -90,6 +90,13 @@ var funcs = template.FuncMap{
 		}
 		return many
 	},
+	// dplural is plural for a days figure, which is one only at exactly 1.
+	"dplural": func(n leave.Days, one, many string) string {
+		if n.IsOne() {
+			return one
+		}
+		return many
+	},
 	"lower":  strings.ToLower,
 	"status": statusClass,
 	// statuslabel is a status as a person reads it: awaiting_hr is "awaiting HR".
@@ -234,24 +241,11 @@ var notices = map[string]string{
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }
 
-func unitLabel(n int, unit string) string {
-	switch unit {
-	case "weekend":
-		if n == 1 || n == -1 {
-			return "weekend"
-		}
-		return "weekends"
-	case "calendar":
-		if n == 1 || n == -1 {
-			return "day"
-		}
-		return "days"
-	}
-	if n == 1 || n == -1 {
-		return "working day"
-	}
-	return "working days"
-}
+// MsgDaysFormat is the error for a days field that is not a number with at
+// most two decimals.
+const MsgDaysFormat = "Enter a number of days with at most two decimals, like 2 or 1.5."
+
+func unitLabel(n leave.Days, unit string) string { return n.Noun(unit) }
 
 func shortRange(start, end string) string {
 	s, err1 := time.Parse(time.DateOnly, start)

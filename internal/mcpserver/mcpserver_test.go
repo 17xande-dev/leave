@@ -867,3 +867,23 @@ func TestDecideExpectedFingerprint(t *testing.T) {
 	r2 := id(f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02"}))
 	f.ok(head, "decide_request", map[string]any{"id": r2, "decision": "approve"})
 }
+
+// adjust_balance takes fractional days, which payroll balances need, and every
+// figure comes back as a JSON number in days (1.5), never as hundredths.
+func TestAdjustBalanceTakesFractionalDays(t *testing.T) {
+	f := newFixture(t)
+	hr := f.as("hr")
+	r := f.ok(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1.5, "reason": "Payroll"})
+	if get(r.Data, "balance", "adjustments") != 1.5 || get(r.Data, "balance", "available") != 16.5 {
+		t.Fatalf("adjust_balance 1.5 = %v", r.Data)
+	}
+	adj := r.Data["adjustments"].([]any)
+	if len(adj) != 1 || get(adj[0].(map[string]any), "days") != 1.5 || !strings.Contains(r.Text, "+1.5 days") {
+		t.Fatalf("adjustments = %v, text %q", adj, r.Text)
+	}
+	r = f.ok(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": -1.44, "reason": "Payroll"})
+	if get(r.Data, "balance", "available") != 15.06 {
+		t.Fatalf("after -1.44: %v", r.Data)
+	}
+	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1.234, "reason": "x"}, "")
+}

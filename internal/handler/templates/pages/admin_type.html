@@ -22,7 +22,7 @@
   <div class="field-row">
     <div class="field">
       <label for="allowance">Days per cycle</label>
-      <input id="allowance" name="allowance" inputmode="numeric" size="6" value="{{.Allowance}}">
+      <input id="allowance" name="allowance" inputmode="decimal" size="6" value="{{.Allowance}}">
       <span class="hint">Empty means no limit.</span>
       {{template "err" index .Errors "allowance"}}
     </div>

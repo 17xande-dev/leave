@@ -30,9 +30,9 @@ type homeData struct {
 	PendingFirst int64
 	// Annual is what is left of annual leave; nil when the type is missing,
 	// inactive or unlimited, so no number is shown rather than a wrong one.
-	Annual *int
+	Annual *leave.Days
 	// AnnualOver is how many days below zero annual leave is, 0 when it is not.
-	AnnualOver int
+	AnnualOver leave.Days
 	// Drafts are requests waiting for the person to submit them: shutdown
 	// requests created for them, and ones HR allowed to go below zero.
 	Drafts []leave.Request
@@ -163,12 +163,12 @@ func typeLabel(b leave.Balance) string {
 	// when the dates fall in another. Days are the usual count; only weekends
 	// need naming.
 	if b.Type.Unit == leave.UnitWeekend {
-		return fmt.Sprintf("%s (%d %s left)", b.Type.Name, n, unitLabel(n, b.Type.Unit))
+		return fmt.Sprintf("%s (%s %s left)", b.Type.Name, n, unitLabel(n, b.Type.Unit))
 	}
 	if b.Type.CycleMonths == 12 {
-		return fmt.Sprintf("%s (%d left this year)", b.Type.Name, n)
+		return fmt.Sprintf("%s (%s left this year)", b.Type.Name, n)
 	}
-	return fmt.Sprintf("%s (%d left this cycle)", b.Type.Name, n)
+	return fmt.Sprintf("%s (%s left this cycle)", b.Type.Name, n)
 }
 
 // pickerMarks (given the person's own requests) is the JSON data block behind the date picker's marks: public
@@ -572,7 +572,7 @@ type requestData struct {
 	// Steps is the trail of decisions on the request.
 	Steps []leave.Step
 	// Shortfall is how far below zero a request awaiting HR would go.
-	Shortfall int
+	Shortfall leave.Days
 	// Candidates is who an admin may reassign a pending request to.
 	Candidates []users.User
 	Errors     leave.FieldErrors
@@ -899,7 +899,7 @@ type queueRow struct {
 
 // queueAfter is the balance line: Below is how far under zero, else 0.
 type queueAfter struct {
-	Left, Below int
+	Left, Below leave.Days
 	CycleName   string
 	Unit        string
 	// Shared: other pending requests of theirs are counted too.

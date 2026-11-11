@@ -119,7 +119,7 @@ func TestEditKeepsApproverAndPlace(t *testing.T) {
 	if got.ApproverID != f.people["head"].ID || got.Status != StatusPending || got.CreatedAt != r.CreatedAt {
 		t.Fatalf("approver/status/created_at moved: %+v", got)
 	}
-	if got.Start != "2026-10-13" || got.End != "2026-10-16" || got.Days != 4 || got.Note != "new note" {
+	if got.Start != "2026-10-13" || got.End != "2026-10-16" || got.Days != WholeDays(4) || got.Note != "new note" {
 		t.Fatalf("not saved: %+v", got)
 	}
 	if len(f.events) != 1 || f.events[0].Kind != EventEdited || f.events[0].Before.Start != "2026-10-12" ||
@@ -143,7 +143,7 @@ func TestEditOverlapAndBalanceDoNotCountItself(t *testing.T) {
 	}
 	// Exactly its own old dates, unchanged but for the note.
 	got := f.mustEdit("staff", r.ID, "annual", "2026-10-12", "2026-10-30", "other note")
-	if got.Days != 15 || got.Note != "other note" {
+	if got.Days != WholeDays(15) || got.Note != "other note" {
 		t.Fatalf("note-only edit = %+v", got)
 	}
 	// One more day than there is is still refused, with the HR pointer.
@@ -290,7 +290,7 @@ func TestPreviewEditExcludesOnlyYourOwnEditableRequest(t *testing.T) {
 		t.Fatalf("plain preview should see the overlap: %v", err)
 	}
 	qt, editing, err := f.svc.PreviewEdit(f.ctx, f.people["staff"], mine.ID, in)
-	if err != nil || !editing || qt.Days != 3 {
+	if err != nil || !editing || qt.Days != WholeDays(3) {
 		t.Fatalf("own id: %+v %v %v", qt, editing, err)
 	}
 	// Someone else's id, a made-up one, and a non-editable one exclude nothing:

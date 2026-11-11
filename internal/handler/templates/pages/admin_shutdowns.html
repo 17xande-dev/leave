@@ -14,7 +14,7 @@
     <tr>
       <td><a href="/admin/shutdowns/{{.ID}}">{{.Name}}</a></td>
       <td>{{date .Start}} – {{date .End}}</td>
-      <td>{{range $i, $p := .Parts}}{{if $i}}<br>{{end}}{{$p.TypeName}}: {{$p.Days}} {{plural $p.Days "day" "days"}}{{end}}</td>
+      <td>{{range $i, $p := .Parts}}{{if $i}}<br>{{end}}{{$p.TypeName}}: {{$p.Days}} {{dplural $p.Days "day" "days"}}{{end}}</td>
       <td>{{if .AutoApprove}}Automatic{{else}}Normal chain{{end}}</td>
     </tr>
   {{end}}

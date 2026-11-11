@@ -14,13 +14,13 @@ const AnnualCode = "annual"
 // current cycle, read in a single query so a list of people costs one query
 // and not one per person.
 type Availability struct {
-	allowance *int
-	used      map[int64]int // adjustments less taken and pending, for people who have any
+	allowance *Days
+	used      map[int64]Days // adjustments less taken and pending, for people who have any
 	ok        bool
 }
 
 // For is what the person has left; nil when the type does not exist or is unlimited.
-func (a Availability) For(userID int64) *int {
+func (a Availability) For(userID int64) *Days {
 	if !a.ok || a.allowance == nil {
 		return nil
 	}
@@ -45,19 +45,19 @@ func (s *Service) AvailabilityByCode(ctx context.Context, code string) (Availabi
 	}
 	cycle := fmtDate(CycleStart(s.today(), t.CycleMonths, st.SickCycleAnchor))
 	rows, err := s.db.QueryContext(ctx, `SELECT user_id, sum(delta) FROM (
-		SELECT user_id, days AS delta FROM balance_adjustments WHERE type_id = ?1 AND cycle_start = ?2
+		SELECT user_id, days_x100 AS delta FROM balance_adjustments WHERE type_id = ?1 AND cycle_start = ?2
 		UNION ALL
-		SELECT user_id, -days FROM requests WHERE type_id = ?1 AND cycle_start = ?2
+		SELECT user_id, -days_x100 FROM requests WHERE type_id = ?1 AND cycle_start = ?2
 			AND kind = 'leave' AND status IN ('approved', 'pending'))
 		GROUP BY user_id`, t.ID, cycle)
 	if err != nil {
 		return Availability{}, err
 	}
 	defer rows.Close()
-	a := Availability{allowance: t.Allowance, used: map[int64]int{}, ok: true}
+	a := Availability{allowance: t.Allowance, used: map[int64]Days{}, ok: true}
 	for rows.Next() {
 		var id int64
-		var n int
+		var n Days
 		if err := rows.Scan(&id, &n); err != nil {
 			return Availability{}, err
 		}

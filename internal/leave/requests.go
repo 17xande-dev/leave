@@ -33,7 +33,7 @@ type Request struct {
 	Kind            string
 	CancelsID       int64 // 0 for a leave request
 	Start, End      string
-	Days            int
+	Days            Days
 	CycleStart      string
 	Note            string
 	Status          string
@@ -84,7 +84,7 @@ func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 func (r Request) IsShutdown() bool { return r.ShutdownPartID != 0 }
 
 const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.cancels_request_id, 0),
-	r.start_date, r.end_date, r.days, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
+	r.start_date, r.end_date, r.days_x100, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
 	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
 	COALESCE(r.shutdown_part_id, 0), r.escalate, r.allow_negative,
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
@@ -258,7 +258,7 @@ type Input struct {
 type Quote struct {
 	Type       Type
 	Start, End time.Time
-	Days       int
+	Days       Days
 	CycleStart time.Time
 	// CycleName names the cycle After is measured in ("2027"), empty when it
 	// is the cycle containing today, so the form can say "this cycle" only
@@ -266,10 +266,10 @@ type Quote struct {
 	CycleName string
 	Balance   Balance
 	// After is the balance left if this request is approved; nil when unlimited.
-	After *int
+	After *Days
 	// Shortfall is how many days below zero the request would take the
 	// balance, whether or not that is allowed; 0 when it fits.
-	Shortfall int
+	Shortfall Days
 	// Coverage has one entry for each limit (its department's, its teams')
 	// the request is over, whether or not that is allowed; empty when none.
 	Coverage []Coverage
@@ -419,15 +419,16 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 			errs["start"] = msg
 			return qt, errs
 		}
-		qt.Days = 1
+		qt.Days = WholeDays(1)
 	} else {
-		qt.Days = CountDays(start, end, t.Unit, holidays, st.Week)
+		counted := CountDays(start, end, t.Unit, holidays, st.Week)
+		qt.Days = WholeDays(counted)
 		qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
 		if qt.Days == 0 {
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs
 		}
-		if msg := restrictedDayRule(st, t, start, end, qt.Days, holidays); msg != "" && !opt.mandatory && !opt.record {
+		if msg := restrictedDayRule(st, t, start, end, counted, holidays); msg != "" && !opt.mandatory && !opt.record {
 			errs["start"] = msg
 			return qt, errs
 		}
@@ -472,7 +473,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 			qt.Shortfall = -after
 		}
 		if after < 0 && !opt.mandatory && !opt.record && !opt.allowNegative {
-			errs["end"] = fmt.Sprintf("This is %d %s, but you have %d left for this cycle.",
+			errs["end"] = fmt.Sprintf("This is %s %s, but you have %s left for this cycle.",
 				qt.Days, plural(qt.Days, "day", "days"), *avail)
 		}
 	}
@@ -539,8 +540,8 @@ func restrictedDayRule(st Settings, t Type, start, end time.Time, days int, holi
 	return ""
 }
 
-func plural(n int, one, many string) string {
-	if n == 1 {
+func plural(n Days, one, many string) string {
+	if n.IsOne() {
 		return one
 	}
 	return many
@@ -581,7 +582,7 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 			return FieldErrors{"coverage": Sentences(qt.Coverage) + " You can ask for special permission."}
 		}
 		escalate := in.Override && len(qt.Coverage) > 0
-		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days,
+		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100,
 			cycle_start, note, status, approver_id, escalate, created_at)
 			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
@@ -605,7 +606,7 @@ func (s *Service) saveAwaitingHR(ctx context.Context, tx *sql.Tx, u users.User, 
 	if strings.TrimSpace(in.Note) == "" {
 		return FieldErrors{"note": "Say why you need to go below zero, so HR can decide."}
 	}
-	res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days,
+	res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100,
 		cycle_start, note, status, created_at) VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'awaiting_hr', ?)`,
 		u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
 		strings.TrimSpace(in.Note), stampNow(s.Now()))

@@ -18,7 +18,7 @@ func newSundayWeek(t *testing.T) *fixture {
 	})
 	for _, code := range []string{"floating", "weekend"} {
 		ty := f.types[code]
-		ty.Active, ty.Allowance = true, intp(4)
+		ty.Active, ty.Allowance = true, wholeDays(4)
 		if _, err := f.svc.SaveType(f.ctx, ty); err != nil {
 			t.Fatal(err)
 		}
@@ -51,8 +51,8 @@ func TestWorkWeekCounting(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || q.Days != c.days {
-			t.Errorf("%s: days = %d, err = %v; want %d", c.name, q.Days, err, c.days)
+		if err != nil || q.Days != WholeDays(c.days) {
+			t.Errorf("%s: days = %s, err = %v; want %d", c.name, q.Days, err, c.days)
 		}
 	}
 }
@@ -60,8 +60,8 @@ func TestWorkWeekCounting(t *testing.T) {
 func TestWeekendsOff(t *testing.T) {
 	f := newSundayWeek(t)
 	r := f.mustSubmit("staff", "weekend", "2026-10-10", "2026-10-11")
-	if r.Days != 1 {
-		t.Fatalf("a weekend off costs %d, want 1", r.Days)
+	if r.Days != WholeDays(1) {
+		t.Fatalf("a weekend off costs %s, want 1", r.Days)
 	}
 	if got := f.available("staff", "weekend"); got != 3 {
 		t.Fatalf("weekends left = %d, want 3", got)
@@ -75,7 +75,7 @@ func TestWeekendsOff(t *testing.T) {
 	f.us.SetLongWeekend(f.ctx, f.people["staff"].ID, true)
 	staff, _ := f.us.ByID(f.ctx, f.people["staff"].ID)
 	r, err := f.svc.Submit(f.ctx, staff, Input{TypeID: f.types["weekend"].ID, Start: "2026-10-16", End: "2026-10-18"})
-	if err != nil || r.Days != 1 {
+	if err != nil || r.Days != WholeDays(1) {
 		t.Fatalf("long weekend: %+v, %v", r, err)
 	}
 }

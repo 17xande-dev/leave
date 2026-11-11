@@ -231,8 +231,8 @@ func TestTeamGridOverlapAndAdjacent(t *testing.T) {
 	// cannot book overlapping leave through the pages, so seed the second
 	// range directly.
 	hs.apply(head, "annual", "2026-10-12", "2026-10-16")
-	if _, err := hs.db.ExecContext(context.Background(), `INSERT INTO requests(user_id, type_id, kind, start_date, end_date, days, cycle_start, status, approver_id, created_at)
-		SELECT user_id, type_id, kind, '2026-10-14', '2026-10-14', 1, cycle_start, 'approved', approver_id, created_at FROM requests WHERE start_date = '2026-10-12'`); err != nil {
+	if _, err := hs.db.ExecContext(context.Background(), `INSERT INTO requests(user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, status, approver_id, created_at)
+		SELECT user_id, type_id, kind, '2026-10-14', '2026-10-14', 100, cycle_start, 'approved', approver_id, created_at FROM requests WHERE start_date = '2026-10-12'`); err != nil {
 		t.Fatal(err)
 	}
 	_, body := hs.get(hs.signIn("staff1"), "/team")

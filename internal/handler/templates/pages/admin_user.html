@@ -74,7 +74,7 @@
     </div>
     <div class="field narrow">
       <label for="days">Days</label>
-      <input id="days" name="days" inputmode="numeric" size="5" value="{{with .Adj.Days}}{{.}}{{end}}">
+      <input id="days" name="days" inputmode="decimal" size="5" value="{{.AdjDays}}">
       {{template "err" index .Errors "days"}}
     </div>
   </div>

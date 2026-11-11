@@ -30,8 +30,8 @@ func TestNegativeBalanceFlow(t *testing.T) {
 		t.Fatalf("overdrawn request: %v", err)
 	}
 	qt, _ := f.svc.Preview(f.ctx, f.people["staff"], Input{TypeID: f.types["annual"].ID, Start: "2026-11-02", End: "2026-11-04"})
-	if qt.Shortfall != 3 {
-		t.Fatalf("shortfall = %d", qt.Shortfall)
+	if qt.Shortfall != WholeDays(3) {
+		t.Fatalf("shortfall = %s", qt.Shortfall)
 	}
 
 	// Asking HR needs a reason.
@@ -46,7 +46,7 @@ func TestNegativeBalanceFlow(t *testing.T) {
 	if r.Status != StatusAwaitingHR || r.ApproverID != 0 || r.AllowNegative {
 		t.Fatalf("awaiting request = %+v", r)
 	}
-	if len(f.events) != 1 || f.events[0].Kind != EventNegativeRequested || f.events[0].Shortfall != 3 {
+	if len(f.events) != 1 || f.events[0].Kind != EventNegativeRequested || f.events[0].Shortfall != WholeDays(3) {
 		t.Fatalf("events = %+v", f.events)
 	}
 	// It reserves nothing, but it does occupy the dates.
@@ -56,7 +56,7 @@ func TestNegativeBalanceFlow(t *testing.T) {
 	if _, err := f.submit("staff", "annual", "2026-11-03", "2026-11-03"); !fieldErr(err, "start") {
 		t.Fatalf("overlap with a request awaiting HR: %v", err)
 	}
-	if short, err := f.svc.Shortfall(f.ctx, r); err != nil || short != 3 {
+	if short, err := f.svc.Shortfall(f.ctx, r); err != nil || short != WholeDays(3) {
 		t.Fatalf("shortfall of the awaiting request = %d, %v", short, err)
 	}
 	if hr, _ := f.svc.AwaitingHR(f.ctx); len(hr) != 1 || hr[0].ID != r.ID {

@@ -40,7 +40,7 @@ func TestShutdownCreatesDraftsForEveryone(t *testing.T) {
 
 	for name := range f.people {
 		ds := f.drafts(name)
-		if len(ds) != 2 || ds[0].Days != 5 || ds[1].Days != 8 || ds[1].TypeName != "Company closure" {
+		if len(ds) != 2 || ds[0].Days != WholeDays(5) || ds[1].Days != WholeDays(8) || ds[1].TypeName != "Company closure" {
 			t.Fatalf("%s's drafts = %+v", name, ds)
 		}
 	}
@@ -119,7 +119,7 @@ func TestSubmitDraftFollowsTheChain(t *testing.T) {
 func TestShutdownMayTakeBalanceNegative(t *testing.T) {
 	f := newFixture(t)
 	f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
-		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: -12, Reason: "taken earlier"})
+		TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: WholeDays(-12), Reason: "taken earlier"})
 	f.december(false)
 	if _, err := f.svc.SubmitDraft(f.ctx, f.people["staff"], f.drafts("staff")[0].ID, ""); err != nil {
 		t.Fatalf("submit with 3 days left: %v", err)

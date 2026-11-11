@@ -124,7 +124,7 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 			return nil
 		}
 		// allow_negative goes too: HR's permission was for the request as it was.
-		res, err := tx.ExecContext(ctx, `UPDATE requests SET type_id = ?, start_date = ?, end_date = ?, days = ?,
+		res, err := tx.ExecContext(ctx, `UPDATE requests SET type_id = ?, start_date = ?, end_date = ?, days_x100 = ?,
 			cycle_start = ?, note = ?, escalate = ?, allow_negative = 0
 			WHERE id = ? AND user_id = ? AND status = 'pending' AND kind = 'leave'
 			AND shutdown_part_id IS NULL AND recorded_by_id IS NULL

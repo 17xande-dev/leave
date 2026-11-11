@@ -27,7 +27,7 @@ func TestRecordLeaveIsApprovedAndCounted(t *testing.T) {
 	f := newFixture(t)
 	f.events = nil
 	r := f.mustRecord("staff", "annual", "2026-06-15", "2026-06-19")
-	if r.Status != StatusApproved || r.Kind != KindLeave || r.Days != 4 {
+	if r.Status != StatusApproved || r.Kind != KindLeave || r.Days != WholeDays(4) {
 		t.Fatalf("recorded = %+v, want approved leave of 4 days (holiday not counted)", r)
 	}
 	hr := f.people["hr"]
@@ -204,7 +204,7 @@ func TestRecordLeaveIgnoresRetiredTypeAndRestrictedDay(t *testing.T) {
 	}
 	// ...but may be recorded.
 	r, err := f.record("hr", "staff", "annual", "2026-09-27", "2026-09-27", "x")
-	if err != nil || r.Days != 1 {
+	if err != nil || r.Days != WholeDays(1) {
 		t.Fatalf("restricted day: %+v, %v", r, err)
 	}
 	// Retire a type: requests refuse it, recording does not.
@@ -229,18 +229,18 @@ func TestRecordLeaveInPreviousCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.CycleStart != "2025-01-01" || r.Days != 20 || !r.AllowNegative {
+	if r.CycleStart != "2025-01-01" || r.Days != WholeDays(20) || !r.AllowNegative {
 		t.Fatalf("recorded = %+v", r)
 	}
 	cycle, _ := ParseDate("2025-01-01")
 	b, err := f.svc.balance(f.ctx, f.db, f.people["staff"].ID, f.types["annual"], cycle, 0)
-	if err != nil || *b.Available() != -5 {
+	if err != nil || *b.Available() != WholeDays(-5) {
 		t.Fatalf("2025 balance = %+v, %v", b, err)
 	}
 	if got := f.available("staff", "annual"); got != 15 {
 		t.Fatalf("this year's balance = %d, want 15", got)
 	}
-	if len(f.events) != 1 || f.events[0].Shortfall != 5 {
+	if len(f.events) != 1 || f.events[0].Shortfall != WholeDays(5) {
 		t.Fatalf("events = %+v, want a shortfall of 5", f.events)
 	}
 }
@@ -248,7 +248,7 @@ func TestRecordLeaveInPreviousCycle(t *testing.T) {
 func TestRecordWeekendOff(t *testing.T) {
 	f := newSundayWeek(t)
 	r, err := f.record("hr", "staff", "weekend", "2026-09-12", "2026-09-13", "x")
-	if err != nil || r.Days != 1 || r.Status != StatusApproved {
+	if err != nil || r.Days != WholeDays(1) || r.Status != StatusApproved {
 		t.Fatalf("weekend off: %+v, %v", r, err)
 	}
 	if _, err := f.record("hr", "staff", "weekend", "2026-09-12", "2026-09-14", "x"); !fieldErr(err, "start") {
@@ -264,7 +264,7 @@ func TestRecordWeekendOff(t *testing.T) {
 func TestAdjustmentIsAnotherAdminsJob(t *testing.T) {
 	f := newFixture(t)
 	adj := func(who string) Adjustment {
-		return Adjustment{UserID: f.people[who].ID, TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: 1, Reason: "x"}
+		return Adjustment{UserID: f.people[who].ID, TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: WholeDays(1), Reason: "x"}
 	}
 	if err := f.svc.AddAdjustment(f.ctx, f.people["hr"], adj("hr")); !fieldErr(err, "person") ||
 		err.(FieldErrors)["person"] != MsgAdjustOwn {

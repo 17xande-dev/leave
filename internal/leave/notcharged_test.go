@@ -29,35 +29,35 @@ func TestQuoteNotCharged(t *testing.T) {
 
 	// Wednesday 16 December is the Day of Reconciliation.
 	q := f.previewQuote("annual", "2026-12-14", "2026-12-18")
-	if got := lines(q); got != "Wed 16 Dec: Day of Reconciliation" || q.Days != 4 || q.NotChargedMore != 0 {
-		t.Errorf("holiday: %q days %d more %d", got, q.Days, q.NotChargedMore)
+	if got := lines(q); got != "Wed 16 Dec: Day of Reconciliation" || q.Days != WholeDays(4) || q.NotChargedMore != 0 {
+		t.Errorf("holiday: %q days %s more %d", got, q.Days, q.NotChargedMore)
 	}
 
 	// Two weekends are one line, not four.
 	q = f.previewQuote("annual", "2026-10-09", "2026-10-19")
-	if got := lines(q); got != "Saturday and Sunday are not working days" || q.Days != 7 {
-		t.Errorf("weekends: %q days %d", got, q.Days)
+	if got := lines(q); got != "Saturday and Sunday are not working days" || q.Days != WholeDays(7) {
+		t.Errorf("weekends: %q days %s", got, q.Days)
 	}
 
 	// Nothing to explain.
 	q = f.previewQuote("annual", "2026-10-12", "2026-10-16")
-	if len(q.NotCharged) != 0 || q.NotChargedMore != 0 || q.Days != 5 {
-		t.Errorf("clean week: %q days %d", lines(q), q.Days)
+	if len(q.NotCharged) != 0 || q.NotChargedMore != 0 || q.Days != WholeDays(5) {
+		t.Errorf("clean week: %q days %s", lines(q), q.Days)
 	}
 
 	// Calendar-day types charge everything, so nothing is uncharged.
-	if q = f.previewQuote("parental", "2026-12-14", "2026-12-20"); len(q.NotCharged) != 0 || q.Days != 7 {
-		t.Errorf("calendar type: %q days %d", lines(q), q.Days)
+	if q = f.previewQuote("parental", "2026-12-14", "2026-12-20"); len(q.NotCharged) != 0 || q.Days != WholeDays(7) {
+		t.Errorf("calendar type: %q days %s", lines(q), q.Days)
 	}
 
 	// A weekend-unit type is counted per weekend; the list is irrelevant.
 	ty := f.types["weekend"]
-	ty.Active, ty.Allowance = true, intp(4)
+	ty.Active, ty.Allowance = true, wholeDays(4)
 	if _, err := f.svc.SaveType(f.ctx, ty); err != nil {
 		t.Fatal(err)
 	}
-	if q = f.previewQuote("weekend", "2026-10-10", "2026-10-11"); len(q.NotCharged) != 0 || q.Days != 1 {
-		t.Errorf("weekend type: %q days %d", lines(q), q.Days)
+	if q = f.previewQuote("weekend", "2026-10-10", "2026-10-11"); len(q.NotCharged) != 0 || q.Days != WholeDays(1) {
+		t.Errorf("weekend type: %q days %s", lines(q), q.Days)
 	}
 }
 

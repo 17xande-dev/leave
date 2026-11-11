@@ -13,14 +13,14 @@ type Balance struct {
 	Type        Type
 	CycleStart  string
 	CycleEnd    string
-	Allowance   *int // nil: unlimited
-	Adjustments int
-	Taken       int // approved
-	Pending     int // awaiting a decision, and reserved so they cannot be spent twice
+	Allowance   *Days // nil: unlimited
+	Adjustments Days
+	Taken       Days // approved
+	Pending     Days // awaiting a decision, and reserved so they cannot be spent twice
 }
 
 // Available is what is left to request; nil when the type is unlimited.
-func (b Balance) Available() *int {
+func (b Balance) Available() *Days {
 	if b.Allowance == nil {
 		return nil
 	}
@@ -35,10 +35,10 @@ func (s *Service) balance(ctx context.Context, q querier, userID int64, t Type, 
 	b := Balance{Type: t, Allowance: t.Allowance, CycleStart: fmtDate(cycle),
 		CycleEnd: fmtDate(CycleEnd(cycle, t.CycleMonths))}
 	err := q.QueryRowContext(ctx, `SELECT
-		COALESCE((SELECT sum(days) FROM balance_adjustments WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3), 0),
-		COALESCE((SELECT sum(days) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
+		COALESCE((SELECT sum(days_x100) FROM balance_adjustments WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3), 0),
+		COALESCE((SELECT sum(days_x100) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
 			AND kind = 'leave' AND status = 'approved' AND id <> ?4), 0),
-		COALESCE((SELECT sum(days) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
+		COALESCE((SELECT sum(days_x100) FROM requests WHERE user_id = ?1 AND type_id = ?2 AND cycle_start = ?3
 			AND kind = 'leave' AND status = 'pending' AND id <> ?4), 0)`,
 		userID, t.ID, b.CycleStart, excludeID).Scan(&b.Adjustments, &b.Taken, &b.Pending)
 	return b, err
@@ -55,7 +55,7 @@ func (s *Service) BalanceIn(ctx context.Context, userID int64, t Type, cycle tim
 type After struct {
 	// Left is the days (or weekends) left, negative when below zero; nil for
 	// an unlimited type, where there is nothing to say.
-	Left *int
+	Left *Days
 	// CycleName names the cycle as Quote.CycleName does, empty for the cycle
 	// containing today.
 	CycleName string
@@ -130,7 +130,7 @@ type Adjustment struct {
 	TypeID     int64
 	TypeName   string
 	CycleStart string
-	Days       int
+	Days       Days
 	Reason     string
 	ByName     string
 	CreatedAt  string
@@ -170,13 +170,13 @@ func (s *Service) AddAdjustment(ctx context.Context, admin users.User, a Adjustm
 		return errs
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO balance_adjustments
-		(user_id, type_id, cycle_start, days, reason, by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		(user_id, type_id, cycle_start, days_x100, reason, by_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		a.UserID, a.TypeID, a.CycleStart, a.Days, strings.TrimSpace(a.Reason), admin.ID, stampNow(s.Now()))
 	return err
 }
 
 func (s *Service) Adjustments(ctx context.Context, userID int64) ([]Adjustment, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.user_id, a.type_id, t.name, a.cycle_start, a.days,
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.user_id, a.type_id, t.name, a.cycle_start, a.days_x100,
 		a.reason, u.name, a.created_at FROM balance_adjustments a
 		JOIN leave_types t ON t.id = a.type_id JOIN users u ON u.id = a.by_user_id
 		WHERE a.user_id = ? ORDER BY a.created_at DESC`, userID)

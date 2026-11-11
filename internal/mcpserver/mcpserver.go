@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -167,6 +169,15 @@ func (d *deps) currentUser(ctx context.Context, req *mcp.CallToolRequest) (users
 // structured content to the model, and the text is what all of them show.
 func add[In, Out any](d *deps, s *mcp.Server, t *mcp.Tool,
 	f func(ctx context.Context, u users.User, in In) (Out, string, error)) {
+	// The SDK would infer "integer" for leave.Days (an int64 underneath) and
+	// refuse a fractional figure like 1.5, so derive the schemas here with
+	// Days declared a number. Days marshals and parses as an exact decimal.
+	if t.InputSchema == nil {
+		t.InputSchema = mustSchema[In]()
+	}
+	if t.OutputSchema == nil {
+		t.OutputSchema = mustSchema[Out]()
+	}
 	mcp.AddTool(s, t, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
 		u, err := d.currentUser(ctx, req)
@@ -183,6 +194,17 @@ func add[In, Out any](d *deps, s *mcp.Server, t *mcp.Tool,
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: summary + "\n\n" + string(j)}}}, out, nil
 	})
+}
+
+// mustSchema is jsonschema.For with leave.Days as a JSON number.
+func mustSchema[T any]() *jsonschema.Schema {
+	sc, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[leave.Days](): {Type: "number"},
+	}})
+	if err != nil {
+		panic(fmt.Sprintf("mcpserver: schema for %T: %v", *new(T), err))
+	}
+	return sc
 }
 
 func requireAdmin(u users.User) error {

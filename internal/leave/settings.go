@@ -44,8 +44,8 @@ type Day struct {
 	Weekday time.Weekday
 }
 
-// Days lists the week Monday first, the order people read it in.
-var Days = []Day{
+// Weekdays lists the week Monday first, the order people read it in.
+var Weekdays = []Day{
 	{"mon", "Monday", time.Monday}, {"tue", "Tuesday", time.Tuesday}, {"wed", "Wednesday", time.Wednesday},
 	{"thu", "Thursday", time.Thursday}, {"fri", "Friday", time.Friday}, {"sat", "Saturday", time.Saturday},
 	{"sun", "Sunday", time.Sunday},
@@ -55,7 +55,7 @@ var Days = []Day{
 // are accepted: a form value that is anything else is a bad request, not a
 // day to guess at.
 func ParseDay(code string) (time.Weekday, bool) {
-	for _, d := range Days {
+	for _, d := range Weekdays {
 		if d.Code == code {
 			return d.Weekday, true
 		}
@@ -65,7 +65,7 @@ func ParseDay(code string) (time.Weekday, bool) {
 
 // dayCode is the stored code for a weekday.
 func dayCode(w time.Weekday) string {
-	for _, d := range Days {
+	for _, d := range Weekdays {
 		if d.Weekday == w {
 			return d.Code
 		}
@@ -78,7 +78,7 @@ func (w Week) Has(d time.Weekday) bool { return w[d] }
 
 func (w Week) codes() string {
 	var out []string
-	for _, d := range Days {
+	for _, d := range Weekdays {
 		if w[d.Weekday] {
 			out = append(out, d.Code)
 		}

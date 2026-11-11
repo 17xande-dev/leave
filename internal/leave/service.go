@@ -89,7 +89,7 @@ type Event struct {
 	Coverage []Coverage
 	Steps    []Step
 	// Shortfall is how many days below zero a negative-balance request asks for.
-	Shortfall int
+	Shortfall Days
 	// Note is what the actor said, where it is not on the request (a grant).
 	Note string
 }

@@ -73,8 +73,9 @@ CREATE TABLE IF NOT EXISTS leave_types (
 	id              INTEGER PRIMARY KEY,
 	code            TEXT NOT NULL UNIQUE,
 	name            TEXT NOT NULL,
-	-- NULL means unlimited (unpaid leave): there is no balance to exhaust.
-	allowance_days  INTEGER CHECK (allowance_days IS NULL OR allowance_days >= 0),
+	-- Hundredths of a day (1500 is 15 days; 100 is one weekend for the weekend
+	-- unit). NULL means unlimited (unpaid leave): there is no balance to exhaust.
+	allowance_x100  INTEGER CHECK (allowance_x100 IS NULL OR allowance_x100 >= 0),
 	cycle_months    INTEGER NOT NULL CHECK (cycle_months IN (12, 36)),
 	-- workdays counts the organisation's working days (Admin -> Settings) that are
 	-- not public holidays; calendar counts every day (maternity leave is four
@@ -159,8 +160,9 @@ CREATE TABLE IF NOT EXISTS balance_adjustments (
 	user_id      INTEGER NOT NULL REFERENCES users(id),
 	type_id      INTEGER NOT NULL REFERENCES leave_types(id),
 	cycle_start  TEXT NOT NULL,
-	-- Signed: carry-over and corrections add, a pro-rata start subtracts.
-	days         INTEGER NOT NULL CHECK (days <> 0),
+	-- Signed hundredths of a day: carry-over and corrections add, a pro-rata
+	-- start subtracts. 250 is two and a half days.
+	days_x100    INTEGER NOT NULL CHECK (days_x100 <> 0),
 	reason       TEXT NOT NULL,
 	by_user_id   INTEGER NOT NULL REFERENCES users(id),
 	created_at   TEXT NOT NULL
@@ -207,7 +209,8 @@ CREATE TABLE IF NOT EXISTS requests (
 	cancels_request_id  INTEGER REFERENCES requests(id),
 	start_date          TEXT NOT NULL,
 	end_date            TEXT NOT NULL,
-	days                INTEGER NOT NULL CHECK (days > 0),
+	-- Hundredths of a day (a whole-day request is a multiple of 100).
+	days_x100           INTEGER NOT NULL CHECK (days_x100 > 0),
 	-- The cycle the days count against: the cycle containing start_date.
 	cycle_start         TEXT NOT NULL,
 	note                TEXT NOT NULL DEFAULT '',
@@ -384,10 +387,11 @@ func Open(path string) (*sql.DB, error) {
 // While the app is greenfield the fix is a fresh database, not an ALTER.
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
-		"users":       {"ext_id", "long_weekend"},
-		"requests":    {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id"},
-		"leave_types": {"restricted_rule", "coverage_rule", "backdate_days"},
-		"settings":    {"team_default_percent"},
+		"users":               {"ext_id", "long_weekend"},
+		"requests":            {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id", "days_x100"},
+		"leave_types":         {"restricted_rule", "coverage_rule", "backdate_days", "allowance_x100"},
+		"settings":            {"team_default_percent"},
+		"balance_adjustments": {"days_x100"},
 	}
 	for table, cols := range want {
 		have := map[string]bool{}
@@ -418,6 +422,8 @@ func checkCurrent(d *sql.DB) error {
 	// still carry them.
 	for _, g := range []struct{ table, col string }{
 		{"leave_types", "backdate"}, {"settings", "sick_backdate_days"},
+		// Whole days, before every figure became hundredths of a day.
+		{"requests", "days"}, {"balance_adjustments", "days"}, {"leave_types", "allowance_days"},
 	} {
 		var n int
 		if err := d.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, g.table, g.col).Scan(&n); err != nil {

@@ -433,19 +433,19 @@ func TestHomeUpNextAndSplit(t *testing.T) {
 
 func TestNewHomeDataAnnual(t *testing.T) {
 	today := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
-	five := 5
-	annual := func(a *int) leave.Balance {
+	five := leave.WholeDays(5)
+	annual := func(a *leave.Days) leave.Balance {
 		return leave.Balance{Type: leave.Type{Code: leave.AnnualCode}, Allowance: a}
 	}
-	if d := newHomeData([]leave.Balance{annual(&five)}, nil, today); d.Annual == nil || *d.Annual != 5 {
+	if d := newHomeData([]leave.Balance{annual(&five)}, nil, today); d.Annual == nil || *d.Annual != leave.WholeDays(5) {
 		t.Errorf("annual = %v, want 5", d.Annual)
 	}
 	if d := newHomeData([]leave.Balance{annual(nil)}, nil, today); d.Annual != nil {
-		t.Errorf("unlimited annual shows %d", *d.Annual)
+		t.Errorf("unlimited annual shows %s", *d.Annual)
 	}
 	other := leave.Balance{Type: leave.Type{Code: "sick"}, Allowance: &five}
 	if d := newHomeData([]leave.Balance{other}, nil, today); d.Annual != nil {
-		t.Errorf("a missing annual type shows %d", *d.Annual)
+		t.Errorf("a missing annual type shows %s", *d.Annual)
 	}
 	rs := []leave.Request{
 		{ID: 4, Status: leave.StatusDraft, Start: "2026-11-01", End: "2026-11-01"},
@@ -516,7 +516,7 @@ func TestHomeAnnualNegativeAndInactive(t *testing.T) {
 	hr, _ := hs.us.ByUsername(context.Background(), "hr")
 	id := hs.staffID("staff1")
 	tid, _ := strconv.ParseInt(hs.typeID("annual"), 10, 64)
-	err := hs.svc.AddAdjustment(context.Background(), hr, leave.Adjustment{UserID: id, TypeID: tid, CycleStart: "2026-01-01", Days: -17, Reason: "test"})
+	err := hs.svc.AddAdjustment(context.Background(), hr, leave.Adjustment{UserID: id, TypeID: tid, CycleStart: "2026-01-01", Days: leave.WholeDays(-17), Reason: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,14 +574,14 @@ func TestApplyTypeLabelsShowWhatIsLeft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: annual.ID, CycleStart: "2026-01-01", Days: -17, Reason: "test"}); err != nil {
+	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: annual.ID, CycleStart: "2026-01-01", Days: leave.WholeDays(-17), Reason: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	weekend, err := hs.svc.Type(ctx, mustAtoi(t, hs.anyTypeID("weekend")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	two := 2
+	two := leave.WholeDays(2)
 	weekend.Active, weekend.Allowance = true, &two
 	if _, err := hs.svc.SaveType(ctx, weekend); err != nil {
 		t.Fatal(err)
@@ -604,7 +604,7 @@ func TestQuoteNamesAnotherCycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	tid := mustAtoi(t, hs.typeID("annual"))
-	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: tid, CycleStart: "2026-01-01", Days: -12, Reason: "test"}); err != nil {
+	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: hs.staffID("staff1"), TypeID: tid, CycleStart: "2026-01-01", Days: leave.WholeDays(-12), Reason: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	_, body := hs.get(c, "/leave/new")

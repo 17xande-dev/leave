@@ -157,7 +157,7 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at", "recorded_by"})
 	for _, q := range rs {
 		cw.Write([]string{strconv.FormatInt(q.ID, 10), csvText(q.UserName), csvText(q.Department),
-			csvText(q.TypeName), q.Kind, q.Start, q.End, strconv.Itoa(q.Days), q.Status,
+			csvText(q.TypeName), q.Kind, q.Start, q.End, q.Days.String(), q.Status,
 			csvText(q.ApproverName), csvText(q.DecidedBy), q.DecidedAt, csvText(q.Note),
 			csvText(q.DecisionNote), q.CreatedAt, csvText(q.RecordedBy)})
 	}
@@ -223,7 +223,7 @@ type userRow struct {
 	Approver string
 	Override bool
 	// Annual is the annual leave still available; nil when unlimited or there is no such type.
-	Annual *int
+	Annual *leave.Days
 }
 
 func (h *Handler) approverName(r *http.Request, u users.User) (string, error) {
@@ -304,6 +304,8 @@ type adminUserData struct {
 	Requests    []leave.Request
 	Errors      leave.FieldErrors
 	Adj         leave.Adjustment
+	// AdjDays is the days field as typed, so a figure that did not parse comes back as typed.
+	AdjDays string
 	// Types and Rec are the "Record leave" form: every type (a retired one may
 	// still be what the leave was), and what
 	// was typed when it was refused.
@@ -443,18 +445,24 @@ func (h *Handler) AdminAddAdjustment(w http.ResponseWriter, r *http.Request) {
 	// adjustment always lands on a specific type's specific cycle.
 	typePart, cycle, _ := strings.Cut(r.PostFormValue("target"), ":")
 	typeID, _ := strconv.ParseInt(typePart, 10, 64)
-	days, _ := strconv.Atoi(strings.TrimSpace(r.PostFormValue("days")))
+	rawDays := strings.TrimSpace(r.PostFormValue("days"))
+	days, perr := leave.ParseDays(rawDays)
 	a := leave.Adjustment{UserID: id, TypeID: typeID, CycleStart: cycle,
 		Days: days, Reason: r.PostFormValue("reason")}
 	err := h.leave.AddAdjustment(r.Context(), currentUser(r), a)
 	var fe leave.FieldErrors
 	if errors.As(err, &fe) {
+		// A figure that did not parse is zero, so AddAdjustment has already
+		// reported every other problem; say what is wrong with this one.
+		if perr != nil && rawDays != "" {
+			fe["days"] = MsgDaysFormat + " Use a minus sign to subtract."
+		}
 		d, derr := h.adminUserData(r, id)
 		if derr != nil {
 			h.serverError(w, r, derr)
 			return
 		}
-		d.Errors, d.Adj = fe, a
+		d.Errors, d.Adj, d.AdjDays = fe, a, rawDays
 		h.render(w, r, http.StatusUnprocessableEntity, "admin_user.html", view{Title: d.User.Name, Data: d})
 		return
 	}
@@ -575,7 +583,7 @@ func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
 		d.Type = t
 	}
 	if d.Type.Allowance != nil {
-		d.Allowance = strconv.Itoa(*d.Type.Allowance)
+		d.Allowance = d.Type.Allowance.String()
 	}
 	d.Backdate = strconv.Itoa(d.Type.BackdateDays)
 	h.render(w, r, http.StatusOK, "admin_type.html", view{Title: "Leave type", Data: d})
@@ -614,9 +622,9 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 		parseErrs["backdate_days"] = leave.BackdateMessage
 	}
 	if d.Allowance != "" {
-		n, err := strconv.Atoi(d.Allowance)
+		n, err := leave.ParseDays(d.Allowance)
 		if err != nil {
-			parseErrs["allowance"] = "Enter a whole number of days, or leave it empty for no limit."
+			parseErrs["allowance"] = MsgDaysFormat + " Leave it empty for no limit."
 		} else {
 			t.Allowance, d.Type.Allowance = &n, &n
 		}

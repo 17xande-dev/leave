@@ -42,7 +42,7 @@ func formFrom(st leave.Settings) settingsForm {
 	if st.TeamDefaultPercent > 0 {
 		f.TeamDefault = strconv.Itoa(st.TeamDefaultPercent)
 	}
-	for _, d := range leave.Days {
+	for _, d := range leave.Weekdays {
 		f.Days[d.Code] = st.Week.Has(d.Weekday)
 		if st.RestrictedDay != nil && *st.RestrictedDay == d.Weekday {
 			f.RestrictedDay = d.Code
@@ -57,7 +57,7 @@ func (h *Handler) settingsPage(w http.ResponseWriter, r *http.Request, status in
 		h.serverError(w, r, err)
 		return
 	}
-	d := settingsData{Errors: errs, Days: leave.Days, UpdatedBy: st.UpdatedBy}
+	d := settingsData{Errors: errs, Days: leave.Weekdays, UpdatedBy: st.UpdatedBy}
 	if form != nil {
 		d.Form = *form
 	} else {

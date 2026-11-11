@@ -55,8 +55,8 @@ func TestQueueBalanceAfter(t *testing.T) {
 	next := hs.apply(staff, "annual", "2027-01-04", "2027-01-05")
 	unpaid := hs.apply(staff, "unpaid", "2026-11-02", "2026-11-03")
 	ty, _ := hs.svc.Type(context.Background(), mustAtoi(t, hs.anyTypeID("weekend")))
-	ty.Active, ty.Allowance = true, new(int)
-	*ty.Allowance = 4
+	four := leave.WholeDays(4)
+	ty.Active, ty.Allowance = true, &four
 	if _, err := hs.svc.SaveType(context.Background(), ty); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestQueueBalanceAfter(t *testing.T) {
 
 	// Below zero, said as such.
 	if err := hs.svc.AddAdjustment(context.Background(), mustUser(t, hs, "hr"), leave.Adjustment{
-		UserID: hs.staffID("staff1"), TypeID: mustAtoi(t, hs.typeID("annual")), CycleStart: "2026-01-01", Days: -14, Reason: "t"}); err != nil {
+		UserID: hs.staffID("staff1"), TypeID: mustAtoi(t, hs.typeID("annual")), CycleStart: "2026-01-01", Days: leave.WholeDays(-14), Reason: "t"}); err != nil {
 		t.Fatal(err)
 	}
 	_, body = hs.get(head, "/approvals")
@@ -408,7 +408,7 @@ func TestDecideRefusesAStalePage(t *testing.T) {
 	if res, _ := hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}}); !strings.HasSuffix(res.Header.Get("Location"), "notice=request-changed") {
 		t.Fatalf("no seen: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
-	if r, _ := hs.svc.Get(context.Background(), mustAtoi(t, id)); r.Status != "pending" || r.Days != 15 {
+	if r, _ := hs.svc.Get(context.Background(), mustAtoi(t, id)); r.Status != "pending" || r.Days != leave.WholeDays(15) {
 		t.Fatalf("request changed by refused decisions: %+v", r)
 	}
 	if _, body := hs.get(head, "/approvals?notice=request-changed"); !strings.Contains(body, "changed after you opened it") {

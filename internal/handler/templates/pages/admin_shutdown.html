@@ -4,7 +4,7 @@
 <a class="back" href="/admin/shutdowns">← Shutdowns</a>
 <h1>{{.Shutdown.Name}}</h1>
 <table class="facts">
-  {{range .Shutdown.Parts}}<tr><th>{{.TypeName}}</th><td>{{date .Start}} – {{date .End}} ({{.Days}} {{plural .Days "day" "days"}})</td></tr>{{end}}
+  {{range .Shutdown.Parts}}<tr><th>{{.TypeName}}</th><td>{{date .Start}} – {{date .End}} ({{.Days}} {{dplural .Days "day" "days"}})</td></tr>{{end}}
   <tr><th>Approval</th><td>{{if .Shutdown.AutoApprove}}Automatic on submit{{else}}Each person's normal approver{{end}}</td></tr>
   <tr><th>Progress</th><td>{{.Drafts}} waiting to be submitted · {{.Pending}} awaiting approval · {{.Approved}} approved</td></tr>
 </table>

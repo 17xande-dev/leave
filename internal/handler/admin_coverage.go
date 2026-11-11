@@ -136,7 +136,7 @@ func (h *Handler) AdminSaveCoverage(w http.ResponseWriter, r *http.Request) {
 
 type permissionRow struct {
 	leave.Request
-	Shortfall int
+	Shortfall leave.Days
 }
 
 type permissionsData struct {
