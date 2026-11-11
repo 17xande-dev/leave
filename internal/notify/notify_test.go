@@ -530,3 +530,16 @@ func TestDaysNamesTheHalfDay(t *testing.T) {
 		t.Fatalf("whole days = %q", got)
 	}
 }
+
+// Imported leave goes on the shared calendar and nobody is emailed.
+func TestImportedLeaveIsCalendarOnly(t *testing.T) {
+	e := setup(t)
+	if _, err := e.svc.ImportLeave(e.ctx, e.people["hr"], e.people["staff"].ID,
+		leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-13"}, "Imported (row 1)."); err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	if len(jobs) != 1 || jobs[0].kind != "calendar_create" {
+		t.Fatalf("jobs = %+v, want one calendar_create", jobs)
+	}
+}

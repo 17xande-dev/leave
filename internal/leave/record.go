@@ -38,6 +38,40 @@ const (
 // requests table forbids approver = owner, so nobody records their own leave,
 // the same rule as GrantNegative: another admin does it.
 func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int64, in Input) (Request, error) {
+	return s.recordApproved(ctx, admin, userID, in, recordOpts{
+		decisionNote: RecordedPrefix + admin.Name, event: EventRecorded})
+}
+
+// MsgImportTooFar is the refusal for imported leave ending more than
+// ImportHorizonDays from today: a typo decades out must fail loudly.
+const MsgImportTooFar = "The last day is more than a year away; check the year."
+
+// ImportHorizonDays is how far ahead ImportLeave lets an entry end.
+const ImportHorizonDays = 366
+
+// ImportLeave records leave from a back-filled log the way RecordLeave does
+// (approved, the admin as approver, balance may go negative, overlap refused)
+// with three differences: leave may still be running or end up to a year from
+// today, the event is EventImported (calendar only, no email), and the note is
+// the caller's. note becomes the decision note and, when in.Note is empty,
+// the request's own note, which recording always requires.
+func (s *Service) ImportLeave(ctx context.Context, admin users.User, userID int64, in Input, note string) (Request, error) {
+	note = strings.TrimSpace(note)
+	if strings.TrimSpace(in.Note) == "" {
+		in.Note = note
+	}
+	return s.recordApproved(ctx, admin, userID, in, recordOpts{
+		decisionNote: note, event: EventImported, importing: true})
+}
+
+type recordOpts struct {
+	decisionNote string
+	event        EventKind
+	importing    bool
+}
+
+// recordApproved is the body RecordLeave and ImportLeave share.
+func (s *Service) recordApproved(ctx context.Context, admin users.User, userID int64, in Input, ro recordOpts) (Request, error) {
 	if !admin.Admin || admin.Disabled {
 		return Request{}, ErrNotAllowed
 	}
@@ -53,7 +87,7 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 	}
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{record: true})
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{record: true, importing: ro.importing})
 		if err != nil {
 			return err
 		}
@@ -63,7 +97,7 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 			allow_negative, recorded_by_id, created_at)
 			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?)`,
 			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, in.HalfStart, in.HalfEnd, fmtDate(qt.CycleStart),
-			strings.TrimSpace(in.Note), admin.ID, admin.ID, now, RecordedPrefix+admin.Name,
+			strings.TrimSpace(in.Note), admin.ID, admin.ID, now, ro.decisionNote,
 			qt.Shortfall > 0, admin.ID, now)
 		if err != nil {
 			return err
@@ -72,7 +106,7 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
-		return s.hook(ctx, tx, Event{Kind: EventRecorded, Request: out, Actor: admin, Shortfall: qt.Shortfall})
+		return s.hook(ctx, tx, Event{Kind: ro.event, Request: out, Actor: admin, Shortfall: qt.Shortfall})
 	})
 	return out, err
 }

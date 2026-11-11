@@ -355,6 +355,10 @@ type quoteOpts struct {
 	// rule changed, so neither applies; no coverage limits; any balance. A
 	// reason is always required and the overlap check still protects the person.
 	record bool
+	// importing widens record for a back-filled log: the last day may be up to
+	// ImportHorizonDays from today (leave still running, or booked and already
+	// in payroll) instead of having to be over.
+	importing bool
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -412,7 +416,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		// Only what has happened: future days must go through an application,
 		// or recording would bypass approval and coverage. The last day counts,
 		// so leave still running cannot be recorded until it is over.
-		if end.After(today) {
+		switch {
+		case opt.importing:
+			if end.After(today.AddDate(0, 0, ImportHorizonDays)) {
+				errs["end"] = MsgImportTooFar
+			}
+		case end.After(today):
 			errs["end"] = MsgRecordFuture
 		}
 	case start.Before(today.AddDate(0, 0, -t.BackdateDays)):

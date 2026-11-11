@@ -67,6 +67,10 @@ const (
 	// EventRecorded: an admin recorded leave the person already took. It is
 	// approved from the start.
 	EventRecorded EventKind = "recorded"
+	// EventImported: leave back-filled from a log (ImportLeave). Approved from
+	// the start like EventRecorded, but the person is not emailed: only the
+	// shared calendar hears of it.
+	EventImported EventKind = "imported"
 	// EventRevoked: an admin removed leave they had recorded. Request is the
 	// now-cancelled leave.
 	EventRevoked EventKind = "revoked"

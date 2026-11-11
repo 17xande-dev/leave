@@ -283,3 +283,37 @@ func TestAdjustmentIsAnotherAdminsJob(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ImportLeave takes leave still running or booked up to a year ahead (RecordLeave
+// refuses it), fires EventImported with the caller's note, and nothing beyond
+// the horizon.
+func TestImportLeaveAllowsAYearAhead(t *testing.T) {
+	f := newFixture(t) // today is 2026-10-05
+	hr, who := f.people["hr"], f.people["staff"].ID
+	in := Input{TypeID: f.types["annual"].ID, Start: "2026-10-12", End: "2026-10-14"}
+	if _, err := f.svc.RecordLeave(f.ctx, hr, who, Input{TypeID: in.TypeID, Start: in.Start, End: in.End, Note: "x"}); err == nil {
+		t.Fatal("RecordLeave accepted future leave")
+	}
+	f.events = nil
+	r, err := f.svc.ImportLeave(f.ctx, hr, who, in, "Imported from the log (row 1). flu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != StatusApproved || !r.IsRecorded() || r.DecisionNote != "Imported from the log (row 1). flu" || r.Note != r.DecisionNote {
+		t.Fatalf("imported = %+v", r)
+	}
+	if len(f.events) != 1 || f.events[0].Kind != EventImported {
+		t.Fatalf("events = %+v, want one EventImported", f.events)
+	}
+	far := Input{TypeID: in.TypeID, Start: "2027-10-04", End: "2027-10-06"}
+	if _, err := f.svc.ImportLeave(f.ctx, hr, who, far, "n"); err != nil {
+		t.Fatalf("a year ahead refused: %v", err)
+	}
+	over := Input{TypeID: in.TypeID, Start: "2027-10-08", End: "2027-10-12"}
+	if _, err := f.svc.ImportLeave(f.ctx, hr, who, over, "n"); err == nil || err.(FieldErrors)["end"] != MsgImportTooFar {
+		t.Fatalf("over the horizon: %v", err)
+	}
+	if _, err := f.svc.ImportLeave(f.ctx, hr, hr.ID, in, "n"); err == nil {
+		t.Fatal("an admin imported their own leave")
+	}
+}

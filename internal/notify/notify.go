@@ -104,6 +104,12 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
 			return err
 		}
+	case leave.EventImported:
+		// A back-filled log: no email (hundreds of messages about leave
+		// payroll already has), but every entry goes on the shared calendar.
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
+			return err
+		}
 	case leave.EventRevoked:
 		if err := n.send(ctx, tx, "revoked", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the leave", "",
 			func(d *msgData) { d.Actor = e.Actor.Name }); err != nil {

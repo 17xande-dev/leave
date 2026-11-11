@@ -131,6 +131,24 @@ func (s *Store) ByID(ctx context.Context, id int64) (User, error) {
 	return scan(s.db.QueryRowContext(ctx, `SELECT `+cols+` FROM users WHERE id = ?`, id))
 }
 
+// ByExtID finds the person the directory knows by id (AD objectGUID).
+func (s *Store) ByExtID(ctx context.Context, extID string) (User, error) {
+	return scan(s.db.QueryRowContext(ctx, `SELECT `+cols+` FROM users WHERE ext_id = ?`, extID))
+}
+
+// ByEmail finds the person with this address, ignoring case; ErrNotFound when
+// no one or, being ambiguous, more than one has it.
+func (s *Store) ByEmail(ctx context.Context, email string) (User, error) {
+	list, err := s.list(ctx, `SELECT `+cols+` FROM users WHERE lower(email) = lower(?) AND email <> ''`, email)
+	if err != nil {
+		return User{}, err
+	}
+	if len(list) != 1 {
+		return User{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
 func (s *Store) ByUsername(ctx context.Context, username string) (User, error) {
 	return scan(s.db.QueryRowContext(ctx, `SELECT `+cols+` FROM users WHERE username = ?`,
 		directory.NormalizeUsername(username)))
