@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -113,13 +114,19 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 }
 
 // copyDB writes a consistent copy of the SQLite database at src to dst. src is
-// opened only to be read; a missing file is an error rather than an empty
+// opened read-only and without db.Open's schema step, so nothing can be written
+// to it, not even transiently; a missing file is an error rather than an empty
 // database quietly created.
 func copyDB(src, dst string) (string, error) {
-	if _, err := os.Stat(src); err != nil {
+	abs, err := filepath.Abs(src)
+	if err != nil {
 		return "", err
 	}
-	d, err := db.Open(src)
+	if _, err := os.Stat(abs); err != nil {
+		return "", err
+	}
+	u := url.URL{Scheme: "file", Path: abs, RawQuery: "mode=ro"}
+	d, err := sql.Open("sqlite3", u.String())
 	if err != nil {
 		return "", err
 	}
@@ -129,6 +136,21 @@ func copyDB(src, dst string) (string, error) {
 	}
 	return dst, nil
 }
+
+// beforeVerify lets a test change a balance between the writes and the
+// verification that reads them back; nil outside tests.
+var beforeVerify func()
+
+// What became of one row: imported/applied, skipped as expected messy data,
+// held back for a person to look at, or an error that is not the data's fault.
+type outcome int
+
+const (
+	outOK outcome = iota
+	outSkip
+	outHeld
+	outErr
+)
 
 type importer struct {
 	ctx   context.Context
@@ -142,8 +164,13 @@ func (im *importer) printf(format string, a ...any) { fmt.Fprintf(im.out, format
 
 // resolveAdmin finds an enabled admin by ext_id, username or email.
 func (im *importer) resolveAdmin(key string) (users.User, error) {
-	for _, find := range []func(context.Context, string) (users.User, error){
-		im.users.ByExtID, im.users.ByUsername, im.users.ByEmail} {
+	finders := []func(context.Context, string) (users.User, error){im.users.ByExtID, im.users.ByUsername}
+	if strings.Contains(key, "@") {
+		// ByUsername drops everything after an @, so "alex@other.test" would
+		// find "alex": an address is looked up as an address only.
+		finders = []func(context.Context, string) (users.User, error){im.users.ByEmail}
+	}
+	for _, find := range finders {
 		u, err := find(im.ctx, key)
 		if errors.Is(err, users.ErrNotFound) {
 			continue
@@ -174,11 +201,13 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 	if err != nil {
 		return fail("-recorded-by: %v", err)
 	}
+	im.printf("Recording admin: %s (%s)", by.Name, by.Username)
 	var self users.User
 	if selfKey != "" {
 		if self, err = im.resolveAdmin(selfKey); err != nil {
 			return fail("-recorded-by-self: %v", err)
 		}
+		im.printf("Recording admin for their own entries: %s (%s)", self.Name, self.Username)
 	}
 	// The admin's own rows need a second admin; find out before writing anything.
 	needSelf := false
@@ -242,20 +271,23 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 		}
 		perPerson[r.ext] = append(perPerson[r.ext], r)
 	}
-	var imported, skipped int
+	var imported, skipped, errored int
 	for _, ext := range order {
 		rows := perPerson[ext]
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].start < rows[j].start })
 		for _, r := range rows {
-			if im.importRow(r, byCode, actor) {
+			switch im.importRow(r, byCode, actor) {
+			case outOK:
 				imported++
-			} else {
+			case outSkip:
 				skipped++
+			default:
+				errored++
 			}
 		}
 	}
 
-	var applied, balSkipped, mismatches int
+	var applied, balSkipped, held, balErrored, mismatches int
 	seen := map[string]bool{}
 	type check struct {
 		ext   string
@@ -271,13 +303,23 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 			continue
 		}
 		seen[b.ext] = true
-		want, u, ok := im.balanceRow(b, annual, cycle, actor)
-		if !ok {
+		want, u, out := im.balanceRow(b, annual, cycle, actor)
+		switch out {
+		case outSkip:
 			balSkipped++
+			continue
+		case outHeld:
+			held++
+			continue
+		case outErr:
+			balErrored++
 			continue
 		}
 		applied++
 		checks = append(checks, check{b.ext, u, want, b.available})
+	}
+	if beforeVerify != nil {
+		beforeVerify()
 	}
 
 	for _, c := range checks {
@@ -293,8 +335,12 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 	}
 
 	im.printf("")
-	im.printf("Leave:    %d imported, %d skipped", imported, skipped)
-	im.printf("Balances: %d applied, %d skipped", applied, balSkipped)
+	im.printf("Leave:    %d imported, %d skipped, %d errors", imported, skipped, errored)
+	im.printf("Balances: %d applied, %d skipped, %d held for review, %d errors", applied, balSkipped, held, balErrored)
+	if errored+balErrored > 0 {
+		im.printf("FAILED: %d rows hit an error (not a skip): a database problem or a bad file. Fix it before trusting this run.", errored+balErrored)
+		return 1
+	}
 	if mismatches > 0 {
 		im.printf("Verification FAILED: %d balances do not equal the file.", mismatches)
 		return 1
@@ -336,11 +382,13 @@ func (im *importer) annualCycle() (leave.Type, time.Time, error) {
 	return leave.Type{}, time.Time{}, errors.New("there is no leave type with code \"annual\"")
 }
 
-// importRow records one entry and prints its line; false means skipped.
-func (im *importer) importRow(r leaveRow, types map[string]leave.Type, actor func(users.User) users.User) bool {
-	skip := func(format string, a ...any) bool {
+// importRow records one entry and prints its line. Only what the data
+// itself can cause (unknown person or type, a refusal from the service's own
+// rules) is a skip; anything else is an error.
+func (im *importer) importRow(r leaveRow, types map[string]leave.Type, actor func(users.User) users.User) outcome {
+	skip := func(format string, a ...any) outcome {
 		im.printf("SKIP row %s  "+format, append([]any{r.row}, a...)...)
-		return false
+		return outSkip
 	}
 	t, ok := types[r.typeCode]
 	if !ok {
@@ -351,7 +399,8 @@ func (im *importer) importRow(r leaveRow, types map[string]leave.Type, actor fun
 	case errors.Is(err, users.ErrNotFound):
 		return skip("unknown ext_id %s", r.ext)
 	case err != nil:
-		return skip("%v", err)
+		im.printf("ERROR row %s  %v", r.row, err)
+		return outErr
 	case u.Disabled:
 		return skip("user is disabled (ext_id %s)", r.ext)
 	}
@@ -370,11 +419,16 @@ func (im *importer) importRow(r leaveRow, types map[string]leave.Type, actor fun
 	}
 	in := leave.Input{TypeID: t.ID, Start: r.start, End: end, HalfStart: hs, HalfEnd: he}
 	req, err := im.svc.ImportLeave(im.ctx, actor(u), u.ID, in, note)
-	if err != nil {
+	var fe leave.FieldErrors
+	switch {
+	case errors.As(err, &fe):
 		return skip("%s", reason(err))
+	case err != nil:
+		im.printf("ERROR row %s  %v", r.row, err)
+		return outErr
 	}
 	im.printf("OK  row %s  ext_id=%s %s %s..%s (%s)", r.row, r.ext, t.Code, req.Start, req.End, req.Days.Label(t.Unit))
-	return true
+	return outOK
 }
 
 func halfFlag(s string) (v, ok bool) {
@@ -406,29 +460,45 @@ func reason(err error) string {
 }
 
 // balanceRow adds the one adjustment that makes the person's available days
-// exactly what the file says. It returns the target and the user, and whether
-// the row was applied.
-func (im *importer) balanceRow(b balanceRow, annual leave.Type, cycle time.Time, actor func(users.User) users.User) (leave.Days, users.User, bool) {
-	skip := func(format string, a ...any) (leave.Days, users.User, bool) {
+// exactly what the file says. It returns the target and the user. A person with
+// 2026 annual leave that this run did not import is held back untouched: the
+// arithmetic would absorb that leave into the opening balance.
+func (im *importer) balanceRow(b balanceRow, annual leave.Type, cycle time.Time, actor func(users.User) users.User) (leave.Days, users.User, outcome) {
+	skip := func(format string, a ...any) (leave.Days, users.User, outcome) {
 		im.printf("SKIP BAL ext_id=%s "+format, append([]any{b.ext}, a...)...)
-		return 0, users.User{}, false
+		return 0, users.User{}, outSkip
 	}
+	fail := func(format string, a ...any) (leave.Days, users.User, outcome) {
+		im.printf("ERROR BAL ext_id=%s "+format, append([]any{b.ext}, a...)...)
+		return 0, users.User{}, outErr
+	}
+	// A value that will not parse is the converter's bug, not messy data.
 	want, err := leave.ParseDays(b.available)
 	if err != nil {
-		return skip("available %q: %v", b.available, err)
+		return fail("available %q: %v", b.available, err)
 	}
 	u, err := im.users.ByExtID(im.ctx, b.ext)
 	switch {
 	case errors.Is(err, users.ErrNotFound):
 		return skip("not found")
 	case err != nil:
-		return skip("%v", err)
+		return fail("%v", err)
 	case u.Disabled:
 		return skip("user is disabled")
 	}
+	var pre int
+	if err := im.db.QueryRowContext(im.ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND type_id = ? AND cycle_start = ?
+		AND kind = 'leave' AND status IN ('approved', 'pending') AND substr(decision_note, 1, ?) <> ?`,
+		u.ID, annual.ID, cycle.Format("2006-01-02"), len(importMarker), importMarker).Scan(&pre); err != nil {
+		return fail("%v", err)
+	}
+	if pre > 0 {
+		im.printf("WARN ext_id=%s %d pre-existing 2026 annual request(s) found; balance adjustment skipped, review by hand", b.ext, pre)
+		return 0, users.User{}, outHeld
+	}
 	bal, err := im.svc.BalanceIn(im.ctx, u.ID, annual, cycle)
 	if err != nil {
-		return skip("%v", err)
+		return fail("%v", err)
 	}
 	was := bal.Available()
 	if was == nil {
@@ -440,12 +510,16 @@ func (im *importer) balanceRow(b balanceRow, annual leave.Type, cycle time.Time,
 			UserID: u.ID, TypeID: annual.ID, CycleStart: cycle.Format("2006-01-02"), Days: adj,
 			Reason: fmt.Sprintf("Opening balance from payroll, October 2026: D = %s.", strings.TrimSpace(b.available)),
 		})
-		if err != nil {
+		var fe leave.FieldErrors
+		switch {
+		case errors.As(err, &fe):
 			return skip("adjustment refused: %s", reason(err))
+		case err != nil:
+			return fail("adjustment: %v", err)
 		}
 	}
 	im.printf("BAL ext_id=%s available was %s, D=%s, adjustment %s", b.ext, was, want, adj)
-	return want, u, true
+	return want, u, outOK
 }
 
 // readCSV reads a header row and returns each record keyed by header name. A

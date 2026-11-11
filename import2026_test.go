@@ -132,7 +132,7 @@ func TestImport2026DryRunWritesNothing(t *testing.T) {
 	}
 	want(t, out, "DRY RUN", "OK  row 2  ext_id=S1 sick 2026-03-04..2026-03-04 (1 working day)",
 		"OK  row 3  ext_id=S1 annual 2026-05-04..2026-05-08 (4.5 working days)",
-		"Leave:    4 imported, 6 skipped", "Balances: 3 applied, 1 skipped", "Verification: 3 balances equal the file exactly.")
+		"Leave:    4 imported, 6 skipped, 0 errors", "Balances: 3 applied, 1 skipped, 0 held for review, 0 errors", "Verification: 3 balances equal the file exactly.")
 	for _, table := range []string{"requests", "balance_adjustments", "outbox"} {
 		if n := e.count(`SELECT count(*) FROM ` + table); n != 0 {
 			t.Errorf("dry run left %d rows in %s", n, table)
@@ -212,7 +212,7 @@ func TestImport2026SecondApplyRefusedUntilForced(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("forced: %d\n%s", code, out)
 	}
-	want(t, out, "Leave:    0 imported, 10 skipped", "adjustment 0")
+	want(t, out, "Leave:    0 imported, 10 skipped, 0 errors", "adjustment 0")
 	if e.count(`SELECT count(*) FROM requests`) != reqs || e.count(`SELECT count(*) FROM balance_adjustments`) != adjs {
 		t.Error("the forced rerun duplicated rows")
 	}
@@ -294,5 +294,134 @@ func TestImport2026BalanceArithmetic(t *testing.T) {
 	want(t, out, "ext_id=S1 available was 15, D=15, adjustment 0", "SKIP BAL ext_id=S2 adjustment refused")
 	if n := e.count(`SELECT count(*) FROM balance_adjustments`); n != 0 {
 		t.Errorf("%d adjustments, want none", n)
+	}
+}
+
+// Only the data's own faults are skips. A database error is an ERROR line, is
+// counted apart and fails the run, so it cannot hide among expected skips.
+func TestImport2026DatabaseErrorFailsTheRun(t *testing.T) {
+	e := newImpEnv(t)
+	d, err := db.Open(e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`CREATE TRIGGER boom BEFORE INSERT ON requests BEGIN SELECT RAISE(ABORT, 'disk on fire'); END`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	code, out := e.fixture("-apply")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out)
+	}
+	want(t, out, "ERROR row 2  ", "disk on fire", "FAILED")
+	if strings.Contains(out, "SKIP row 2 ") {
+		t.Errorf("a database error was reported as a skip:\n%s", out)
+	}
+}
+
+// A balance that will not parse is the converter's bug: an error, not a skip.
+func TestImport2026UnparseableBalanceFailsTheRun(t *testing.T) {
+	e := newImpEnv(t)
+	l := writeCSV(t, "l.csv", "row,ext_id,type_code,start,end,half_start,half_end,note\n")
+	b := writeCSV(t, "b.csv", "ext_id,available\nS1,abc\nS2,1.234\n")
+	code, out := e.run("-leave="+l, "-balances="+b, "-recorded-by=alex")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out)
+	}
+	want(t, out, `ERROR BAL ext_id=S1 available "abc"`, `ERROR BAL ext_id=S2 available "1.234"`, "0 applied, 0 skipped, 0 held for review, 2 errors")
+}
+
+// An address is looked up as an address only: "alex@other.test" must not
+// reach the user "alex" through the username step, which drops the domain.
+func TestImport2026AddressIsNotAUsername(t *testing.T) {
+	e := newImpEnv(t)
+	l := writeCSV(t, "l.csv", "row,ext_id,type_code,start,end,half_start,half_end,note\n")
+	b := writeCSV(t, "b.csv", "ext_id,available\n")
+	if code, out := e.run("-leave="+l, "-balances="+b, "-recorded-by=alex@other.test"); code != 2 {
+		t.Fatalf("exit %d, want 2:\n%s", code, out)
+	}
+	code, out := e.run("-leave="+l, "-balances="+b, "-recorded-by=alex@x.test", "-recorded-by-self=mel")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "Recording admin: Alex Admin (alex)", "Recording admin for their own entries: Mel Admin (mel)")
+}
+
+// Leave that was in the database before this run would be absorbed into the
+// opening balance by the arithmetic, so that person is held back, untouched.
+func TestImport2026PreExistingLeaveHoldsTheBalance(t *testing.T) {
+	e := newImpEnv(t)
+	d, err := db.Open(e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	us := users.NewStore(d)
+	svc := leave.New(d, us, leave.Config{})
+	svc.Now = now
+	if err := svc.SeedTypes(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ts, _ := svc.Types(context.Background(), false)
+	alex, _ := us.ByExtID(context.Background(), "A1")
+	sam, _ := us.ByExtID(context.Background(), "S1")
+	for _, ty := range ts {
+		if ty.Code == "annual" {
+			if _, err := svc.RecordLeave(context.Background(), alex, sam.ID,
+				leave.Input{TypeID: ty.ID, Start: "2026-02-03", End: "2026-02-03", Note: "before"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	d.Close()
+	code, out := e.fixture("-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "WARN ext_id=S1 1 pre-existing 2026 annual request(s) found; balance adjustment skipped, review by hand",
+		"Balances: 2 applied, 1 skipped, 1 held for review, 0 errors")
+	if strings.Contains(out, "BAL ext_id=S1 ") {
+		t.Errorf("S1 got a balance line:\n%s", out)
+	}
+	if n := e.count(`SELECT count(*) FROM balance_adjustments a JOIN users u ON u.id = a.user_id WHERE u.ext_id = 'S1'`); n != 0 {
+		t.Errorf("S1 has %d adjustments, want none", n)
+	}
+}
+
+// The read-back after -apply can fail: another adjustment landing between the
+// write and the verification shows as a MISMATCH and a non-zero exit.
+func TestImport2026VerificationCanFail(t *testing.T) {
+	e := newImpEnv(t)
+	beforeVerify = func() {
+		d, err := db.Open(e.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		if _, err := d.Exec(`INSERT INTO balance_adjustments (user_id, type_id, cycle_start, days_x100, reason, by_user_id, created_at)
+			SELECT s.id, (SELECT id FROM leave_types WHERE code = 'annual'), '2026-01-01', 100, 'sneaky', a.id, '2026-11-11T09:00:00Z'
+			FROM users s, users a WHERE s.ext_id = 'S1' AND a.ext_id = 'A1'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeVerify = nil })
+	code, out := e.fixture("-apply")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out)
+	}
+	want(t, out, "MISMATCH ext_id=S1 available is 15.6, the file says 14.6", "Verification FAILED: 1 balances")
+}
+
+// A second balance row for one person is skipped; the first one stands.
+func TestImport2026DuplicateBalanceRowKeepsTheFirst(t *testing.T) {
+	e := newImpEnv(t)
+	l := writeCSV(t, "l.csv", "row,ext_id,type_code,start,end,half_start,half_end,note\n")
+	b := writeCSV(t, "b.csv", "ext_id,available\nS1,14.6\nS1,5\n")
+	code, out := e.run("-leave="+l, "-balances="+b, "-recorded-by=alex", "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "SKIP BAL ext_id=S1 duplicate balance row", "Balances: 1 applied, 1 skipped, 0 held for review, 0 errors")
+	if got := e.available("S1"); got == nil || got.String() != "14.6" {
+		t.Errorf("S1 available = %v, want 14.6", got)
 	}
 }

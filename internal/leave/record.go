@@ -147,9 +147,12 @@ func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Req
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
 		}
-		// No pending cancellation can be waiting on it: the owner may only ask
-		// to cancel leave starting after today, and RecordLeave refuses to
-		// record any such leave.
+		// No pending cancellation can be waiting on leave from RecordLeave: the
+		// owner may only ask to cancel leave starting after today, and
+		// RecordLeave refuses to record any such leave. ImportLeave can (it
+		// accepts leave up to a year ahead), so imported leave still to come
+		// could have one; the import is a one-off before anyone is using the
+		// cancellation flow on it.
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
