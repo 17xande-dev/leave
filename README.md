@@ -9,7 +9,7 @@ Microsoft 365 calendar.
 - **htmx** only for the live preview on the apply form (days charged, and which days are not and why). Every form is a plain
   POST that works without JavaScript.
 - **SQLite** in a single file. **One plain CSS file**, no framework or build step.
-- One binary with everything embedded, running in Docker on the on-prem work-docker host next to the DC, deployed with Kamal.
+- One binary with everything embedded, running in Docker on the on-prem work-docker02 host next to the DC, deployed with Kamal.
 
 ## How it works
 
@@ -370,7 +370,7 @@ until the new secret is in place, then Retry clears them.
 
 ### 3. Deploying (Kamal)
 
-The app runs on `work-docker` behind a shared `kamal-proxy`, reached through one shared
+The app runs on `work-docker02` behind a shared `kamal-proxy`, reached through one shared
 Cloudflare Tunnel. Host-side setup (kamal-proxy and the tunnel's `cloudflared`) lives in
 `~/dev/riverschurch/infra`; this repo only deploys the app. `make deploy` runs the check
 gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
@@ -379,7 +379,7 @@ answers. It refuses to run with uncommitted changes, because Kamal builds from `
 
 One-time setup, on your workstation:
 
-1. **`work-docker` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
+1. **`work-docker02` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
    user too). That user needs passwordless `docker`.
 2. **`gh` logged in** with a token that can write packages: `.kamal/secrets` uses
    `gh auth token` as the ghcr.io password.
@@ -410,7 +410,7 @@ The database lives in the `leave-data` named volume. Back it up and copy it out:
 
 ```sh
 kamal app exec --reuse 'sqlite3 /data/leave.db ".backup /data/backup.db"'
-ssh work-docker 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/backup.db" -' > leave-backup-$(date +%F).tar
+ssh work-docker02 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/backup.db" -' > leave-backup-$(date +%F).tar
 ```
 
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
@@ -426,12 +426,12 @@ signed off. Do the copy **before** moving the hostname to the shared tunnel, so 
 written to the empty new database is overwritten:
 
 ```sh
-# on work-docker, after the first `make deploy` has created `leave-data`
+# on work-docker02, after the first `make deploy` has created `leave-data`
 docker compose -f ~/leave/compose.yaml stop leave        # nothing writes to the source
 docker run --rm -v leave_leave-data:/from:ro -v "$PWD":/b alpine tar czf /b/leave-data-premigrate.tgz -C /from .
 # on the workstation: stop the new app so nothing writes to the target
 kamal app stop
-# on work-docker: copy EVERYTHING (leave.db and any -journal), then own it as the app's uid
+# on work-docker02: copy EVERYTHING (leave.db and any -journal), then own it as the app's uid
 docker run --rm -v leave_leave-data:/from:ro -v leave-data:/to alpine \
   sh -c 'cp -a /from/. /to/ && chown -R 10001 /to'
 # on the workstation

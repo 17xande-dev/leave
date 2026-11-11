@@ -1,4 +1,4 @@
-# Kamal deploy for the work Docker host (work-docker). `make deploy` runs the check
+# Kamal deploy for the work Docker host (work-docker02). `make deploy` runs the check
 # gate, then `kamal deploy`: build the image locally, push it to ghcr.io, and swap it
 # in behind kamal-proxy with a health check. Host-side setup (kamal-proxy and the
 # shared Cloudflare tunnel) lives in ~/dev/riverschurch/infra.
@@ -24,7 +24,7 @@ ssh:
 servers:
   web:
     hosts:
-      - work-docker
+      - work-docker02
     options:
       # A small Go binary plus SQLite; this is ample and stops a runaway from
       # taking the shared host.
@@ -52,7 +52,7 @@ env:
     COOKIE_SECURE: "true"
     DIRECTORY: ldap
     TZ_NAME: Africa/Johannesburg
-    # The `kamal` docker network (fixed subnet 172.30.17.0/24 on work-docker) holds
+    # The `kamal` docker network (fixed subnet 172.30.17.0/24 on work-docker02) holds
     # kamal-proxy and the app. The peer is kamal-proxy, which passes Cloudflare's
     # CF-Connecting-IP through; trusting the subnet is what makes the app honour it,
     # so the sign-in rate limit sees real client addresses. Safe only while the
