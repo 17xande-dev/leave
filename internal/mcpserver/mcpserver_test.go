@@ -887,3 +887,45 @@ func TestAdjustBalanceTakesFractionalDays(t *testing.T) {
 	}
 	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1.234, "reason": "x"}, "")
 }
+
+// half_start / half_end flow through preview, apply, edit and record, and the
+// request results say which end is a half day.
+func TestHalfDaysThroughTheTools(t *testing.T) {
+	f := newFixture(t)
+	staff, hr := f.as("staff1"), f.as("hr")
+
+	args := map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-13", "half_end": true}
+	p := f.ok(staff, "preview_request", args)
+	if p.Data["ok"] != true || p.Data["days"].(float64) != 1.5 || p.Data["available_after"].(float64) != 13.5 {
+		t.Fatalf("preview = %v", p.Data)
+	}
+	r := f.ok(staff, "apply_for_leave", args)
+	if get(r.Data, "request", "days").(float64) != 1.5 || get(r.Data, "request", "half_end") != true ||
+		get(r.Data, "request", "half_start") != nil {
+		t.Fatalf("apply = %v", r.Data)
+	}
+
+	// An edit that sends no flag makes both days whole again.
+	e := f.ok(staff, "edit_request", map[string]any{"id": id(r), "type": "annual", "start": "2026-10-12", "end": "2026-10-13"})
+	if get(e.Data, "request", "days").(float64) != 2 || get(e.Data, "request", "half_end") != nil {
+		t.Fatalf("edit = %v", e.Data)
+	}
+	e = f.ok(staff, "edit_request", map[string]any{"id": id(r), "type": "annual", "start": "2026-10-12", "end": "2026-10-13", "half_start": true})
+	if get(e.Data, "request", "days").(float64) != 1.5 || get(e.Data, "request", "half_start") != true {
+		t.Fatalf("edit with half_start = %v", e.Data)
+	}
+
+	// Refusals are tool errors naming the problem.
+	f.refused(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-19", "half_end": true}, "A one-day request has only a first day")
+	bad := f.ok(staff, "preview_request", map[string]any{"type": "maternity", "start": "2026-10-19", "end": "2026-10-21", "half_start": true})
+	if bad.Data["ok"] != false || !strings.Contains(bad.Text, "half_start") {
+		t.Fatalf("preview of a half day on a calendar-unit type = %v", bad.Data)
+	}
+
+	rec := f.ok(hr, "record_leave", map[string]any{"person": "staff2", "type": "annual", "start": "2026-06-22",
+		"end": "2026-06-24", "note": "from the log", "half_start": true, "half_end": true})
+	if get(rec.Data, "request", "days").(float64) != 2 || get(rec.Data, "request", "half_start") != true ||
+		get(rec.Data, "request", "half_end") != true {
+		t.Fatalf("record_leave = %v", rec.Data)
+	}
+}

@@ -2,6 +2,7 @@ package leave
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -43,6 +44,15 @@ func (d Days) String() string {
 // singular noun ("1 day", but "1.5 days" and "0.5 days").
 func (d Days) IsOne() bool { return d == 100 || d == -100 }
 
+// Plural picks the singular word at exactly one and the plural otherwise:
+// the one rule for "1 day" but "1.5 days" and "0.5 days".
+func (d Days) Plural(one, many string) string {
+	if d.IsOne() {
+		return one
+	}
+	return many
+}
+
 // Noun is the unit's name for this figure: "working day(s)" for the workdays
 // unit, "day(s)" for calendar, "weekend(s)".
 func (d Days) Noun(unit string) string {
@@ -67,6 +77,13 @@ func (d Days) Noun(unit string) string {
 // Label is the figure with its unit: "1 working day", "1.5 working days",
 // "2 weekends".
 func (d Days) Label(unit string) string { return d.String() + " " + d.Noun(unit) }
+
+// MaxDays is the sanity cap on one adjustment or one allowance (1000 days): far
+// beyond any real figure, so a slipped decimal point is refused rather than saved.
+const MaxDays = Days(100000)
+
+// MsgDaysTooMany is the refusal for a figure beyond MaxDays.
+const MsgDaysTooMany = "That is more than 1000 days; check the figure."
 
 // ErrDays is the error ParseDays returns for text that is not a days figure.
 var ErrDays = errors.New("enter a number of days with at most two decimals, like 2 or 1.5")
@@ -125,11 +142,12 @@ func (d Days) MarshalJSON() ([]byte, error) { return []byte(d.String()), nil }
 func (d *Days) UnmarshalJSON(b []byte) error {
 	b = bytes.TrimSpace(b)
 	if len(b) > 0 && b[0] == '"' {
+		// Decoded as a JSON string first, so an escape ("\u0031.5") means what
+		// it says rather than reaching ParseDays as raw text.
 		var s string
-		if len(b) < 2 || b[len(b)-1] != '"' {
+		if err := json.Unmarshal(b, &s); err != nil {
 			return ErrDays
 		}
-		s = string(b[1 : len(b)-1])
 		v, err := ParseDays(s)
 		if err != nil {
 			return err

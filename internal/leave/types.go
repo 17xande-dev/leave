@@ -198,6 +198,8 @@ func ValidateType(t *Type) FieldErrors {
 	}
 	if t.Allowance != nil && *t.Allowance < 0 {
 		errs["allowance"] = "The allowance cannot be negative."
+	} else if t.Allowance != nil && *t.Allowance > MaxDays {
+		errs["allowance"] = MsgDaysTooMany
 	}
 	return errs
 }

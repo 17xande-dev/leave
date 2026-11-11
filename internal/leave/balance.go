@@ -162,6 +162,8 @@ func (s *Service) AddAdjustment(ctx context.Context, admin users.User, a Adjustm
 	}
 	if a.Days == 0 {
 		errs["days"] = "Enter a number of days, negative to subtract."
+	} else if a.Days > MaxDays || a.Days < -MaxDays {
+		errs["days"] = MsgDaysTooMany
 	}
 	if strings.TrimSpace(a.Reason) == "" {
 		errs["reason"] = "Say why, for whoever reads this later."

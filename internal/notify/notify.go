@@ -319,6 +319,15 @@ func Dates(start, end string) string {
 	return s.Format("Mon 2 Jan 2006") + " – " + e.Format("Mon 2 Jan 2006")
 }
 
-func days(r leave.Request) string { return daysOf(r.Days, r.TypeUnit) }
+// days is the request's figure with its unit, and which end is a half day when
+// one is ("1.5 working days, last day a half day"): every email, edit diff and
+// calendar event reads the figure through here, so none can leave it out.
+func days(r leave.Request) string {
+	s := daysOf(r.Days, r.TypeUnit)
+	if h := r.HalfNote(); h != "" {
+		s += ", " + h
+	}
+	return s
+}
 
 func daysOf(n leave.Days, unit string) string { return n.Label(unit) }

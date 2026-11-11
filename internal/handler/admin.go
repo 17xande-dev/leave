@@ -482,7 +482,7 @@ func (h *Handler) AdminRecordLeave(w http.ResponseWriter, r *http.Request) {
 	}
 	typeID, _ := strconv.ParseInt(r.PostFormValue("type"), 10, 64)
 	in := leave.Input{TypeID: typeID, Start: r.PostFormValue("start"), End: r.PostFormValue("end"),
-		Note: r.PostFormValue("note")}
+		Note: r.PostFormValue("note"), HalfStart: r.PostFormValue("half_start") == "1", HalfEnd: r.PostFormValue("half_end") == "1"}
 	rec, err := h.leave.RecordLeave(r.Context(), currentUser(r), id, in)
 	var fe leave.FieldErrors
 	switch {

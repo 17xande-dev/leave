@@ -31,6 +31,8 @@ type RequestInfo struct {
 	Start      string     `json:"start" jsonschema:"first day, YYYY-MM-DD"`
 	End        string     `json:"end" jsonschema:"last day, YYYY-MM-DD"`
 	Days       leave.Days `json:"days"`
+	HalfStart  bool       `json:"half_start,omitempty" jsonschema:"the first (or only) day is a half day, charged 0.5"`
+	HalfEnd    bool       `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5"`
 	Status     string     `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
 	Note       string     `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
 	// RecordedBy is set when an administrator wrote the leave down after the fact.
@@ -49,7 +51,7 @@ type RequestInfo struct {
 
 func requestInfo(r leave.Request) RequestInfo {
 	return RequestInfo{ID: r.ID, Kind: r.Kind, Person: r.UserName, Department: r.Department,
-		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Days: r.Days, Status: r.Status,
+		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Days: r.Days, HalfStart: r.HalfStart, HalfEnd: r.HalfEnd, Status: r.Status,
 		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
 		CreatedAt: r.CreatedAt, RemovedBy: r.RemovedBy, RemovedAt: r.RemovedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
 		SpecialPermission: r.Escalate}
@@ -88,14 +90,6 @@ func (d *deps) steps(ctx context.Context, id int64) ([]StepInfo, error) {
 		out = append(out, StepInfo{Approver: s.ApproverName, Decision: s.Decision, Note: s.Note, At: s.DecidedAt})
 	}
 	return out, nil
-}
-
-// dplural is plural for a days figure, which is one only at exactly 1.
-func dplural(n leave.Days, one, many string) string {
-	if n.IsOne() {
-		return one
-	}
-	return many
 }
 
 func plural(n int, one, many string) string {
@@ -340,10 +334,12 @@ func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool) 
 }
 
 type RequestIn struct {
-	Type  string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End   string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note  string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
 }
 
 func (d *deps) input(ctx context.Context, in RequestIn) (leave.Input, error) {
@@ -355,11 +351,12 @@ func (d *deps) input(ctx context.Context, in RequestIn) (leave.Input, error) {
 	if end == "" {
 		end = strings.TrimSpace(in.Start)
 	}
-	return leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note}, nil
+	return leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note,
+		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd}, nil
 }
 
 type Problem struct {
-	Field   string `json:"field" jsonschema:"type, start, end, note or coverage"`
+	Field   string `json:"field" jsonschema:"type, start, end, note, half_start, half_end or coverage"`
 	Message string `json:"message"`
 }
 
@@ -446,12 +443,14 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 }
 
 type ApplyIn struct {
-	Type     string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start    string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End      string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note     string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
-	AskHR    bool   `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
+	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+	AskHR     bool   `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
 }
 
 type RequestOut struct {
@@ -460,7 +459,8 @@ type RequestOut struct {
 }
 
 func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut, string, error) {
-	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note})
+	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
 	}
@@ -480,12 +480,14 @@ func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut,
 }
 
 type EditIn struct {
-	ID       int64  `json:"id" jsonschema:"the pending request's id"`
-	Type     string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start    string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End      string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note     string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	Override bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+	ID        int64  `json:"id" jsonschema:"the pending request's id"`
+	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
 }
 
 // edit changes a pending request of the person's own, as the Edit form does.
@@ -496,7 +498,8 @@ func (d *deps) edit(ctx context.Context, u users.User, in EditIn) (RequestOut, s
 	if err != nil {
 		return RequestOut{}, "", err
 	}
-	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note})
+	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
 	}

@@ -140,6 +140,65 @@ func CountDays(start, end time.Time, unit string, holidays map[time.Time]bool, w
 	return n
 }
 
+// halfDays is the days a request's half-day flags take off its whole-day count:
+// half a day for each flag.
+func halfDays(in Input) Days {
+	var d Days
+	if in.HalfStart {
+		d += 50
+	}
+	if in.HalfEnd {
+		d += 50
+	}
+	return d
+}
+
+// checkHalves refuses a half-day flag that cannot mean anything: on a type that
+// is not counted in working days, on a request that is a company shutdown
+// (whose days are mandatory and whole), on a one-day request's last day (the
+// same day as its first), or on a day that costs nothing (a Saturday, a day
+// the working week leaves out, a public holiday) -- a half of nothing. The
+// errors are keyed by the checkbox they belong to.
+func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]bool, week Week, mandatory bool) FieldErrors {
+	if !in.HalfStart && !in.HalfEnd {
+		return nil
+	}
+	fe := FieldErrors{}
+	flagged := map[string]bool{"half_start": in.HalfStart, "half_end": in.HalfEnd}
+	refuse := func(msg string) {
+		for k, on := range flagged {
+			if on {
+				fe[k] = msg
+			}
+		}
+	}
+	switch {
+	case mandatory:
+		refuse("A company shutdown is always whole days.")
+		return fe
+	case t.Unit != UnitWorkdays:
+		refuse(t.Name + " is not counted in working days, so it has no half days.")
+		return fe
+	}
+	if in.HalfEnd && end.Equal(start) {
+		fe["half_end"] = "A one-day request has only a first day: tick \"First (or only) day is a half day\" instead."
+	}
+	for _, h := range []struct {
+		key, name string
+		on        bool
+		day       time.Time
+	}{{"half_start", "first", in.HalfStart, start}, {"half_end", "last", in.HalfEnd, end}} {
+		if h.on && fe[h.key] == "" && !charged(h.day, t.Unit, holidays, week) {
+			fe[h.key] = fmt.Sprintf("The %s day (%s) is not a working day, or is a public holiday, so it cannot be a half day.",
+				h.name, h.day.Format("Mon 2 Jan"))
+		}
+	}
+	if len(fe) == 0 {
+		return nil
+	}
+	return fe
+}
+
 // charged is the one rule for whether a day costs leave, shared by CountDays
 // and NotCharged so the count and the explanation cannot disagree.
 func charged(d time.Time, unit string, holidays map[time.Time]bool, week Week) bool {

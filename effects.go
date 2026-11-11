@@ -82,7 +82,11 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 				approved = "Recorded by " + r.DecidedBy + "."
 			}
 		}
-		body := fmt.Sprintf("%s, %s.\n%s", r.TypeName, notify.Dates(r.Start, r.End), approved)
+		dates := notify.Dates(r.Start, r.End)
+		if h := r.HalfNote(); h != "" {
+			dates += " (" + h + ")"
+		}
+		body := fmt.Sprintf("%s, %s.\n%s", r.TypeName, dates, approved)
 		if r.Department != "" {
 			body += "\nDepartment: " + r.Department
 		}

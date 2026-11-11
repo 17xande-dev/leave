@@ -8,7 +8,7 @@
 <form method="post" class="panel">
   {{template "csrf" $.CSRF}}
   <h2><a href="/leave/{{.ID}}?from=admin">{{.UserName}}: {{.TypeName}}</a></h2>
-  <p>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}, {{.Days}} {{units .Days .TypeUnit}}.
+  <p>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}, {{.Days}} {{units .Days .TypeUnit}}{{with .HalfNote}} ({{.}}){{end}}.
   {{if .Shortfall}}That is <strong>{{.Shortfall}} {{units .Shortfall .TypeUnit}}</strong> below zero.{{else}}Their balance now covers it.{{end}}</p>
   <p><strong>Their reason:</strong> {{.Note}}</p>
   <div class="field">

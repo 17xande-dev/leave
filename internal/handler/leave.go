@@ -318,6 +318,7 @@ func inputFrom(r *http.Request, get func(string) string) leave.Input {
 	id, _ := strconv.ParseInt(get("type"), 10, 64)
 	return leave.Input{TypeID: id, Start: strings.TrimSpace(get("start")),
 		End: strings.TrimSpace(get("end")), Note: get("note"),
+		HalfStart: get("half_start") == "1", HalfEnd: get("half_end") == "1",
 		Override: get("override") == "1", Negative: get("negative") == "1"}
 }
 
@@ -489,7 +490,8 @@ func (h *Handler) EditForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in := leave.Input{TypeID: req.TypeID, Start: req.Start, End: req.End, Note: req.Note}
+	in := leave.Input{TypeID: req.TypeID, Start: req.Start, End: req.End, Note: req.Note,
+		HalfStart: req.HalfStart, HalfEnd: req.HalfEnd}
 	d, err := h.applyData(r, in, nil, &req)
 	if err != nil {
 		h.serverError(w, r, err)

@@ -8,7 +8,7 @@
 <table class="facts">
   <tr><th>Who</th><td>{{.UserName}}{{with .Department}} <small>{{.}}</small>{{end}}</td></tr>
   <tr><th>Dates</th><td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td></tr>
-  <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}</td></tr>
+  <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}{{with .HalfNote}} ({{.}}){{end}}</td></tr>
   {{with .Note}}<tr><th>{{if $.Data.Request.IsRecorded}}Why it was recorded{{else}}Note{{end}}</th><td>{{.}}</td></tr>{{end}}
   {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.RecordedBy}}{{with .DecidedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
   {{with .RemovedBy}}<tr><th>Removed by</th><td>{{.}}{{with $.Data.Request.RemovedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}</td></tr>{{end}}

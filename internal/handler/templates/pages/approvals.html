@@ -24,7 +24,7 @@
         {{with .After}}<br><small class="after">{{if .Below}}{{.Below}} {{units .Below .Unit}} below zero{{else}}{{.Left}} {{units .Left .Unit}} left in {{with .CycleName}}{{.}}{{else}}this cycle{{end}}{{end}}{{if .Shared}} if all their pending requests are approved{{else}} afterwards{{end}}</small>{{end}}
         {{with .Away}}<br><small class="away">Also away: {{range $i, $a := .}}{{if $i}}, {{end}}{{$a.Name}}{{range $j, $r := $a.Ranges}}{{if $j}};{{end}}{{with $r.Type}}, {{.}}{{end}} ({{shortrange $r.Start $r.End}}){{end}}{{if eq $a.Pending "all"}} (not yet approved){{else if $a.Pending}} (some not yet approved){{end}}{{end}}{{with $row.AwayMore}}, and {{.}} more{{end}}</small>{{end}}</td>
       <td class="dates">{{shortrange .Start .End}}</td>
-      <td class="num">{{.Days}}</td>
+      <td class="num">{{.Days}}{{with .HalfNote}}<br><small>{{.}}</small>{{end}}</td>
       <td class="acts">
         <form method="post" action="/leave/{{.ID}}/decide" class="row">
           {{template "csrf" $.CSRF}}

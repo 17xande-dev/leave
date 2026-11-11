@@ -59,10 +59,10 @@ func (s *Service) RecordLeave(ctx context.Context, admin users.User, userID int6
 		}
 		now := stampNow(s.Now())
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100,
-			cycle_start, note, status, approver_id, decided_by_id, decided_at, decision_note, allow_negative,
-			recorded_by_id, created_at)
-			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?)`,
-			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
+			half_start, half_end, cycle_start, note, status, approver_id, decided_by_id, decided_at, decision_note,
+			allow_negative, recorded_by_id, created_at)
+			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?)`,
+			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, in.HalfStart, in.HalfEnd, fmtDate(qt.CycleStart),
 			strings.TrimSpace(in.Note), admin.ID, admin.ID, now, RecordedPrefix+admin.Name,
 			qt.Shortfall > 0, admin.ID, now)
 		if err != nil {

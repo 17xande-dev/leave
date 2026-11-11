@@ -376,7 +376,7 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 			return Request{}, err
 		}
 	}
-	in := Input{TypeID: d.TypeID, Start: d.Start, End: d.End, Note: note}
+	in := Input{TypeID: d.TypeID, Start: d.Start, End: d.End, Note: note, HalfStart: d.HalfStart, HalfEnd: d.HalfEnd}
 	if err := s.ensureYears(ctx, in); err != nil {
 		return Request{}, err
 	}

@@ -131,6 +131,12 @@
     <p class="legend muted"><span class="mark-holiday">public holiday</span> <span class="mark-booked">{{.User.Name}} has leave booked or requested</span></p>
     {{template "err" index .RecErrors "start"}}
     {{template "err" index .RecErrors "end"}}
+    <div class="checks">
+      <label><input type="checkbox" name="half_start" value="1"{{if .Rec.HalfStart}} checked{{end}}> First (or only) day is a half day</label>
+      <label><input type="checkbox" name="half_end" value="1"{{if .Rec.HalfEnd}} checked{{end}}> Last day is a half day</label>
+    </div>
+    {{template "err" index .RecErrors "half_start"}}
+    {{template "err" index .RecErrors "half_end"}}
   </div>
   <div class="field">
     <label for="rec-note">Why it is being recorded</label>

@@ -27,22 +27,24 @@ const (
 
 // Request is one row of requests with the names a page needs joined in.
 type Request struct {
-	ID              int64
-	UserID          int64
-	TypeID          int64
-	Kind            string
-	CancelsID       int64 // 0 for a leave request
-	Start, End      string
-	Days            Days
-	CycleStart      string
-	Note            string
-	Status          string
-	ApproverID      int64 // 0: the admins' queue
-	DecidedByID     int64
-	DecidedAt       string
-	DecisionNote    string
-	CalendarEventID string
-	CreatedAt       string
+	ID         int64
+	UserID     int64
+	TypeID     int64
+	Kind       string
+	CancelsID  int64 // 0 for a leave request
+	Start, End string
+	Days       Days
+	// HalfStart and HalfEnd: the first / last day is a half day (see Input).
+	HalfStart, HalfEnd bool
+	CycleStart         string
+	Note               string
+	Status             string
+	ApproverID         int64 // 0: the admins' queue
+	DecidedByID        int64
+	DecidedAt          string
+	DecisionNote       string
+	CalendarEventID    string
+	CreatedAt          string
 	// ShutdownPartID is set on a request generated for a company shutdown.
 	ShutdownPartID int64
 	// Escalate: over a department coverage limit, so every level up to the
@@ -77,6 +79,23 @@ const RecordedPrefix = "Recorded by "
 // it going through approval, whatever has become of it since.
 func (r Request) IsRecorded() bool { return r.RecordedByID != 0 }
 
+// HalfNote says which end of r is a half day, for pages, emails and the
+// calendar: "" when neither is. The day figure beside it already shows 0.5,
+// 1.5 and so on, so this only names the day.
+func (r Request) HalfNote() string {
+	switch {
+	case r.HalfStart && r.HalfEnd:
+		return "first and last days are half days"
+	case r.HalfStart && r.Start == r.End:
+		return "half day"
+	case r.HalfStart:
+		return "first day a half day"
+	case r.HalfEnd:
+		return "last day a half day"
+	}
+	return ""
+}
+
 func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 
 // IsShutdown reports whether r was generated for a company shutdown: its type
@@ -84,7 +103,7 @@ func (r Request) IsCancellation() bool { return r.Kind == KindCancellation }
 func (r Request) IsShutdown() bool { return r.ShutdownPartID != 0 }
 
 const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.cancels_request_id, 0),
-	r.start_date, r.end_date, r.days_x100, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
+	r.start_date, r.end_date, r.days_x100, r.half_start, r.half_end, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
 	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
 	COALESCE(r.shutdown_part_id, 0), r.escalate, r.allow_negative,
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
@@ -103,7 +122,7 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
-	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.CycleStart,
+	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.HalfStart, &r.HalfEnd, &r.CycleStart,
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
 		&r.ApproverName, &r.DecidedBy, &r.ShutdownName, &r.RecordedByID, &r.RecordedBy, &r.RemovedByID, &r.RemovedBy,
@@ -246,6 +265,10 @@ type Input struct {
 	Start  string
 	End    string
 	Note   string
+	// HalfStart and HalfEnd make the first / last day a half day, charged 0.5
+	// instead of 1. A one-day request uses HalfStart only. Only workdays-unit
+	// types have half days, and only on a day that is actually charged.
+	HalfStart, HalfEnd bool
 	// Override asks for special permission: a request over a department's
 	// coverage limit (department or team) is saved anyway and goes up the whole approval chain.
 	Override bool
@@ -414,6 +437,9 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return Quote{}, err
 	}
 	holidays := holidayDays(holidayNames)
+	if fe := checkHalves(in, t, start, end, holidays, st.Week, opt.mandatory); len(fe) > 0 {
+		return qt, fe
+	}
 	if t.Unit == UnitWeekend {
 		if msg := weekendShape(start, end, u.LongWeekend); msg != "" {
 			errs["start"] = msg
@@ -422,9 +448,9 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		qt.Days = WholeDays(1)
 	} else {
 		counted := CountDays(start, end, t.Unit, holidays, st.Week)
-		qt.Days = WholeDays(counted)
+		qt.Days = WholeDays(counted) - halfDays(in)
 		qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
-		if qt.Days == 0 {
+		if counted == 0 {
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs
 		}
@@ -474,7 +500,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		}
 		if after < 0 && !opt.mandatory && !opt.record && !opt.allowNegative {
 			errs["end"] = fmt.Sprintf("This is %s %s, but you have %s left for this cycle.",
-				qt.Days, plural(qt.Days, "day", "days"), *avail)
+				qt.Days, qt.Days.Plural("day", "days"), *avail)
 		}
 	}
 	if len(errs) > 0 {
@@ -540,13 +566,6 @@ func restrictedDayRule(st Settings, t Type, start, end time.Time, days int, holi
 	return ""
 }
 
-func plural(n Days, one, many string) string {
-	if n.IsOne() {
-		return one
-	}
-	return many
-}
-
 // Submit validates and saves a leave request, routed to the requester's approver.
 //
 // With in.Override a request over a department limit is saved anyway, marked
@@ -583,9 +602,9 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 		}
 		escalate := in.Override && len(qt.Coverage) > 0
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100,
-			cycle_start, note, status, approver_id, escalate, created_at)
-			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
-			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
+			half_start, half_end, cycle_start, note, status, approver_id, escalate, created_at)
+			VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+			u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, in.HalfStart, in.HalfEnd, fmtDate(qt.CycleStart),
 			strings.TrimSpace(in.Note), nullID(approver), escalate, stampNow(s.Now()))
 		if err != nil {
 			return err
@@ -607,8 +626,8 @@ func (s *Service) saveAwaitingHR(ctx context.Context, tx *sql.Tx, u users.User, 
 		return FieldErrors{"note": "Say why you need to go below zero, so HR can decide."}
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100,
-		cycle_start, note, status, created_at) VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, 'awaiting_hr', ?)`,
-		u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart),
+		half_start, half_end, cycle_start, note, status, created_at) VALUES (?, ?, 'leave', ?, ?, ?, ?, ?, ?, ?, 'awaiting_hr', ?)`,
+		u.ID, qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, in.HalfStart, in.HalfEnd, fmtDate(qt.CycleStart),
 		strings.TrimSpace(in.Note), stampNow(s.Now()))
 	if err != nil {
 		return err

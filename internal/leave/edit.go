@@ -72,7 +72,7 @@ func editShortfall(qt Quote, err error) {
 	}
 }
 
-// Edit changes the type, dates and note of u's own pending request, which stays
+// Edit changes the type, dates, half-day flags and note of u's own pending request, which stays
 // with the approver it was sent to (their frozen approver_id, not a fresh
 // ResolveApprover) and keeps its place in the queue. It runs the same checks as
 // Submit, with the request's old version out of the overlap, coverage and
@@ -119,17 +119,18 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		escalate := in.Override && len(qt.Coverage) > 0
 		note := strings.TrimSpace(in.Note)
 		if qt.Type.ID == old.TypeID && fmtDate(qt.Start) == old.Start && fmtDate(qt.End) == old.End &&
-			note == old.Note && escalate == old.Escalate {
+			note == old.Note && escalate == old.Escalate && in.HalfStart == old.HalfStart && in.HalfEnd == old.HalfEnd {
 			out = old // nothing to save, nobody to tell
 			return nil
 		}
 		// allow_negative goes too: HR's permission was for the request as it was.
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET type_id = ?, start_date = ?, end_date = ?, days_x100 = ?,
-			cycle_start = ?, note = ?, escalate = ?, allow_negative = 0
+			half_start = ?, half_end = ?, cycle_start = ?, note = ?, escalate = ?, allow_negative = 0
 			WHERE id = ? AND user_id = ? AND status = 'pending' AND kind = 'leave'
 			AND shutdown_part_id IS NULL AND recorded_by_id IS NULL
 			AND NOT EXISTS (SELECT 1 FROM request_steps WHERE request_id = requests.id)`,
-			qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, fmtDate(qt.CycleStart), note, escalate, id, u.ID)
+			qt.Type.ID, fmtDate(qt.Start), fmtDate(qt.End), qt.Days, in.HalfStart, in.HalfEnd,
+			fmtDate(qt.CycleStart), note, escalate, id, u.ID)
 		if err != nil {
 			return err
 		}

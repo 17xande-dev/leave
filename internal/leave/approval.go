@@ -142,8 +142,8 @@ func (s *Service) RequestCancellation(ctx context.Context, u users.User, id int6
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO requests (user_id, type_id, kind, cancels_request_id,
-			start_date, end_date, days_x100, cycle_start, note, status, approver_id, created_at)
-			SELECT user_id, type_id, 'cancellation', id, start_date, end_date, days_x100, cycle_start, ?, 'pending', ?, ?
+			start_date, end_date, days_x100, half_start, half_end, cycle_start, note, status, approver_id, created_at)
+			SELECT user_id, type_id, 'cancellation', id, start_date, end_date, days_x100, half_start, half_end, cycle_start, ?, 'pending', ?, ?
 			FROM requests WHERE id = ? AND status = 'approved'`,
 			strings.TrimSpace(note), nullID(approver), stampNow(s.Now()), id)
 		if err != nil {
@@ -189,12 +189,13 @@ func (s *Service) Decide(ctx context.Context, actor users.User, id int64, approv
 // approver was shown: its owner edited it after the page was read.
 var ErrChanged = errors.New("leave: the request was changed after it was read")
 
-// Fingerprint identifies what an approver decides on: the type, dates, days,
-// special-permission flag and note. An edit changes it, so a decision made on
+// Fingerprint identifies what an approver decides on: the type, dates, days (and which
+// ends are half days), special-permission flag and note. An edit changes it, so a decision made on
 // a page read before the edit can be told apart (see DecideSeen). It is a hash,
 // opaque to callers, and covers nothing an approver's own actions change.
 func (r Request) Fingerprint() string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%d|%s|%s|%d|%t|%s", r.ID, r.Kind, r.TypeID, r.Start, r.End, r.Days, r.Escalate, r.Note)))
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%d|%s|%s|%s|%t|%t|%t|%s",
+		r.ID, r.Kind, r.TypeID, r.Start, r.End, r.Days.String(), r.HalfStart, r.HalfEnd, r.Escalate, r.Note)))
 	return hex.EncodeToString(h[:12])
 }
 

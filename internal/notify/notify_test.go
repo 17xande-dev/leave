@@ -517,3 +517,16 @@ func TestEditedEmailSaysWhenSpecialPermissionChanges(t *testing.T) {
 		t.Fatalf("needed again:\n%s", m.Text)
 	}
 }
+
+// Every email, edit diff and calendar line reads a request's figure through
+// days, so a half day is named wherever the figure is.
+func TestDaysNamesTheHalfDay(t *testing.T) {
+	r := leave.Request{Days: 150, TypeUnit: leave.UnitWorkdays, Start: "2026-10-12", End: "2026-10-13", HalfEnd: true}
+	if got := days(r); got != "1.5 working days, last day a half day" {
+		t.Fatalf("days = %q", got)
+	}
+	r.HalfEnd, r.Days = false, 200
+	if got := days(r); got != "2 working days" {
+		t.Fatalf("whole days = %q", got)
+	}
+}

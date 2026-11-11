@@ -94,7 +94,7 @@ func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
-		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending'))) STRICT`)
+		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending'))) STRICT`)
 	old.Close()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "awaiting_hr") {
 		t.Fatalf("old database: err = %v", err)
@@ -111,7 +111,7 @@ func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
-		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
 	old.Close()
@@ -129,7 +129,7 @@ func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
-		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY, team_default_percent INTEGER) STRICT`)
@@ -148,7 +148,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
-		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
+		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
 	old.Close()
 	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "team_default_percent") {
@@ -159,7 +159,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	old, _ = sql.Open("sqlite3", "file:"+path)
 	for _, q := range []string{
 		`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
-			allow_negative INTEGER, recorded_by_id INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`,
+			allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`,
 		`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`,
 		`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`,
 		`CREATE TABLE settings (id INTEGER PRIMARY KEY, team_default_percent INTEGER) STRICT`,
@@ -217,5 +217,56 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 			t.Fatalf("open %d: %v", i+1, err)
 		}
 		d.Close()
+	}
+}
+
+// A requests table from before half-day requests has every other column; it is
+// refused naming half_start rather than failing at the first insert.
+func TestOldDatabaseWithoutHalfDaysRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
+		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "requests.half_start") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}
+
+// half_end on a one-day request is refused by the schema itself, and the flags
+// accept only 0 and 1, so no code path can store a nonsense half day.
+func TestHalfDayColumnsChecked(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, q := range []string{
+		`INSERT INTO users (id, ext_id, dn, username, name, synced_at) VALUES (1, 'x', 'dn', 'x', 'X', '')`,
+		`INSERT INTO leave_types (id, code, name, cycle_months, unit) VALUES (1, 'annual', 'Annual', 12, 'workdays')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins := func(start, end string, hs, he int) error {
+		_, err := d.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, half_start, half_end,
+			cycle_start, status, created_at) VALUES (1, 1, 'leave', ?, ?, 50, ?, ?, '2026-01-01', 'pending', '')`, start, end, hs, he)
+		return err
+	}
+	if err := ins("2026-03-03", "2026-03-03", 1, 0); err != nil {
+		t.Fatalf("half_start on one day: %v", err)
+	}
+	if err := ins("2026-03-10", "2026-03-10", 0, 1); err == nil {
+		t.Fatal("half_end on a one-day request was accepted")
+	}
+	if err := ins("2026-03-10", "2026-03-11", 0, 1); err != nil {
+		t.Fatalf("half_end on two days: %v", err)
+	}
+	if err := ins("2026-03-17", "2026-03-18", 2, 0); err == nil {
+		t.Fatal("half_start = 2 was accepted")
 	}
 }

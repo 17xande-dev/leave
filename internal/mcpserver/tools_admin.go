@@ -75,11 +75,13 @@ func personInfo(u users.User) PersonInfo {
 // --- Recorded leave ---------------------------------------------------------
 
 type RecordLeaveIn struct {
-	Person string `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
-	Type   string `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
-	Start  string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End    string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
-	Note   string `json:"note" jsonschema:"why it is being recorded; required"`
+	Person    string `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
+	Type      string `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
+	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
+	Note      string `json:"note" jsonschema:"why it is being recorded; required"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
 }
 
 type RecordedOut struct {
@@ -105,7 +107,8 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 	if end == "" {
 		end = strings.TrimSpace(in.Start)
 	}
-	req, err := d.leave.RecordLeave(ctx, u, who.ID, leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note})
+	req, err := d.leave.RecordLeave(ctx, u, who.ID, leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note,
+		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RecordedOut{}, "", err
 	}
@@ -118,7 +121,7 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 		out.Balance = &bi
 	}
 	out.Message = fmt.Sprintf("Recorded %s %s of %s for %s. They have been emailed and it is on the shared calendar.",
-		req.Days, dplural(req.Days, "day", "days"), req.TypeName, req.UserName)
+		req.Days, req.Days.Plural("day", "days"), req.TypeName, req.UserName)
 	if out.BelowZero {
 		out.Message += " Their balance is now below zero."
 	}
@@ -262,7 +265,7 @@ func (d *deps) adjustBalance(ctx context.Context, u users.User, in AdjustIn) (Ad
 	}
 	out.Adjustments = adjustmentInfos(as)
 	out.Message = fmt.Sprintf("Adjusted %s's %s balance for the cycle from %s by %s %s. Nobody is emailed.",
-		who.Name, t.Name, cycle, signedDays(in.Days), dplural(in.Days, "day", "days"))
+		who.Name, t.Name, cycle, signedDays(in.Days), in.Days.Plural("day", "days"))
 	return out, out.Message, nil
 }
 
@@ -377,7 +380,7 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "record_leave", Annotations: additive("Record leave a person took (administrators)"),
 		Description: "Administrators only: write down leave a person has already started or taken, stored as approved. The person is emailed and it goes on the shared calendar. " +
 			"A note saying why is required. Leave whose last day is still to come is refused (future days go through an application); a retired type is allowed; the balance may go below zero (reported as below_zero). " +
-			"You cannot record your own leave; another administrator does that. Only when the person has told you to."}, d.recordLeave)
+			"You cannot record your own leave; another administrator does that. Only when the person has told you to. half_start / half_end make the first (or only) / last day a half day (0.5), as in apply_for_leave."}, d.recordLeave)
 	add(d, s, &mcp.Tool{Name: "remove_recorded_leave", Annotations: destructive("Remove recorded leave (administrators)"),
 		Description: "Administrators only: remove leave an administrator recorded (not ordinary approved leave). It no longer counts against their balance, the calendar event goes and the person is emailed. Cannot be undone. You cannot remove leave recorded for you. Only when the person has told you to."}, d.removeRecorded)
 	add(d, s, &mcp.Tool{Name: "adjust_balance", Annotations: additive("Adjust a balance (administrators)"),

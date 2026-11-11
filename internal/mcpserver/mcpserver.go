@@ -260,17 +260,19 @@ func (d *deps) register(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "preview_request", Annotations: readOnly("Preview a leave request"),
 		Description: "Check a leave request without making it: the number of days it costs, your balance afterwards, and every rule that would stop it " +
 			"(dates, restricted day, overlap, department and team coverage, balance). Also says whether you may ask for special permission or HR's " +
-			"permission to go below zero. Call this before apply_for_leave."}, d.previewRequest)
+			"permission to go below zero. Accepts half_start / half_end for half days (see apply_for_leave). Call this before apply_for_leave."}, d.previewRequest)
 
 	// Act
 	add(d, s, &mcp.Tool{Name: "apply_for_leave", Annotations: additive("Apply for leave"),
 		Description: "Submit a leave request for approval, exactly as the Apply form does; the approver is emailed. " +
 			"Only call this when the person has asked for it. Set override only after preview_request says special permission is available and the " +
-			"person wants it (the request then goes up every approval level); set ask_hr only when the balance is the only problem and the person wants HR's permission to go below zero."}, d.apply)
+			"person wants it (the request then goes up every approval level); set ask_hr only when the balance is the only problem and the person wants HR's permission to go below zero." +
+			" half_start / half_end make the first (or only) / last day a half day (0.5); only for leave counted in working days, on a day that is charged, and half_end needs a request of more than one day."}, d.apply)
 	add(d, s, &mcp.Tool{Name: "edit_request", Annotations: additive("Edit a pending request"),
 		Description: "Change the type, dates or note of one of your own pending requests that nobody has started to decide, instead of withdrawing it and applying again. " +
 			"Give the id and the full new type, start, end and note; the same checks as apply_for_leave apply, and its approver is emailed. " +
-			"Only call this when the person has asked for it. override asks for special permission as in apply_for_leave. There is no ask_hr here: to go below zero, withdraw and apply again with ask_hr."}, d.edit)
+			"Only call this when the person has asked for it. override asks for special permission as in apply_for_leave. There is no ask_hr here: to go below zero, withdraw and apply again with ask_hr." +
+			" half_start / half_end make the first (or only) / last day a half day (0.5); only for leave counted in working days, on a day that is charged, and half_end needs a request of more than one day. Send them again on an edit: leaving them off makes both days whole."}, d.edit)
 	add(d, s, &mcp.Tool{Name: "withdraw_request", Annotations: destructive("Withdraw a request"),
 		Description: "Withdraw one of your own requests that has not been decided yet (pending, waiting for HR, or a draft). Cannot be undone."}, d.withdraw)
 	add(d, s, &mcp.Tool{Name: "submit_draft", Annotations: additive("Submit a draft request"),

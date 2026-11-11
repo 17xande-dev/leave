@@ -211,6 +211,12 @@ CREATE TABLE IF NOT EXISTS requests (
 	end_date            TEXT NOT NULL,
 	-- Hundredths of a day (a whole-day request is a multiple of 100).
 	days_x100           INTEGER NOT NULL CHECK (days_x100 > 0),
+	-- The first / last day is a half day (charged 0.5 instead of 1): how HR's log
+	-- records "1/2 day" or "2.5 days". Only for workdays-unit types, which the
+	-- service enforces. A one-day request uses half_start alone, hence the CHECK:
+	-- half_end on a single day would be the same day twice.
+	half_start          INTEGER NOT NULL DEFAULT 0 CHECK (half_start IN (0, 1)),
+	half_end            INTEGER NOT NULL DEFAULT 0 CHECK (half_end IN (0, 1)),
 	-- The cycle the days count against: the cycle containing start_date.
 	cycle_start         TEXT NOT NULL,
 	note                TEXT NOT NULL DEFAULT '',
@@ -249,6 +255,7 @@ CREATE TABLE IF NOT EXISTS requests (
 	removed_at          TEXT,
 	created_at          TEXT NOT NULL,
 	CHECK (end_date >= start_date),
+	CHECK (half_end = 0 OR end_date > start_date),
 	CHECK ((kind = 'leave') = (cancels_request_id IS NULL)),
 	CHECK (approver_id IS NULL OR user_id <> approver_id)
 ) STRICT;
@@ -388,7 +395,7 @@ func Open(path string) (*sql.DB, error) {
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
 		"users":               {"ext_id", "long_weekend"},
-		"requests":            {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id", "days_x100"},
+		"requests":            {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id", "days_x100", "half_start", "half_end"},
 		"leave_types":         {"restricted_rule", "coverage_rule", "backdate_days", "allowance_x100"},
 		"settings":            {"team_default_percent"},
 		"balance_adjustments": {"days_x100"},
