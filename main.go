@@ -30,6 +30,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "import2026" {
+		os.Exit(runImport2026(os.Args[2:], os.Stdout, time.Now))
+	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)

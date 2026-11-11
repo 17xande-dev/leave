@@ -1,0 +1,11 @@
+row,ext_id,type_code,start,end,half_start,half_end,note
+2,S1,sick,2026-03-04,,,,flu
+3,S1,annual,2026-05-04,2026-05-08,,1,"1/2 day on the Friday"
+4,S9,annual,2026-05-04,2026-05-08,,,
+5,S1,bogus,2026-06-01,,,,
+6,S1,annual,2026-05-06,2026-05-06,,,overlaps row 3
+7,S1,annual,2026-06-01,,2,,bad flag
+8,S2,maternity,2026-09-01,2026-11-29,,,
+9,S2,annual,2028-01-03,2028-01-04,,,too far ahead
+10,A1,annual,2026-07-06,2026-07-07,,,the admin's own
+11,S2,annual,2026-01-01,2026-12-31,,,too long
