@@ -164,12 +164,13 @@ func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]
 		return nil
 	}
 	fe := FieldErrors{}
-	flagged := map[string]bool{"half_start": in.HalfStart, "half_end": in.HalfEnd}
+	// A refusal that is about the request, not one box, is said once, under
+	// the first box ticked, rather than twice.
 	refuse := func(msg string) {
-		for k, on := range flagged {
-			if on {
-				fe[k] = msg
-			}
+		if in.HalfStart {
+			fe["half_start"] = msg
+		} else {
+			fe["half_end"] = msg
 		}
 	}
 	switch {

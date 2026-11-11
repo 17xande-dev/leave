@@ -164,6 +164,43 @@ func TestEditChangingOnlyAFlag(t *testing.T) {
 	}
 }
 
+// Swapping which end is the half day leaves the days at 1.5, so only the flags
+// distinguish the two versions: the fingerprint must still change, or an
+// approver who read "first day half" would approve "last day half" unseen.
+func TestEditSwappingTheHalfDayChangesTheFingerprint(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmitHalf("staff", "annual", "2026-10-12", "2026-10-13", true, false)
+	seen := r.Fingerprint()
+	e, err := f.svc.Edit(f.ctx, f.people["staff"], r.ID, Input{TypeID: r.TypeID, Start: r.Start, End: r.End, Note: r.Note, HalfEnd: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Days != 150 || e.HalfStart || !e.HalfEnd {
+		t.Fatalf("edited = %s days half_start=%v half_end=%v", e.Days, e.HalfStart, e.HalfEnd)
+	}
+	if e.Fingerprint() == seen {
+		t.Fatal("swapping the half day kept the fingerprint")
+	}
+	if _, err := f.svc.DecideSeen(f.ctx, f.people["head"], r.ID, true, "", seen); !errors.Is(err, ErrChanged) {
+		t.Fatalf("deciding on the old fingerprint: %v", err)
+	}
+}
+
+// A refusal about the request itself (not one box) is reported once, under the
+// first ticked box.
+func TestHalfRefusalAboutTheTypeIsReportedOnce(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.submitHalf("staff", "maternity", "2026-10-12", "2026-10-14", true, true)
+	var fe FieldErrors
+	if !errors.As(err, &fe) || fe["half_start"] == "" || fe["half_end"] != "" || len(fe) != 1 {
+		t.Fatalf("both boxes on a calendar-unit type: %v", err)
+	}
+	_, err = f.submitHalf("staff", "maternity", "2026-10-12", "2026-10-14", false, true)
+	if !errors.As(err, &fe) || fe["half_end"] == "" || fe["half_start"] != "" {
+		t.Fatalf("only half_end on a calendar-unit type: %v", err)
+	}
+}
+
 // An edit that shrinks the request to one day cannot keep half_end.
 func TestEditToOneDayRefusesHalfEnd(t *testing.T) {
 	f := newFixture(t)
@@ -335,8 +372,13 @@ func TestDaysSanityCaps(t *testing.T) {
 
 func TestDaysUnmarshalJSONStringDecodesEscapes(t *testing.T) {
 	var d Days
-	if err := d.UnmarshalJSON([]byte(`"1.5"`)); err != nil || d != 150 {
+	// \u0031 is "1": only a real JSON string decode turns this into 1.5; code
+	// that just slices off the quotes would hand ParseDays a backslash.
+	if err := d.UnmarshalJSON([]byte(`"\u0031.5"`)); err != nil || d != 150 {
 		t.Fatalf("escaped string: %v, %v", d, err)
+	}
+	if err := d.UnmarshalJSON([]byte(`"1\"5"`)); err == nil {
+		t.Fatal("a string with an escaped quote inside was accepted")
 	}
 	if err := d.UnmarshalJSON([]byte(`"1.5`)); err == nil {
 		t.Fatal("unterminated string accepted")

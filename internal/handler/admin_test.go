@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/csv"
 	"io"
 	"net/http"
 	"net/url"
@@ -62,6 +63,9 @@ func TestCSVEscapesFormulas(t *testing.T) {
 	defer res.Body.Close()
 	b := new(strings.Builder)
 	io.Copy(b, res.Body)
+	if !strings.Contains(b.String(), ",days,half_day,status,") {
+		t.Fatalf("csv header lacks the half_day column:\n%s", b)
+	}
 	if !strings.Contains(b.String(), `'=HYPERLINK`) || res.Header.Get("Content-Type") != "text/csv; charset=utf-8" {
 		t.Fatalf("csv:\n%s", b)
 	}
@@ -603,5 +607,40 @@ func TestAdjustmentAndAllowanceFormsTakeDecimals(t *testing.T) {
 		"allowance": {"7.555"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}})
 	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "at most two decimals") {
 		t.Errorf("allowance 7.555: %d", res.StatusCode)
+	}
+}
+
+// The export says which day is half, so a 1.5 can be told from two days.
+func TestCSVHasHalfDayColumn(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
+		"end": {"2026-10-13"}, "note": {"n"}, "half_end": {"1"}})
+	hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-19"},
+		"end": {"2026-10-19"}, "note": {"n"}})
+	res, err := hs.signIn("hr").Get(hs.srv.URL + "/admin/requests.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	rows, err := csv.NewReader(res.Body).ReadAll()
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("csv rows = %d, %v", len(rows), err)
+	}
+	col := -1
+	for i, h := range rows[0] {
+		if h == "half_day" {
+			col = i
+		}
+	}
+	if col < 0 {
+		t.Fatalf("header = %v", rows[0])
+	}
+	got := map[string]string{}
+	for _, r := range rows[1:] {
+		got[r[5]] = r[col] // start date
+	}
+	if got["2026-10-12"] != "last day a half day" || got["2026-10-19"] != "" {
+		t.Fatalf("half_day column = %v", got)
 	}
 }
