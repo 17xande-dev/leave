@@ -425,3 +425,169 @@ func TestImport2026DuplicateBalanceRowKeepsTheFirst(t *testing.T) {
 		t.Errorf("S1 available = %v, want 14.6", got)
 	}
 }
+
+// unrecordEnv imports the fixture for real, so there are entries to remove:
+// rows 2 and 3 (S1), 8 (S2) and 10 (A1, recorded by Mel).
+func unrecordEnv(t *testing.T) *impEnv {
+	e := newImpEnv(t)
+	if code, out := e.fixture("-apply"); code != 0 {
+		t.Fatalf("import: %d\n%s", code, out)
+	}
+	return e
+}
+
+func (e *impEnv) unrecord(csv string, extra ...string) (int, string) {
+	p := writeCSV(e.t, "u.csv", csv)
+	return e.run(append([]string{"-unrecord=" + p, "-recorded-by=alex@x.test", "-recorded-by-self=M1"}, extra...)...)
+}
+
+const removed = `SELECT count(*) FROM requests WHERE status = 'cancelled' AND removed_by_id IS NOT NULL`
+
+// -unrecord alone removes exactly the named imports, with no email, even
+// though the earlier import makes a plain -apply refuse; -leave is not needed.
+func TestImport2026UnrecordRemovesQuietly(t *testing.T) {
+	e := unrecordEnv(t)
+	sam := e.available("S1")
+	code, out := e.unrecord("row,ext_id\n3,S1\n10,A1\n", "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "OK  UNREC row 3  ext_id=S1", "OK  UNREC row 10  ext_id=A1",
+		"Unrecord: 2 unrecorded, 0 skipped, 0 errors")
+	if n := e.count(removed); n != 2 {
+		t.Errorf("%d removed, want 2", n)
+	}
+	// Row 10 is Alex's own, so Mel removed it; row 3 Alex.
+	if n := e.count(`SELECT count(*) FROM requests r JOIN users a ON a.id = r.removed_by_id JOIN users u ON u.id = r.user_id
+		WHERE r.status = 'cancelled' AND ((u.ext_id = 'A1' AND a.ext_id = 'M1') OR (u.ext_id = 'S1' AND a.ext_id = 'A1'))`); n != 2 {
+		t.Errorf("%d of 2 removals by the right admin", n)
+	}
+	if got := e.available("S1"); got == nil || *got <= *sam {
+		t.Errorf("S1 available %v -> %v, want days back", sam, got)
+	}
+	// Row 2 (sick, S1) and row 8 are untouched.
+	if n := e.count(`SELECT count(*) FROM requests WHERE status = 'approved'`); n != 2 {
+		t.Errorf("%d approved left, want 2", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE kind = 'calendar_delete'`); n != 2 {
+		t.Errorf("%d calendar_delete jobs, want 2", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox WHERE kind NOT IN ('calendar_create', 'calendar_delete')`); n != 0 {
+		t.Errorf("%d other jobs: someone was emailed", n)
+	}
+}
+
+// Nothing or too much to match is a skip with its reason, never a guess and
+// never a failure: a row the first pass skipped (so it never existed), an
+// unknown or wrong person, a row number that is only a prefix of another.
+func TestImport2026UnrecordSkipsWhatItCannotMatch(t *testing.T) {
+	e := unrecordEnv(t)
+	// Make row 1 ambiguous: a second approved entry carrying the same marker.
+	d, err := db.Open(e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, note, status,
+		approver_id, decided_by_id, decided_at, decision_note, recorded_by_id, created_at)
+		SELECT user_id, type_id, kind, '2026-02-02', '2026-02-02', days_x100, cycle_start, 'dup', status,
+		approver_id, decided_by_id, decided_at, 'Imported from the 2026 leave log (row 2). dup', recorded_by_id, created_at
+		FROM requests WHERE decision_note LIKE '%(row 2).%'`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	code, out := e.unrecord("row,ext_id\n6,S1\n4,S9\n1,S1\n2,S1\n3,S2\n", "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out,
+		"SKIP UNREC row 6  ext_id=S1: no imported request found",
+		"SKIP UNREC row 4  unknown ext_id S9",
+		"SKIP UNREC row 1  ext_id=S1: no imported request found",
+		"SKIP UNREC row 2  ext_id=S1: 2 imported requests match",
+		"SKIP UNREC row 3  ext_id=S2: no imported request found", // row 3 is S1's
+		"Unrecord: 0 unrecorded, 5 skipped, 0 errors")
+	if n := e.count(removed); n != 0 {
+		t.Errorf("%d removed, want none", n)
+	}
+}
+
+// Running the same file again finds nothing left to remove: skips, exit 0.
+func TestImport2026UnrecordTwiceIsSafe(t *testing.T) {
+	e := unrecordEnv(t)
+	csv := "row,ext_id\n3,S1\n8,S2\n"
+	if code, out := e.unrecord(csv, "-apply"); code != 0 {
+		t.Fatalf("first: %d\n%s", code, out)
+	}
+	code, out := e.unrecord(csv, "-apply")
+	if code != 0 {
+		t.Fatalf("second: exit %d:\n%s", code, out)
+	}
+	want(t, out, "SKIP UNREC row 3", "SKIP UNREC row 8", "Unrecord: 0 unrecorded, 2 skipped, 0 errors")
+	if strings.Contains(out, "ERROR") {
+		t.Errorf("second run reported an error:\n%s", out)
+	}
+	if n := e.count(removed); n != 2 {
+		t.Errorf("%d removed, want 2", n)
+	}
+}
+
+// A dry run reports the removals and changes nothing.
+func TestImport2026UnrecordDryRunChangesNothing(t *testing.T) {
+	e := unrecordEnv(t)
+	jobs := e.count(`SELECT count(*) FROM outbox`)
+	code, out := e.unrecord("row,ext_id\n3,S1\n8,S2\n")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "DRY RUN", "OK  UNREC row 3", "OK  UNREC row 8", "Unrecord: 2 unrecorded, 0 skipped, 0 errors")
+	if n := e.count(removed); n != 0 {
+		t.Errorf("dry run removed %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM outbox`); n != jobs {
+		t.Errorf("dry run changed the outbox from %d to %d", jobs, n)
+	}
+}
+
+// -unrecord works with -leave/-balances in one run (imports, then removals,
+// then balances against what is left), and a database failure is an error.
+func TestImport2026UnrecordWithLeaveAndErrors(t *testing.T) {
+	e := newImpEnv(t)
+	u := writeCSV(t, "u.csv", "row,ext_id\n2,S1\n")
+	code, out := e.fixture("-unrecord="+u, "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "OK  UNREC row 2  ext_id=S1", "Leave:    4 imported, 6 skipped", "Unrecord: 1 unrecorded, 0 skipped, 0 errors",
+		"Verification: 3 balances equal the file exactly.")
+
+	// A broken table is an ERROR that fails the run, not a skip.
+	e2 := unrecordEnv(t)
+	d, err := db.Open(e2.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`CREATE TRIGGER boom BEFORE UPDATE ON requests BEGIN SELECT RAISE(ABORT, 'disk on fire'); END`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	code, out = e2.unrecord("row,ext_id\n3,S1\n", "-apply")
+	if code != 1 {
+		t.Fatalf("exit %d, want 1:\n%s", code, out)
+	}
+	want(t, out, "ERROR UNREC row 3", "disk on fire", "FAILED")
+}
+
+// The flags must name a workable combination.
+func TestImport2026UnrecordFlagRules(t *testing.T) {
+	e := newImpEnv(t)
+	u := writeCSV(t, "u.csv", "row,ext_id\n")
+	if code, _ := e.run("-recorded-by=alex"); code != 2 {
+		t.Errorf("no input: exit %d, want 2", code)
+	}
+	if code, _ := e.run("-leave="+fixtureLeave, "-unrecord="+u, "-recorded-by=alex"); code != 2 {
+		t.Errorf("-leave without -balances: exit %d, want 2", code)
+	}
+	if code, out := e.run("-unrecord="+writeCSV(t, "bad.csv", "row\n1\n"), "-recorded-by=alex"); code != 2 {
+		t.Errorf("bad header: exit %d, want 2:\n%s", code, out)
+	}
+}

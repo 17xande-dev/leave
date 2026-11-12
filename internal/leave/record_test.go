@@ -317,3 +317,54 @@ func TestImportLeaveAllowsAYearAhead(t *testing.T) {
 		t.Fatal("an admin imported their own leave")
 	}
 }
+
+// UnimportLeave quietly undoes what the 2026 import made, and only that: the
+// note the import leaves is required, so recorded or ordinary leave is refused.
+func TestUnimportLeave(t *testing.T) {
+	f := newFixture(t) // today is 2026-10-05
+	hr, staff := f.people["hr"], f.people["staff"]
+	imp, err := f.svc.ImportLeave(f.ctx, hr, staff.ID,
+		Input{TypeID: f.types["annual"].ID, Start: "2026-06-15", End: "2026-06-19"}, ImportedNotePrefix+"7). flu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := f.mustRecord("staff", "sick", "2026-06-01", "2026-06-01")
+	ordinary := f.mustSubmit("staff", "annual", "2026-11-02", "2026-11-02")
+	f.svc.Decide(f.ctx, f.people["head"], ordinary.ID, true, "")
+	// Even a note that looks like the import's, typed into an approval, is not enough.
+	faked := f.mustSubmit("staff", "annual", "2026-11-09", "2026-11-09")
+	f.svc.Decide(f.ctx, f.people["head"], faked.ID, true, ImportedNotePrefix+"9).")
+
+	for name, id := range map[string]int64{"recorded": recorded.ID, "ordinary": ordinary.ID, "lookalike": faked.ID} {
+		if _, err := f.svc.UnimportLeave(f.ctx, hr, id); !errors.Is(err, ErrNotAllowed) {
+			t.Errorf("%s leave: %v, want ErrNotAllowed", name, err)
+		}
+		if got, _ := f.svc.Get(f.ctx, id); got.Status != StatusApproved {
+			t.Errorf("%s leave status = %s after a refused removal", name, got.Status)
+		}
+	}
+	if _, err := f.svc.UnimportLeave(f.ctx, staff, imp.ID); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("non-admin: %v", err)
+	}
+	own := staff
+	own.Admin = true
+	if _, err := f.svc.UnimportLeave(f.ctx, own, imp.ID); !fieldErr(err, "person") || err.(FieldErrors)["person"] != MsgUnrecordOwn {
+		t.Fatalf("own leave: %v", err)
+	}
+
+	before := f.available("staff", "annual")
+	f.events = nil
+	got, err := f.svc.UnimportLeave(f.ctx, hr, imp.ID)
+	if err != nil || got.Status != StatusCancelled || got.RemovedByID != hr.ID || got.RemovedAt == "" {
+		t.Fatalf("unimport = %+v, %v", got, err)
+	}
+	if len(f.events) != 1 || f.events[0].Kind != EventUnimported {
+		t.Fatalf("events = %+v, want one EventUnimported", f.events)
+	}
+	if after := f.available("staff", "annual"); after != before+int(imp.Days/100) {
+		t.Errorf("available %d -> %d, want the %s back", before, after, imp.Days)
+	}
+	if _, err := f.svc.UnimportLeave(f.ctx, hr, imp.ID); !fieldErr(err, "request") || err.(FieldErrors)["request"] != MsgUnrecordGone {
+		t.Fatalf("removing twice: %v", err)
+	}
+}

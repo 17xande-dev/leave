@@ -9,8 +9,12 @@ package main
 //	leave import2026 -leave=leave.csv -balances=balances.csv \
 //	    -recorded-by=ADMIN -recorded-by-self=OTHER_ADMIN [-apply] [-force]
 //
+// -unrecord=unrecord.csv quietly removes entries an earlier run imported (no
+// email, calendar event only); it may be given with -leave/-balances or alone.
+//
 // leave.csv:    row,ext_id,type_code,start,end,half_start,half_end,note
 // balances.csv: ext_id,available
+// unrecord.csv: row,ext_id
 //
 // Without -apply nothing is written to the database: the run is made against
 // a private copy of it (VACUUM INTO), which is thrown away, so the report is
@@ -41,13 +45,15 @@ import (
 
 // importMarker starts the decision note of every imported entry; it is how a
 // second -apply is noticed.
-const importMarker = "Imported from the 2026 leave log (row "
+const importMarker = leave.ImportedNotePrefix
 
 type leaveRow struct {
 	row, ext, typeCode, start, end, halfStart, halfEnd, note string
 }
 
 type balanceRow struct{ ext, available string }
+
+type unrecordRow struct{ row, ext string }
 
 // runImport2026 is the whole subcommand; the return value is the exit code:
 // 0 done (skips included), 1 an -apply whose verification failed, 2 the run
@@ -61,6 +67,7 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 	bySelf := fs.String("recorded-by-self", "", "a second admin, who records the first admin's own entries")
 	apply := fs.Bool("apply", false, "write to the database (default: dry run)")
 	force := fs.Bool("force", false, "apply even though entries were imported before")
+	unPath := fs.String("unrecord", "", "unrecord.csv: imported entries to remove quietly (no email)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -68,16 +75,27 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 		fmt.Fprintf(stdout, "ERROR "+format+"\n", a...)
 		return 2
 	}
-	if *leavePath == "" || *balPath == "" || *by == "" {
-		return fail("-leave, -balances and -recorded-by are required")
+	if *by == "" || (*leavePath == "") != (*balPath == "") || (*leavePath == "" && *unPath == "") {
+		return fail("-recorded-by is required, with -leave and -balances together, -unrecord, or both")
 	}
-	leaves, err := readLeaveCSV(*leavePath)
-	if err != nil {
-		return fail("%v", err)
+	var (
+		leaves []leaveRow
+		bals   []balanceRow
+		unrecs []unrecordRow
+		err    error
+	)
+	if *leavePath != "" {
+		if leaves, err = readLeaveCSV(*leavePath); err != nil {
+			return fail("%v", err)
+		}
+		if bals, err = readBalancesCSV(*balPath); err != nil {
+			return fail("%v", err)
+		}
 	}
-	bals, err := readBalancesCSV(*balPath)
-	if err != nil {
-		return fail("%v", err)
+	if *unPath != "" {
+		if unrecs, err = readUnrecordCSV(*unPath); err != nil {
+			return fail("%v", err)
+		}
 	}
 
 	cfg, err := config.Load()
@@ -110,7 +128,7 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 		return fail("%v", err)
 	}
 	imp := &importer{ctx: ctx, out: stdout, db: database, svc: svc, users: us}
-	return imp.run(leaves, bals, *by, *bySelf, *apply, *force)
+	return imp.run(leaves, bals, unrecs, *by, *bySelf, *apply, *force)
 }
 
 // copyDB writes a consistent copy of the SQLite database at src to dst. src is
@@ -186,7 +204,7 @@ func (im *importer) resolveAdmin(key string) (users.User, error) {
 	return users.User{}, fmt.Errorf("no user %q (tried ext_id, username, email)", key)
 }
 
-func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey string, apply, force bool) int {
+func (im *importer) run(leaves []leaveRow, bals []balanceRow, unrecs []unrecordRow, byKey, selfKey string, apply, force bool) int {
 	fail := func(format string, a ...any) int {
 		im.printf("ERROR "+format, a...)
 		return 2
@@ -221,6 +239,11 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 			needSelf = true
 		}
 	}
+	for _, r := range unrecs {
+		if u, err := im.users.ByExtID(im.ctx, r.ext); err == nil && u.ID == by.ID {
+			needSelf = true
+		}
+	}
 	if needSelf {
 		switch {
 		case selfKey == "":
@@ -236,7 +259,9 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 		return fail("%v", err)
 	}
 	if prior > 0 {
-		if apply && !force {
+		// The refusal guards against importing leave twice; a run that only
+		// removes entries (-unrecord alone) imports nothing, so it is exempt.
+		if apply && !force && len(leaves)+len(bals) > 0 {
 			return fail("%d entries were already imported (decision note starts %q). Refusing to import again; -force overrides.", prior, importMarker)
 		}
 		im.printf("NOTE %d entries were already imported before this run.", prior)
@@ -284,6 +309,20 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 			default:
 				errored++
 			}
+		}
+	}
+
+	// Removals come after the imports and before the balances, so the opening
+	// balance is worked out against the leave that is left.
+	var unrecorded, unSkipped, unErrored int
+	for _, r := range unrecs {
+		switch im.unrecordRow(r, actor) {
+		case outOK:
+			unrecorded++
+		case outSkip:
+			unSkipped++
+		default:
+			unErrored++
 		}
 	}
 
@@ -337,8 +376,11 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, byKey, selfKey str
 	im.printf("")
 	im.printf("Leave:    %d imported, %d skipped, %d errors", imported, skipped, errored)
 	im.printf("Balances: %d applied, %d skipped, %d held for review, %d errors", applied, balSkipped, held, balErrored)
-	if errored+balErrored > 0 {
-		im.printf("FAILED: %d rows hit an error (not a skip): a database problem or a bad file. Fix it before trusting this run.", errored+balErrored)
+	if len(unrecs) > 0 {
+		im.printf("Unrecord: %d unrecorded, %d skipped, %d errors", unrecorded, unSkipped, unErrored)
+	}
+	if errored+balErrored+unErrored > 0 {
+		im.printf("FAILED: %d rows hit an error (not a skip): a database problem or a bad file. Fix it before trusting this run.", errored+balErrored+unErrored)
 		return 1
 	}
 	if mismatches > 0 {
@@ -428,6 +470,70 @@ func (im *importer) importRow(r leaveRow, types map[string]leave.Type, actor fun
 		return outErr
 	}
 	im.printf("OK  row %s  ext_id=%s %s %s..%s (%s)", r.row, r.ext, t.Code, req.Start, req.End, req.Days.Label(t.Unit))
+	return outOK
+}
+
+// unrecordRow quietly removes the one entry the import made for a log row.
+// Anything but exactly one match is a skip, never a guess: a row the first
+// pass never imported (so there is nothing to remove, as when its day is not a
+// work day), one already removed, or an ambiguous one.
+func (im *importer) unrecordRow(r unrecordRow, actor func(users.User) users.User) outcome {
+	skip := func(format string, a ...any) outcome {
+		im.printf("SKIP UNREC row %s  "+format, append([]any{r.row}, a...)...)
+		return outSkip
+	}
+	fail := func(format string, a ...any) outcome {
+		im.printf("ERROR UNREC row %s  "+format, append([]any{r.row}, a...)...)
+		return outErr
+	}
+	u, err := im.users.ByExtID(im.ctx, r.ext)
+	switch {
+	case errors.Is(err, users.ErrNotFound):
+		return skip("unknown ext_id %s", r.ext)
+	case err != nil:
+		return fail("%v", err)
+	case u.Disabled:
+		return skip("user is disabled (ext_id %s)", r.ext)
+	}
+	// The note is "<marker><row>). <text>": match the start of it exactly
+	// (substr, so a stray % or _ in the file is not a wildcard), so that row 1
+	// never matches row 10.
+	prefix := fmt.Sprintf("%s%s).", importMarker, r.row)
+	rows, err := im.db.QueryContext(im.ctx, `SELECT id FROM requests WHERE user_id = ? AND status = 'approved'
+		AND recorded_by_id IS NOT NULL AND substr(decision_note, 1, ?) = ?`, u.ID, len(prefix), prefix)
+	if err != nil {
+		return fail("%v", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fail("%v", err)
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return fail("%v", err)
+	}
+	switch len(ids) {
+	case 0:
+		return skip("ext_id=%s: no imported request found to remove (never imported, or already removed)", r.ext)
+	case 1:
+	default:
+		return skip("ext_id=%s: %d imported requests match, not guessing which to remove", r.ext, len(ids))
+	}
+	req, err := im.svc.UnimportLeave(im.ctx, actor(u), ids[0])
+	var fe leave.FieldErrors
+	switch {
+	case errors.As(err, &fe):
+		return skip("%s", reason(err))
+	case err != nil:
+		return fail("%v", err)
+	}
+	im.printf("OK  UNREC row %s  ext_id=%s %s..%s removed", r.row, r.ext, req.Start, req.End)
 	return outOK
 }
 
@@ -565,6 +671,18 @@ func readLeaveCSV(path string) ([]leaveRow, error) {
 	out := make([]leaveRow, len(recs))
 	for i, m := range recs {
 		out[i] = leaveRow{m["row"], m["ext_id"], m["type_code"], m["start"], m["end"], m["half_start"], m["half_end"], m["note"]}
+	}
+	return out, nil
+}
+
+func readUnrecordCSV(path string) ([]unrecordRow, error) {
+	recs, err := readCSV(path, "row", "ext_id")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]unrecordRow, len(recs))
+	for i, m := range recs {
+		out[i] = unrecordRow{m["row"], m["ext_id"]}
 	}
 	return out, nil
 }

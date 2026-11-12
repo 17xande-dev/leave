@@ -120,6 +120,26 @@ func (s *Service) recordApproved(ctx context.Context, admin users.User, userID i
 // The guard is in the UPDATE itself: recorded_by_id is set only by RecordLeave,
 // so nothing an approver types can make ordinary leave removable this way.
 func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Request, error) {
+	return s.removeRecorded(ctx, admin, id, EventRevoked, "")
+}
+
+// ImportedNotePrefix starts the decision note of every entry ImportLeave was
+// given by the import2026 command; it is how those entries are recognised.
+const ImportedNotePrefix = "Imported from the 2026 leave log (row "
+
+// UnimportLeave removes an entry the 2026 import created, as Unrecord does but
+// quietly: EventUnimported takes the calendar event away and tells nobody. It
+// exists for the one-off correction of the bulk import, a historical fix that
+// should not email anyone about leave payroll already settled. It is
+// deliberately not a general quiet remove: the UPDATE itself requires the
+// import's note, so anything recorded or approved any other way is refused.
+func (s *Service) UnimportLeave(ctx context.Context, admin users.User, id int64) (Request, error) {
+	return s.removeRecorded(ctx, admin, id, EventUnimported, ImportedNotePrefix)
+}
+
+// removeRecorded is the body Unrecord and UnimportLeave share. A non-empty
+// notePrefix additionally requires the decision note to start with it.
+func (s *Service) removeRecorded(ctx context.Context, admin users.User, id int64, event EventKind, notePrefix string) (Request, error) {
 	if !admin.Admin || admin.Disabled {
 		return Request{}, ErrNotAllowed
 	}
@@ -129,7 +149,7 @@ func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Req
 		if err != nil {
 			return err
 		}
-		if !r.IsRecorded() {
+		if !r.IsRecorded() || !strings.HasPrefix(r.DecisionNote, notePrefix) {
 			return ErrNotAllowed
 		}
 		if r.UserID == admin.ID {
@@ -139,8 +159,15 @@ func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Req
 			return FieldErrors{"request": MsgUnrecordGone}
 		}
 		now := stampNow(s.Now())
-		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = 'cancelled', removed_by_id = ?, removed_at = ?
-			WHERE id = ? AND recorded_by_id IS NOT NULL AND status = 'approved'`, admin.ID, now, id)
+		q := `UPDATE requests SET status = 'cancelled', removed_by_id = ?, removed_at = ?
+			WHERE id = ? AND recorded_by_id IS NOT NULL AND status = 'approved'`
+		args := []any{admin.ID, now, id}
+		if notePrefix != "" {
+			// substr, not LIKE: the prefix holds a "(" and the note is free text.
+			q += ` AND substr(decision_note, 1, ?) = ?`
+			args = append(args, len(notePrefix), notePrefix)
+		}
+		res, err := tx.ExecContext(ctx, q, args...)
 		if err != nil {
 			return err
 		}
@@ -156,7 +183,7 @@ func (s *Service) Unrecord(ctx context.Context, admin users.User, id int64) (Req
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
-		return s.hook(ctx, tx, Event{Kind: EventRevoked, Request: out, Actor: admin})
+		return s.hook(ctx, tx, Event{Kind: event, Request: out, Actor: admin})
 	})
 	return out, err
 }

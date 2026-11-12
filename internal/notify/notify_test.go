@@ -543,3 +543,22 @@ func TestImportedLeaveIsCalendarOnly(t *testing.T) {
 		t.Fatalf("jobs = %+v, want one calendar_create", jobs)
 	}
 }
+
+// Removing imported leave takes it off the calendar and emails nobody.
+func TestUnimportedLeaveIsCalendarOnly(t *testing.T) {
+	e := setup(t)
+	r, err := e.svc.ImportLeave(e.ctx, e.people["hr"], e.people["staff"].ID,
+		leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-13"}, leave.ImportedNotePrefix+"1).")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+	if _, err := e.svc.UnimportLeave(e.ctx, e.people["hr"], r.ID); err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	want := `{"request_id":` + itoa(r.ID) + `}`
+	if len(jobs) != 1 || jobs[0].kind != "calendar_delete" || jobs[0].payload != want {
+		t.Fatalf("jobs = %+v, want one calendar_delete", jobs)
+	}
+}

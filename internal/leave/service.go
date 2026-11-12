@@ -74,6 +74,9 @@ const (
 	// EventRevoked: an admin removed leave they had recorded. Request is the
 	// now-cancelled leave.
 	EventRevoked EventKind = "revoked"
+	// EventUnimported: an admin quietly removed an entry the 2026 import
+	// created (UnimportLeave). Like EventRevoked, but nobody is emailed.
+	EventUnimported EventKind = "unimported"
 	// EventEdited: the requester changed a pending request. Request is as it
 	// is now and Before as it was; the approver is told.
 	EventEdited EventKind = "edited"
