@@ -977,3 +977,61 @@ func TestHalfDaysThroughTheTools(t *testing.T) {
 		t.Fatalf("record_leave = %v", rec.Data)
 	}
 }
+
+// A male-marked person sees no maternity anywhere in what the tools list: not
+// in the balances, and not in the "did you mean" hint for a wrong type name.
+func TestMaternityHiddenFromMaleStaffInToolListings(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.makeAdmin("hr")
+	staff, hr := f.as("staff1"), f.as("hr")
+	u, err := f.us.ByUsername(ctx, "staff1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := map[string]any{"type": "nonsense", "start": "2026-10-19", "end": "2026-10-20", "note": "n"}
+	hints := func() map[string]string {
+		t.Helper()
+		out := map[string]string{}
+		for tool, args := range map[string]struct {
+			cs   *mcp.ClientSession
+			args map[string]any
+		}{
+			"apply_for_leave": {staff, wrong},
+			"record_leave":    {hr, map[string]any{"person": "staff1", "type": "nonsense", "start": "2026-06-22", "end": "2026-06-23", "note": "n"}},
+			"adjust_balance":  {hr, map[string]any{"person": "staff1", "type": "nonsense", "days": 1, "reason": "x"}},
+		} {
+			r := f.call(args.cs, tool, args.args)
+			if !r.IsError || !strings.Contains(r.Text, "is not one of") {
+				t.Fatalf("%s: want a type hint, got %v %q", tool, r.IsError, r.Text)
+			}
+			out[tool] = r.Text
+		}
+		return out
+	}
+	balances := func() string {
+		t.Helper()
+		return f.ok(staff, "my_balances", nil).Text + f.ok(hr, "person_balances", map[string]any{"person": "staff1"}).Text
+	}
+
+	if !strings.Contains(balances(), "maternity") {
+		t.Fatal("maternity missing from balances for a person with no sex recorded")
+	}
+	for tool, text := range hints() {
+		if !strings.Contains(text, "maternity (") {
+			t.Errorf("%s hint omits maternity for an unmarked person: %q", tool, text)
+		}
+	}
+
+	if err := f.us.SetSex(ctx, u.ID, "m"); err != nil {
+		t.Fatal(err)
+	}
+	if got := balances(); strings.Contains(got, "maternity") || !strings.Contains(got, "annual") {
+		t.Errorf("balances for a male-marked person: %s", got)
+	}
+	for tool, text := range hints() {
+		if strings.Contains(text, "maternity") || !strings.Contains(text, "annual (") {
+			t.Errorf("%s hint for a male-marked person: %q", tool, text)
+		}
+	}
+}

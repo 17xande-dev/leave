@@ -99,7 +99,7 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 	if err != nil {
 		return RecordedOut{}, "", err
 	}
-	t, err := d.resolveTypeIn(ctx, in.Type, false)
+	t, err := d.resolveTypeIn(ctx, in.Type, false, who)
 	if err != nil {
 		return RecordedOut{}, "", err
 	}
@@ -232,7 +232,7 @@ func (d *deps) adjustBalance(ctx context.Context, u users.User, in AdjustIn) (Ad
 	if err != nil {
 		return AdjustOut{}, "", err
 	}
-	t, err := d.resolveType(ctx, in.Type)
+	t, err := d.resolveType(ctx, in.Type, who)
 	if err != nil {
 		return AdjustOut{}, "", err
 	}

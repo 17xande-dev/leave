@@ -166,3 +166,43 @@ func TestMaternityMessageNamesTheReader(t *testing.T) {
 		t.Errorf("import: %q, want %q", got, theirs)
 	}
 }
+
+// Balances leaves maternity out entirely for someone recorded as male, rather
+// than listing it with a refused state; everyone else, and every other type,
+// is unchanged.
+func TestBalancesOmitMaternityForMaleStaff(t *testing.T) {
+	codes := func(f *fixture) map[string]bool {
+		t.Helper()
+		bs, err := f.svc.Balances(f.ctx, f.people["staff"].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, b := range bs {
+			m[b.Type.Code] = true
+		}
+		return m
+	}
+	f := newFixture(t)
+	before := codes(f)
+	if !before[MaternityCode] {
+		t.Fatal("maternity missing for a person with no sex recorded")
+	}
+	f.setSex("staff", "f")
+	if got := codes(f); len(got) != len(before) || !got[MaternityCode] {
+		t.Errorf("female: %v, want %v", got, before)
+	}
+	f.setSex("staff", "m")
+	got := codes(f)
+	if got[MaternityCode] {
+		t.Error("maternity listed for a male-marked person")
+	}
+	if len(got) != len(before)-1 {
+		t.Errorf("male: %v, want everything in %v but maternity", got, before)
+	}
+	for c := range before {
+		if c != MaternityCode && !got[c] {
+			t.Errorf("%s dropped for a male-marked person", c)
+		}
+	}
+}

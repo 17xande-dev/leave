@@ -128,3 +128,32 @@ func TestApprovingMaternityForSinceMarkedMaleIsRefused(t *testing.T) {
 		t.Errorf("decline: %d", res.StatusCode)
 	}
 }
+
+// The person's own page and the admin's page about them list no maternity
+// balance for a man, and still do for everyone else.
+func TestMaternityBalanceHiddenFromMaleStaff(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	staff := hs.signIn("staff1")
+	page := "/admin/users/" + itoa(hs.staffID("staff1"))
+	const name = "Maternity leave"
+
+	check := func(label string, want bool) {
+		t.Helper()
+		_, home := hs.get(staff, "/")
+		_, admin := hs.get(hr, page)
+		for where, body := range map[string]string{"home": home, "admin person": admin} {
+			if !strings.Contains(body, "Annual leave") {
+				t.Errorf("%s, %s page: annual missing", label, where)
+			}
+			if got := strings.Contains(body, name); got != want {
+				t.Errorf("%s, %s page: maternity shown = %v, want %v", label, where, got, want)
+			}
+		}
+	}
+	check("unset", true)
+	hs.post(hr, page+"/sex", url.Values{"sex": {"m"}})
+	check("male", false)
+	hs.post(hr, page+"/sex", url.Values{"sex": {"f"}})
+	check("female", true)
+}

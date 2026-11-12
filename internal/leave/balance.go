@@ -2,6 +2,7 @@ package leave
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,12 +101,19 @@ func (s *Service) AfterApproval(ctx context.Context, req Request) (After, error)
 	return out, nil
 }
 
-// Balances is every active type's balance for the cycle containing today.
+// Balances is the balance of every active type offered to the person, for the
+// cycle containing today. A type that is refused to them (maternity, for
+// someone recorded as male) is left out, not shown as unavailable.
 func (s *Service) Balances(ctx context.Context, userID int64) ([]Balance, error) {
+	u, err := s.users.ByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	types, err := s.Types(ctx, true)
 	if err != nil {
 		return nil, err
 	}
+	types = slices.DeleteFunc(types, func(t Type) bool { return !t.OfferedTo(u) })
 	st, err := s.settings(ctx, s.db)
 	if err != nil {
 		return nil, err

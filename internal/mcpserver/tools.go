@@ -307,13 +307,16 @@ func (d *deps) publicHolidays(ctx context.Context, _ users.User, in HolidaysIn) 
 // --- Requests: preview and apply --------------------------------------------
 
 // resolveType finds the active leave type a person means by its code or name.
-func (d *deps) resolveType(ctx context.Context, name string) (leave.Type, error) {
-	return d.resolveTypeIn(ctx, name, true)
+// target is who the type is for: the "did you mean" hint leaves out types not
+// offered to them. An exact match is still returned, so the rules refuse it
+// with their own reason.
+func (d *deps) resolveType(ctx context.Context, name string, target users.User) (leave.Type, error) {
+	return d.resolveTypeIn(ctx, name, true, target)
 }
 
 // resolveTypeIn is resolveType, optionally over retired types too (recording
 // leave from before a type was retired).
-func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool) (leave.Type, error) {
+func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool, target users.User) (leave.Type, error) {
 	ts, err := d.leave.Types(ctx, activeOnly)
 	if err != nil {
 		return leave.Type{}, err
@@ -328,7 +331,9 @@ func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool) 
 	}
 	opts := make([]string, 0, len(ts))
 	for _, t := range ts {
-		opts = append(opts, fmt.Sprintf("%s (%s)", t.Code, t.Name))
+		if t.OfferedTo(target) {
+			opts = append(opts, fmt.Sprintf("%s (%s)", t.Code, t.Name))
+		}
 	}
 	return leave.Type{}, userErrorf("Leave type %q is not one of: %s.", name, strings.Join(opts, ", "))
 }
@@ -342,8 +347,10 @@ type RequestIn struct {
 	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
 }
 
-func (d *deps) input(ctx context.Context, in RequestIn) (leave.Input, error) {
-	t, err := d.resolveType(ctx, in.Type)
+// input is the request as the applicant u made it; u only shapes the hint when
+// the type is not recognised.
+func (d *deps) input(ctx context.Context, u users.User, in RequestIn) (leave.Input, error) {
+	t, err := d.resolveType(ctx, in.Type, u)
 	if err != nil {
 		return leave.Input{}, err
 	}
@@ -406,7 +413,7 @@ func (d *deps) approverName(ctx context.Context, u users.User) (string, error) {
 }
 
 func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (PreviewOut, string, error) {
-	li, err := d.input(ctx, in)
+	li, err := d.input(ctx, u, in)
 	if err != nil {
 		return PreviewOut{}, "", err
 	}
@@ -459,7 +466,7 @@ type RequestOut struct {
 }
 
 func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut, string, error) {
-	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
 		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
@@ -498,7 +505,7 @@ func (d *deps) edit(ctx context.Context, u users.User, in EditIn) (RequestOut, s
 	if err != nil {
 		return RequestOut{}, "", err
 	}
-	li, err := d.input(ctx, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
 		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
