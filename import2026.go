@@ -10,7 +10,8 @@ package main
 //	    -recorded-by=ADMIN -recorded-by-self=OTHER_ADMIN [-apply] [-force]
 //
 // -unrecord=unrecord.csv quietly removes entries an earlier run imported (no
-// email, calendar event only); it may be given with -leave/-balances or alone.
+// email, calendar event only); it must be given on its own, between two
+// -leave/-balances runs.
 //
 // leave.csv:    row,ext_id,type_code,start,end,half_start,half_end,note
 // balances.csv: ext_id,available
@@ -76,7 +77,14 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 		return 2
 	}
 	if *by == "" || (*leavePath == "") != (*balPath == "") || (*leavePath == "" && *unPath == "") {
-		return fail("-recorded-by is required, with -leave and -balances together, -unrecord, or both")
+		return fail("-recorded-by is required, with either -leave and -balances together, or -unrecord alone")
+	}
+	// No single order serves both: a remainder re-booked after an original is
+	// refused as an overlap while the original is still there, and the
+	// removal cannot come first without the balances seeing the old leave.
+	// So the removal is its own run, between the two imports.
+	if *unPath != "" && *leavePath != "" {
+		return fail("-unrecord must run on its own, not together with -leave/-balances")
 	}
 	var (
 		leaves []leaveRow
@@ -312,8 +320,8 @@ func (im *importer) run(leaves []leaveRow, bals []balanceRow, unrecs []unrecordR
 		}
 	}
 
-	// Removals come after the imports and before the balances, so the opening
-	// balance is worked out against the leave that is left.
+	// -unrecord runs alone (see runImport2026), so there are no imports or
+	// balances in the same run.
 	var unrecorded, unSkipped, unErrored int
 	for _, r := range unrecs {
 		switch im.unrecordRow(r, actor) {

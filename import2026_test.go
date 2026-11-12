@@ -548,19 +548,8 @@ func TestImport2026UnrecordDryRunChangesNothing(t *testing.T) {
 	}
 }
 
-// -unrecord works with -leave/-balances in one run (imports, then removals,
-// then balances against what is left), and a database failure is an error.
-func TestImport2026UnrecordWithLeaveAndErrors(t *testing.T) {
-	e := newImpEnv(t)
-	u := writeCSV(t, "u.csv", "row,ext_id\n2,S1\n")
-	code, out := e.fixture("-unrecord="+u, "-apply")
-	if code != 0 {
-		t.Fatalf("exit %d:\n%s", code, out)
-	}
-	want(t, out, "OK  UNREC row 2  ext_id=S1", "Leave:    4 imported, 6 skipped", "Unrecord: 1 unrecorded, 0 skipped, 0 errors",
-		"Verification: 3 balances equal the file exactly.")
-
-	// A broken table is an ERROR that fails the run, not a skip.
+// A database failure while removing is an ERROR that fails the run, not a skip.
+func TestImport2026UnrecordDatabaseErrorFailsTheRun(t *testing.T) {
 	e2 := unrecordEnv(t)
 	d, err := db.Open(e2.path)
 	if err != nil {
@@ -570,7 +559,7 @@ func TestImport2026UnrecordWithLeaveAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Close()
-	code, out = e2.unrecord("row,ext_id\n3,S1\n", "-apply")
+	code, out := e2.unrecord("row,ext_id\n3,S1\n", "-apply")
 	if code != 1 {
 		t.Fatalf("exit %d, want 1:\n%s", code, out)
 	}
@@ -587,7 +576,74 @@ func TestImport2026UnrecordFlagRules(t *testing.T) {
 	if code, _ := e.run("-leave="+fixtureLeave, "-unrecord="+u, "-recorded-by=alex"); code != 2 {
 		t.Errorf("-leave without -balances: exit %d, want 2", code)
 	}
+	bal := writeCSV(t, "b.csv", "ext_id,available\n")
+	if code, out := e.run("-leave="+fixtureLeave, "-balances="+bal, "-unrecord="+u, "-recorded-by=alex"); code != 2 {
+		t.Errorf("-unrecord with -leave/-balances: exit %d, want 2:\n%s", code, out)
+	} else {
+		want(t, out, "-unrecord must run on its own")
+	}
 	if code, out := e.run("-unrecord="+writeCSV(t, "bad.csv", "row\n1\n"), "-recorded-by=alex"); code != 2 {
 		t.Errorf("bad header: exit %d, want 2:\n%s", code, out)
+	}
+}
+
+// The admin's own row needs the second admin; without one the run refuses
+// before removing anything, even the other person's row in the same file.
+func TestImport2026UnrecordOwnRowNeedsSecondAdmin(t *testing.T) {
+	e := unrecordEnv(t)
+	p := writeCSV(t, "u.csv", "row,ext_id\n3,S1\n10,A1\n")
+	code, out := e.run("-unrecord="+p, "-recorded-by=alex@x.test", "-apply")
+	if code != 2 {
+		t.Fatalf("exit %d, want 2:\n%s", code, out)
+	}
+	want(t, out, "-recorded-by-self is required")
+	if n := e.count(removed); n != 0 {
+		t.Errorf("%d removed, want none", n)
+	}
+}
+
+// The row number matches exactly: removing row 1 leaves rows 10, 11 and 1a.
+func TestImport2026UnrecordRowNumberIsExact(t *testing.T) {
+	e := newImpEnv(t)
+	l := writeCSV(t, "l.csv", "row,ext_id,type_code,start,end,half_start,half_end,note\n"+
+		"10,S2,annual,2026-03-02,,,,\n1,S2,annual,2026-03-03,,,,\n11,S2,annual,2026-03-04,,,,\n1a,S2,annual,2026-03-05,,,,\n")
+	b := writeCSV(t, "b.csv", "ext_id,available\n")
+	if code, out := e.run("-leave="+l, "-balances="+b, "-recorded-by=alex", "-apply"); code != 0 {
+		t.Fatalf("import: %d\n%s", code, out)
+	}
+	if n := e.count(`SELECT count(*) FROM requests WHERE status = 'approved'`); n != 4 {
+		t.Fatalf("%d imported, want 4", n)
+	}
+	code, out := e.unrecord("row,ext_id\n1,S2\n", "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "Unrecord: 1 unrecorded, 0 skipped, 0 errors")
+	if n := e.count(removed); n != 1 {
+		t.Fatalf("%d removed, want 1", n)
+	}
+	if n := e.count(`SELECT count(*) FROM requests WHERE status = 'cancelled' AND start_date = '2026-03-03'`); n != 1 {
+		t.Error("the removed request is not row 1's")
+	}
+}
+
+// A disabled person's row is a skip: nothing removed, no error.
+func TestImport2026UnrecordDisabledUserIsSkipped(t *testing.T) {
+	e := unrecordEnv(t)
+	d, err := db.Open(e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`UPDATE users SET disabled = 1 WHERE ext_id = 'S1'`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	code, out := e.unrecord("row,ext_id\n3,S1\n", "-apply")
+	if code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	want(t, out, "SKIP UNREC row 3  user is disabled (ext_id S1)", "Unrecord: 0 unrecorded, 1 skipped, 0 errors")
+	if n := e.count(removed); n != 0 {
+		t.Errorf("%d removed, want none", n)
 	}
 }
