@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"html"
 	"net/http"
 	"net/url"
 	"strings"
@@ -74,5 +75,56 @@ func TestMaternityPickerHiddenFromMaleStaff(t *testing.T) {
 	// Someone else is unaffected.
 	if _, body := hs.get(hs.signIn("staff2"), "/leave/new"); !strings.Contains(body, opt) {
 		t.Error("maternity hidden from a person who is not marked male")
+	}
+}
+
+// A maternity request made while the person's sex was unset is not approved
+// once they are marked male: the single decide (from the request page and from
+// the queue row) and the bulk approve each refuse it, say why, and leave it
+// pending.
+func TestApprovingMaternityForSinceMarkedMaleIsRefused(t *testing.T) {
+	hs := newHarness(t)
+	hr, head := hs.signIn("hr"), hs.signIn("headops")
+	apply := func() (string, int64) {
+		p := hs.apply(hs.signIn("staff1"), "maternity", "2026-10-12", "2026-10-16")
+		return p, mustAtoi(t, idOf(p))
+	}
+	p, id := apply()
+	hs.post(hr, "/admin/users/"+itoa(hs.staffID("staff1"))+"/sex", url.Values{"sex": {"m"}})
+	r, _ := hs.svc.Get(context.Background(), id)
+	staff := mustUser(t, hs, "staff1")
+	want := html.EscapeString("Maternity leave is not available to " + staff.Name + ": they are recorded as male")
+	pending := func(label string) {
+		t.Helper()
+		if x, _ := hs.svc.Get(context.Background(), id); x.Status != "pending" {
+			t.Errorf("%s: approved anyway: %s", label, x.Status)
+		}
+	}
+
+	// From the request page.
+	res, body := hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}, "seen": {r.Fingerprint()}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, want) {
+		t.Errorf("request page: %d, message missing:\n%s", res.StatusCode, body)
+	}
+	pending("request page")
+
+	// From a queue row: the error opens that row.
+	res, body = hs.postRaw(head, p+"/decide", url.Values{"decision": {"approve"}, "from": {"queue"}, "seen": {r.Fingerprint()}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, want) {
+		t.Errorf("queue row: %d, message missing:\n%s", res.StatusCode, body)
+	}
+	pending("queue row")
+
+	// Bulk: the refusal is listed against the row, with the message itself.
+	res, body = hs.postRaw(head, "/approvals/approve", url.Values{"id": {idOf(p) + ":" + r.Fingerprint()}})
+	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, want) || !strings.Contains(body, staff.Name+": ") {
+		t.Errorf("bulk: %d, message missing:\n%s", res.StatusCode, body)
+	}
+	pending("bulk")
+
+	// Declining is still possible.
+	res, _ = hs.postRaw(head, p+"/decide", url.Values{"decision": {"decline"}, "note": {"policy"}, "seen": {r.Fingerprint()}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Errorf("decline: %d", res.StatusCode)
 	}
 }

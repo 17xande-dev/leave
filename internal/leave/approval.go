@@ -260,6 +260,21 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 		if ordinary && r.Escalate && r.Kind == KindLeave {
 			return ErrNeedsOverride
 		}
+		// The person may have been marked male since they applied: quote only
+		// saw the request as it was made. Declining stays possible.
+		if approve && r.Kind == KindLeave {
+			t, err := scanType(tx.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, r.TypeID))
+			if err != nil {
+				return err
+			}
+			owner := users.User{ID: r.UserID}
+			if err := tx.QueryRowContext(ctx, `SELECT name, sex FROM users WHERE id = ?`, r.UserID).Scan(&owner.Name, &owner.Sex); err != nil {
+				return err
+			}
+			if maternityRefused(t, owner) {
+				return FieldErrors{"type": maternityMessage(owner, actor.ID == owner.ID)}
+			}
+		}
 		if r.Escalate {
 			decision := "approved"
 			if !approve {

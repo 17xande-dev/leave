@@ -19,7 +19,25 @@ const MaternityCode = "maternity"
 // OfferedTo reports whether a form should list this type for u. It is only the
 // picker's half of the rule; quote is the guard that actually refuses.
 func (t Type) OfferedTo(u users.User) bool {
-	return !(t.Code == MaternityCode && u.Sex == "m")
+	return !maternityRefused(t, u)
+}
+
+// maternityRefused is the one statement of the rule: maternity leave is not
+// for someone recorded as male. An unrecorded sex blocks nobody. quote applies
+// it to every request as made, and decide again when one is approved, since
+// the person may have been marked male after applying.
+func maternityRefused(t Type, u users.User) bool {
+	return t.Code == MaternityCode && u.Sex == "m"
+}
+
+// maternityMessage says why, and what to do. yours is true when the reader is
+// the person themselves (applying, editing); otherwise it is an admin or
+// approver acting on someone else's behalf.
+func maternityMessage(u users.User, yours bool) string {
+	if yours {
+		return "Maternity leave is not available to you: you are recorded as male. If that is wrong, ask an admin to change it."
+	}
+	return "Maternity leave is not available to " + u.Name + ": they are recorded as male (an admin can change this on their admin page)."
 }
 
 // Availability is every person's available balance for one leave type in the

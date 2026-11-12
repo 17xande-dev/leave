@@ -1055,7 +1055,10 @@ func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 			failures = append(failures, label+": needs special permission. Use its own Override button.")
 			continue
 		}
+		var fe leave.FieldErrors
 		switch _, err := h.leave.DecideOrdinary(r.Context(), u, id, seen[id]); {
+		case errors.As(err, &fe):
+			failures = append(failures, label+": "+fe["type"])
 		case errors.Is(err, leave.ErrChanged):
 			failures = append(failures, label+": changed after you opened it. Check it again.")
 		case errors.Is(err, leave.ErrNeedsOverride):

@@ -74,7 +74,7 @@
   <div class="field">
     <label for="note">Note <small>(required to decline)</small></label>
     <textarea id="note" name="note" rows="2">{{.Note}}</textarea>
-    {{template "err" index .Errors "note"}}
+    {{template "err" index .Errors "note"}}{{template "err" index .Errors "type"}}
   </div>
   <div class="actions">
     <button type="submit" name="decision" value="approve">{{if .Request.Escalate}}{{with .Next}}Override and send to {{.}}{{else}}Override and approve{{end}}{{else}}Approve{{end}}</button>

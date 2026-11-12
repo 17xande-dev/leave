@@ -42,7 +42,7 @@
             <div class="field">
               <label for="note-{{.ID}}">Reason <small>(required)</small></label>
               <textarea id="note-{{.ID}}" name="note" rows="2" required></textarea>
-              {{if eq .ID $.Data.OpenID}}{{template "err" index $.Data.OpenErrors "note"}}{{end}}
+              {{if eq .ID $.Data.OpenID}}{{template "err" index $.Data.OpenErrors "note"}}{{template "err" index $.Data.OpenErrors "type"}}{{end}}
             </div>
             <button type="submit" name="decision" value="decline" class="quiet">Decline</button>
           </form>

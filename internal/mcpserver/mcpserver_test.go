@@ -163,10 +163,12 @@ func TestMaternityRefusedForMaleStaffThroughTools(t *testing.T) {
 	if err := f.us.SetSex(ctx, u.ID, "m"); err != nil {
 		t.Fatal(err)
 	}
-	const msg = "maternity leave policy does not apply here"
+	// Self-service says "you"; an admin recording for them hears about "them".
+	const msg = "you are recorded as male"
+	const theirs = "they are recorded as male"
 	f.refused(staff, "apply_for_leave", args, msg)
 	rec := map[string]any{"person": "staff1", "type": "maternity", "start": "2026-06-22", "end": "2026-06-26", "note": "log"}
-	f.refused(hr, "record_leave", rec, msg)
+	f.refused(hr, "record_leave", rec, theirs)
 	if p := f.ok(staff, "preview_request", args); p.Data["ok"] != false || !strings.Contains(p.Text, msg) {
 		t.Fatalf("preview = %q %v", p.Text, p.Data)
 	}
@@ -180,6 +182,12 @@ func TestMaternityRefusedForMaleStaffThroughTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.refused(staff, "edit_request", map[string]any{"id": id(r), "type": "maternity", "start": "2026-10-19", "end": "2026-10-22"}, msg)
+	// decide_request: approving it is refused for the approver, who is not the person.
+	head := f.as("headops")
+	f.refused(head, "decide_request", map[string]any{"id": id(r), "decision": "approve"}, theirs)
+	if g := f.ok(staff, "get_request", map[string]any{"id": id(r)}); get(g.Data, "request", "status") != "pending" {
+		t.Fatalf("approved anyway: %v", g.Data)
+	}
 	// Other types are unaffected.
 	f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-03"})
 }

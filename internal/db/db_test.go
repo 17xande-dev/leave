@@ -284,3 +284,31 @@ func TestHalfDayColumnsChecked(t *testing.T) {
 		t.Fatal("half_start = 2 was accepted")
 	}
 }
+
+// users.sex is checked by the schema itself, not only by users.SetSex: a bad
+// value written by raw SQL is refused by SQLite with a constraint error.
+func TestUsersSexColumnChecked(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if _, err := d.Exec(`INSERT INTO users (id, ext_id, dn, username, name, synced_at) VALUES (1, 'x', 'dn', 'x', 'X', '')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, ok := range []string{"", "f", "m"} {
+		if _, err := d.Exec(`UPDATE users SET sex = ? WHERE id = 1`, ok); err != nil {
+			t.Errorf("sex %q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"x", "M", "F", "male", " "} {
+		_, err := d.Exec(`UPDATE users SET sex = ? WHERE id = 1`, bad)
+		if err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+			t.Errorf("sex %q: err = %v, want a CHECK constraint failure", bad, err)
+		}
+	}
+	var got string
+	if err := d.QueryRow(`SELECT sex FROM users WHERE id = 1`).Scan(&got); err != nil || got != "m" {
+		t.Errorf("stored sex = %q, %v; a refused write must leave the last good value", got, err)
+	}
+}
