@@ -1,15 +1,15 @@
 package db
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// The DDL says STRICT, but CREATE TABLE IF NOT EXISTS reports success against a
-// table created before STRICT was added, so the only trustworthy check is what
-// SQLite actually recorded.
+// Check what SQLite actually recorded, including goose's version table.
 func TestEveryTableIsStrict(t *testing.T) {
 	d, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -34,9 +34,56 @@ func TestEveryTableIsStrict(t *testing.T) {
 			t.Errorf("table %s is not STRICT", name)
 		}
 	}
-	// A minimum, so the test cannot pass vacuously if the schema stops applying.
-	if n < 8 {
-		t.Fatalf("found %d tables, want at least 8", n)
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	// Count application tables and migration tracking so the check cannot pass vacuously.
+	if n != 21 {
+		t.Fatalf("found %d tables, want 20 application tables and goose_db_version", n)
+	}
+}
+
+func TestMigrationStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "fresh.db")
+	var out bytes.Buffer
+	if err := Status(context.Background(), path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n" {
+		t.Fatalf("before Open: %q", got)
+	}
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	out.Reset()
+	if err := Status(context.Background(), path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n" {
+		t.Fatalf("after Open: %q", got)
+	}
+}
+
+func TestNewerMigrationVersionRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "future.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (2, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	if d, err := Open(path); err == nil {
+		d.Close()
+		t.Fatal("newer schema accepted")
+	} else if !strings.Contains(err.Error(), "newer than this binary") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := Status(context.Background(), path, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "newer than this binary") {
+		t.Fatalf("status on newer schema: %v", err)
 	}
 }
 
@@ -65,13 +112,12 @@ func TestOldDatabaseRefused(t *testing.T) {
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "older build") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
 
-// An old requests table that has the shutdown column but not the newer ones
-// is refused naming the missing column.
+// A partial unversioned requests schema must fail before migration runs.
 func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	old, err := sql.Open("sqlite3", "file:"+path)
@@ -80,12 +126,12 @@ func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
 	}
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, status TEXT, shutdown_part_id INTEGER) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "requests.escalate") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
 
-// A users table from before users.sex is refused naming the column.
+// A users table from before users.sex must not be silently adopted.
 func TestOldDatabaseWithoutUsersSexRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	old, err := sql.Open("sqlite3", "file:"+path)
@@ -94,7 +140,7 @@ func TestOldDatabaseWithoutUsersSexRefused(t *testing.T) {
 	}
 	old.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, ext_id TEXT, long_weekend INTEGER) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "users.sex") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
@@ -110,7 +156,7 @@ func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending'))) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "awaiting_hr") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
@@ -129,7 +175,7 @@ func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 	old.Exec(`CREATE TABLE coverage_rules (department TEXT PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "settings") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
@@ -148,7 +194,7 @@ func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 	old.Exec(`CREATE TABLE request_steps (id INTEGER PRIMARY KEY) STRICT`)
 	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY, team_default_percent INTEGER) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "oauth_clients") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }
@@ -165,7 +211,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 		allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`)
 	old.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "team_default_percent") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database without the settings column: err = %v", err)
 	}
 
@@ -185,13 +231,12 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 		old.Exec(q)
 	}
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "teams") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database without the team tables: err = %v", err)
 	}
 }
 
-// A database from before per-type backdating or recorded leave is refused with
-// the recreate message rather than migrated.
+// Historical pre-goose schemas are refused regardless of which feature is missing.
 func TestOldBackdatingAndRecordedShapesRefused(t *testing.T) {
 	for name, tc := range map[string]struct{ mutate, want string }{
 		"no backdate_days":       {`ALTER TABLE leave_types DROP COLUMN backdate_days`, "leave_types.backdate_days"},
@@ -210,19 +255,22 @@ func TestOldBackdatingAndRecordedShapesRefused(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err := d.Exec(`DROP TABLE goose_db_version`); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := d.Exec(tc.mutate); err != nil {
 				t.Fatal(err)
 			}
 			d.Close()
 			_, err = Open(path)
-			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "make recreate-db") {
-				t.Fatalf("err = %v, want a recreate-db refusal naming %s", err, tc.want)
+			if err == nil || !strings.Contains(err.Error(), "predates migrations") || !strings.Contains(err.Error(), "make recreate-db") {
+				t.Fatalf("err = %v, want an unversioned database refusal for %s", err, tc.want)
 			}
 		})
 	}
 }
 
-// A fresh database opens, and reopens: checkCurrent accepts today's schema.
+// Reopening must not rerun the baseline or append another applied version.
 func TestFreshDatabaseOpensTwice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fresh.db")
 	for i := 0; i < 2; i++ {
@@ -230,12 +278,20 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err != nil {
 			t.Fatalf("open %d: %v", i+1, err)
 		}
+
+		var version, applied, rows int
+		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
+			t.Fatal(err)
+		}
+		if version != 1 || applied != 1 || rows != 2 {
+			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
+		}
 		d.Close()
 	}
 }
 
 // A requests table from before half-day requests has every other column; it is
-// refused naming half_start rather than failing at the first insert.
+// refused as unversioned rather than failing at the first insert.
 func TestOldDatabaseWithoutHalfDaysRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	old, err := sql.Open("sqlite3", "file:"+path)
@@ -245,7 +301,7 @@ func TestOldDatabaseWithoutHalfDaysRefused(t *testing.T) {
 	old.Exec(`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 		allow_negative INTEGER, recorded_by_id INTEGER, status TEXT) STRICT`)
 	old.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "requests.half_start") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "predates migrations") {
 		t.Fatalf("old database: err = %v", err)
 	}
 }

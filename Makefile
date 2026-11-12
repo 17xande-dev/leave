@@ -13,7 +13,11 @@ GOVULNCHECK_VERSION ?= v1.9.0
 DEV_ENV = DIRECTORY=fake COOKIE_SECURE=false \
 	LISTEN_ADDR=:8082 BASE_URL=http://localhost:8082 DB_PATH=data/leave.db
 
-.PHONY: fmt-check vulncheck vulncheck-install run run-mail build test check vet fmt tidy recreate-db mailpit deploy logs-prod
+.PHONY: fmt-check vulncheck vulncheck-install run run-mail build test check vet fmt tidy recreate-db mailpit deploy logs-prod migrate-status
+
+## migrate-status: print applied/pending database migrations without starting the server
+migrate-status:
+	go run . -migrate-status
 
 ## run: the server on :8082 with the fake directory (testdata/directory.json)
 run:

@@ -97,10 +97,16 @@ func (g Graph) Configured() bool {
 	return g.TenantID != "" && g.ClientID != "" && g.ClientSecret != ""
 }
 
+// DatabasePath reads the shared database location without requiring server
+// credentials, so migration status also works in an operator's local shell.
+func DatabasePath() string {
+	return getenv("DB_PATH", "data/leave.db")
+}
+
 func Load() (Config, error) {
 	c := Config{
 		ListenAddr:     getenv("LISTEN_ADDR", ":8080"),
-		DBPath:         getenv("DB_PATH", "data/leave.db"),
+		DBPath:         DatabasePath(),
 		BaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/"),
 		CookieSecure:   getenv("COOKIE_SECURE", "true") == "true",
 		TrustedProxies: parseList(os.Getenv("TRUSTED_PROXIES")),

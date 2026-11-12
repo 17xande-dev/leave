@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -32,6 +33,15 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "import2026" {
 		os.Exit(runImport2026(os.Args[2:], os.Stdout, time.Now))
+	}
+	migrateStatus := flag.Bool("migrate-status", false, "Print database migration status and exit")
+	flag.Parse()
+	if *migrateStatus {
+		if err := db.Status(context.Background(), config.DatabasePath(), os.Stdout); err != nil {
+			slog.Error("migration status", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)

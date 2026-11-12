@@ -303,7 +303,8 @@ make run                 # http://localhost:8082 -- the fake directory, any pass
 make mailpit             # in another terminal: mail viewer at http://localhost:8025
 make run-mail            # as run, but sends mail to mailpit
 make check               # gofmt + vet + every test, uncached
-make recreate-db         # drop the local database (after a schema change)
+make recreate-db         # discard a disposable local database
+make migrate-status      # inspect migrations without starting the server
 ```
 
 The fake directory is `testdata/directory.json`: `pastor` (set as the final approver on **Admin → Settings**, which starts with none),
@@ -403,12 +404,38 @@ Then `make deploy`. Logs: `make logs-prod`. Other commands (`kamal app details`,
 `kamal rollback <version>`, `kamal app exec -i sh`) work as usual; `kamal config` shows
 what would be deployed.
 
-The schema has no migrations. If the app refuses to start against an old database, the
-logs say so. Back up the database (below) while the old version is still running, then
-run `kamal app remove` (a stopped container still holds the volume, and Docker refuses
-`docker volume rm` while any container, running or stopped, references it; Kamal also keeps
-old stopped containers), then `docker volume rm leave-data` on the host and redeploy. That
-deletes everything in the volume, so copy the backup out first.
+Numbered SQL migrations in `internal/db/migrations` are embedded and applied at startup
+by goose. Add each schema change as a new migration; never edit an applied migration.
+`go run . -migrate-status` reports applied/pending migrations without applying them or
+starting the server. An empty database therefore reports baseline 1 pending until its
+first normal startup. A database newer than the binary is refused.
+
+An existing database without `goose_db_version` is refused before any migration runs.
+For disposable local data, use `make recreate-db`. For existing production data, back
+it up and verify its schema matches baseline 1 (including `users.sex`) before explicitly
+adopting it. With the application stopped, run the following against the verified
+database in the environment where it resides (the path below is the container path):
+
+```sh
+sqlite3 -bail /data/leave.db <<'SQL'
+BEGIN IMMEDIATE;
+CREATE TABLE goose_db_version (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id INTEGER NOT NULL,
+  is_applied INTEGER NOT NULL,
+  tstamp TEXT NOT NULL DEFAULT (datetime('now'))
+) STRICT;
+INSERT INTO goose_db_version (version_id, is_applied) VALUES (0, 1), (1, 1);
+COMMIT;
+SQL
+leave -migrate-status
+```
+
+The expected status is `0001 applied 0001_baseline.sql`, with no pending migrations.
+This marks the existing baseline as applied without executing its DDL. The SQL is a
+one-time operation: it deliberately fails if the tracking table already exists. Do
+not use `goose up` to adopt an existing schema; `goose fix` only renumbers files and
+does not mark migrations applied.
 
 The database lives in the `leave-data` named volume. Back it up and copy it out:
 
@@ -483,7 +510,7 @@ need a bypass rule.
 | Sign-in | LDAP bind against the DC, per request, with no connection pool, so one user's bind can never leak into another's request. People are keyed on `objectGUID`, which survives OU moves and renames. |
 | Database | SQLite: one instance, one file. Switch to Postgres if a second instance or an outside reader is ever needed. |
 | Styling | One plain CSS file. No Web Awesome, because a component framework and a CDN or vendoring step bought nothing here. |
-| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
+| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
 
 ### Decisions still open
 
