@@ -3,8 +3,12 @@ package db
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -288,6 +292,151 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		}
 		d.Close()
 	}
+}
+
+func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "no-zero.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(`DELETE FROM goose_db_version WHERE version_id=0`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var count, version, applied int
+	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || version != 1 || applied != 1 {
+		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
+	}
+}
+
+// Exercise the operator's exact SQL, including production's appended users.sex,
+// and compare every application row before adoption and after the first boot.
+func TestAdoptBaselinePreservesData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unversioned.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, q := range []string{
+		`DROP TABLE goose_db_version`,
+		`ALTER TABLE users DROP COLUMN sex`,
+		`ALTER TABLE users ADD COLUMN sex TEXT NOT NULL DEFAULT '' CHECK (sex IN ('', 'f', 'm'))`,
+		`INSERT INTO users (id, ext_id, dn, username, name, sex, synced_at) VALUES
+		 (1, 'person-1', 'dn1', 'staff', 'Staff Member', 'f', '2026-11-12T08:00:00Z'),
+		 (2, 'person-2', 'dn2', 'admin', 'Administrator', 'm', '2026-11-12T08:00:00Z')`,
+		`INSERT INTO leave_types (id, code, name, allowance_x100, cycle_months, unit) VALUES (1, 'annual', 'Annual', 1500, 12, 'workdays')`,
+		`INSERT INTO requests (id, user_id, type_id, kind, start_date, end_date, days_x100, half_start, cycle_start, status, created_at)
+		 VALUES (1, 1, 1, 'leave', '2026-11-16', '2026-11-16', 50, 1, '2026-01-01', 'pending', '2026-11-12T08:00:00Z')`,
+		`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES ('session-hash', 1, '2026-11-12T08:00:00Z', '2026-11-13T08:00:00Z')`,
+		`UPDATE settings SET team_default_percent=40, updated_by_id=2, updated_at='2026-11-12T08:00:00Z' WHERE id=1`,
+		`INSERT INTO outbox (kind, payload, next_attempt_at, created_at) VALUES ('email', '{"to":"staff@example.org"}', '2026-11-12T08:00:00Z', '2026-11-12T08:00:00Z')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var lastColumn string
+	if err := d.QueryRow(`SELECT name FROM pragma_table_info('users') ORDER BY cid DESC LIMIT 1`).Scan(&lastColumn); err != nil || lastColumn != "sex" {
+		t.Fatalf("production-shaped users last column=%q, err=%v", lastColumn, err)
+	}
+	before := applicationRows(t, d)
+	if refused, err := Open(path); err == nil {
+		refused.Close()
+		t.Fatal("unversioned database accepted before adoption")
+	} else if !strings.Contains(err.Error(), "predates migrations") {
+		t.Fatal(err)
+	}
+	adoptionSQL, err := os.ReadFile("testdata/adopt_baseline.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Exec(string(adoptionSQL)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if after := applicationRows(t, d); !reflect.DeepEqual(before, after) {
+		t.Fatalf("application rows changed during adoption/boot:\nbefore: %v\nafter: %v", before, after)
+	}
+	var out bytes.Buffer
+	if err := Status(context.Background(), path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n" {
+		t.Fatalf("after adoption: %q", got)
+	}
+}
+
+func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
+	t.Helper()
+	tables, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'goose_db_version' ORDER BY name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for tables.Next() {
+		var name string
+		if err := tables.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	if err := tables.Err(); err != nil {
+		t.Fatal(err)
+	}
+	tables.Close()
+	if len(names) != 20 {
+		t.Fatalf("found %d application tables, want 20", len(names))
+	}
+	snapshot := make(map[string][32]byte, len(names))
+	for _, name := range names {
+		rows, err := d.Query(`SELECT * FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var data bytes.Buffer
+		for rows.Next() {
+			values := make([]any, len(columns))
+			pointers := make([]any, len(columns))
+			for i := range values {
+				pointers[i] = &values[i]
+			}
+			if err := rows.Scan(pointers...); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.NewEncoder(&data).Encode(values); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		snapshot[name] = sha256.Sum256(data.Bytes())
+	}
+	return snapshot
 }
 
 // A requests table from before half-day requests has every other column; it is

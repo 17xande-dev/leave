@@ -401,8 +401,11 @@ One-time setup, on your workstation:
    read-only at `/certs`, and untouched by deploys) and set `LDAP_CA_FILE=/certs/<file>.pem`.
 
 Then `make deploy`. Logs: `make logs-prod`. Other commands (`kamal app details`,
-`kamal rollback <version>`, `kamal app exec -i sh`) work as usual; `kamal config` shows
+`kamal rollback <version>`, `kamal app exec --reuse -i sh`) work as usual; `kamal config` shows
 what would be deployed.
+After later migrations ship, rolling back to a goose-enabled image older than the
+last-applied migration deliberately refuses to boot with the "newer than this binary"
+guard; this is expected protection against running code on an incompatible schema.
 
 Numbered SQL migrations in `internal/db/migrations` are embedded and applied at startup
 by goose. Add each schema change as a new migration; never edit an applied migration.
@@ -411,24 +414,52 @@ starting the server. An empty database therefore reports baseline 1 pending unti
 first normal startup. A database newer than the binary is refused.
 
 An existing database without `goose_db_version` is refused before any migration runs.
-For disposable local data, use `make recreate-db`. For existing production data, back
-it up and verify its schema matches baseline 1 (including `users.sex`) before explicitly
-adopting it. With the application stopped, run the following against the verified
-database in the environment where it resides (the path below is the container path):
+For disposable local data, use `make recreate-db`.
+
+**One-time production adoption of baseline 1.** Run these commands from the repo root
+on your workstation. The app does **not** need to be stopped: the adoption SQL is safe
+while the old app is still serving. Use `--reuse` for every one-off command so Kamal
+executes it inside the running container; without it, the image's `leave` entrypoint
+receives the command as arguments and can start another server instead.
+
+1. Immediately before adopting, take a fresh SQLite `.backup` and inspect its schema:
 
 ```sh
-sqlite3 -bail /data/leave.db <<'SQL'
-BEGIN IMMEDIATE;
-CREATE TABLE goose_db_version (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  version_id INTEGER NOT NULL,
-  is_applied INTEGER NOT NULL,
-  tstamp TEXT NOT NULL DEFAULT (datetime('now'))
-) STRICT;
-INSERT INTO goose_db_version (version_id, is_applied) VALUES (0, 1), (1, 1);
-COMMIT;
-SQL
-leave -migrate-status
+kamal app exec --reuse 'sqlite3 /data/leave.db ".backup /data/leave-before-goose.db"'
+kamal app exec --reuse 'sqlite3 /data/leave-before-goose.db ".schema"'
+```
+
+Spot-check that backup's tables, columns, constraints and indexes against
+[`0001_baseline.sql`](internal/db/migrations/0001_baseline.sql), including `users.sex`,
+and resolve any drift before proceeding. Production's `users.sex` was appended by
+`ALTER TABLE`, so its physical column order differs from a fresh database; that order
+difference is expected. This is a manual check: adoption does not automatically verify
+schema equivalence. Repeat the backup and check if any manual schema change happens
+before adoption.
+
+2. Apply the exact SQL in
+[`internal/db/testdata/adopt_baseline.sql`](internal/db/testdata/adopt_baseline.sql),
+which is also exercised by the adoption regression test. The workstation reads the
+file and passes its contents as SQLite's SQL argument inside the running container:
+
+```sh
+kamal app exec --reuse "sqlite3 -bail /data/leave.db \"$(cat internal/db/testdata/adopt_baseline.sql)\""
+```
+
+3. Verify the version rows with SQLite while the old image is still running:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db "SELECT version_id,is_applied FROM goose_db_version ORDER BY id;"'
+```
+
+The output must contain exactly `0|1` followed by `1|1`. Stop on any error or unexpected
+result. The old image has no `-migrate-status` flag; do not run it until after deployment.
+
+4. Only after that verification, deploy the committed new image and check its status:
+
+```sh
+make deploy
+kamal app exec --reuse 'leave -migrate-status'
 ```
 
 The expected status is `0001 applied 0001_baseline.sql`, with no pending migrations.

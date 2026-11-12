@@ -2,6 +2,10 @@
 -- Every table is STRICT: SQLite refuses a string in an INTEGER column.
 -- CHECKs bound the remaining values, including statuses and booleans.
 -- Dates are YYYY-MM-DD TEXT calendar days; instants are RFC3339 TEXT in UTC.
+-- Production added users.sex by ALTER TABLE, so it is physically last there,
+-- unlike a fresh database. Any future SQLite table rebuild (create/copy/drop/
+-- rename) MUST name both destination and source columns explicitly; never copy
+-- with SELECT *, because production's physical column order differs.
 CREATE TABLE users (
 	id          INTEGER PRIMARY KEY,
 	-- The directory's permanent id for the person (AD objectGUID). Not the

@@ -70,7 +70,7 @@ func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 		return fail(err)
 	}
 	// Goose's SQLite store uses a TIMESTAMP column, which SQLite STRICT rejects.
-	// Retain its version operations and adapt only metadata creation/date decoding.
+	// Retain its version operations and adapt metadata creation/discovery/date decoding.
 	p, err := goose.NewProvider(goose.DialectCustom, d, source, goose.WithStore(strictVersionStore{base}))
 	if err != nil {
 		return fail(err)
@@ -86,6 +86,14 @@ func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 }
 
 type strictVersionStore struct{ database.Store }
+
+// Table existence must not depend on version 0 being present: adopted or
+// repaired databases can have an applied baseline without that sentinel row.
+func (s strictVersionStore) TableExists(ctx context.Context, d database.DBTxConn) (bool, error) {
+	var exists bool
+	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, s.Tablename()).Scan(&exists)
+	return exists, err
+}
 
 func (s strictVersionStore) CreateVersionTable(ctx context.Context, d database.DBTxConn) error {
 	_, err := d.ExecContext(ctx, `CREATE TABLE goose_db_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version_id INTEGER NOT NULL,is_applied INTEGER NOT NULL,tstamp TEXT NOT NULL DEFAULT (datetime('now'))) STRICT`)
