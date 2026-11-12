@@ -19,19 +19,20 @@
      color-scheme also makes native controls and scrollbars match. */
   color-scheme: light dark;
 
-  /* Palette: a monochrome brand palette. Ink on paper, one inverted fill for
-     actions, red only for trouble and a lime highlight for what to notice. The
-     two values of every pair are checked for contrast by a test. */
-  --paper: light-dark(#ffffff, #0c0c0c);
-  --paper-sunk: light-dark(#f4f4f4, #161616);
-  --ink: light-dark(#0c0c0c, #f2f2f2);
-  --ink-soft: light-dark(#4d4d4d, #b3b3b3);
-  --ink-faint: light-dark(#6b6b6b, #8f8f8f);
-  --rule: light-dark(#dddddd, #2e2e2e);
-  --accent: light-dark(#0c0c0c, #ffffff);
-  --accent-ink: light-dark(#ffffff, #0c0c0c);
-  /* A token of its own: mixing black with black would do nothing. */
-  --accent-hover: light-dark(#333333, #d9d9d9);
+  /* Palette: warm ink and paper, with muted blue for links and the current page,
+     red for trouble and a lime highlight for what to notice. Text and background
+     pairs are checked for contrast in both themes. */
+  --paper: light-dark(#faf9f6, #1c1d1e);
+  --paper-sunk: light-dark(#efede8, #28292a);
+  --ink: light-dark(#282826, #eeece8);
+  --ink-soft: light-dark(#555550, #c0bfba);
+  --ink-faint: light-dark(#686862, #aaa9a4);
+  --rule: light-dark(#d8d6d0, #454543);
+  --accent: light-dark(#30312f, #e7e5e0);
+  --accent-ink: light-dark(#faf9f6, #1c1d1e);
+  /* A separate hover tone keeps action feedback visible in both themes. */
+  --accent-hover: light-dark(#4a4b48, #c9c8c2);
+  --link: light-dark(#385e73, #a2c2d1);
   --warn: light-dark(#c40d0d, #ff6b6b);
   --pending: light-dark(#8a5a00, #e5a63a);
   --highlight: light-dark(#daf617, #daf617);
@@ -138,7 +139,7 @@ body {
 
       &:hover,
       &[aria-current="page"] {
-        color: var(--ink);
+        color: var(--link);
         text-decoration: underline;
         text-underline-offset: 3px;
       }
@@ -285,7 +286,7 @@ p {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
   text-underline-offset: 2px;
 }
 

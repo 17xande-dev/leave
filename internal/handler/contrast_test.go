@@ -37,6 +37,7 @@ func TestThemeContrast(t *testing.T) {
 		{"ink-soft", "paper"}, {"ink-soft", "paper-sunk"},
 		{"ink-faint", "paper"}, {"ink-faint", "paper-sunk"},
 		{"accent-ink", "accent"}, {"accent-ink", "accent-hover"},
+		{"link", "paper"}, {"link", "paper-sunk"},
 		{"warn", "paper"}, {"warn", "paper-sunk"},
 		{"pending", "paper"}, {"pending", "paper-sunk"},
 		{"highlight-ink", "highlight"},
@@ -54,7 +55,7 @@ func TestThemeContrast(t *testing.T) {
 			}
 		}
 	}
-	if checked < 26 {
+	if checked < 30 {
 		t.Fatalf("checked only %d colour pairs", checked)
 	}
 
