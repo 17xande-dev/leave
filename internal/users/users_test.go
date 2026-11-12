@@ -2,6 +2,7 @@ package users
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/17xande-dev/leave/internal/dbtest"
@@ -110,6 +111,39 @@ func TestLongWeekendSurvivesSync(t *testing.T) {
 	s.Sync(ctx, []directory.User{dirUser("sam")})
 	if got, _ := s.ByID(ctx, u.ID); !got.LongWeekend {
 		t.Fatal("sync reset long_weekend")
+	}
+}
+
+func TestSetSex(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(dbtest.New(t))
+	u, _ := s.Upsert(ctx, dirUser("sam"))
+	if u.Sex != "" {
+		t.Fatalf("new user sex = %q, want empty", u.Sex)
+	}
+	for _, v := range []string{"f", "m", "", "m"} {
+		if err := s.SetSex(ctx, u.ID, v); err != nil {
+			t.Fatalf("SetSex(%q): %v", v, err)
+		}
+		if got, _ := s.ByID(ctx, u.ID); got.Sex != v {
+			t.Fatalf("after SetSex(%q) ByID.Sex = %q", v, got.Sex)
+		}
+	}
+	for _, bad := range []string{"F", "M", "x", "male", " f"} {
+		if err := s.SetSex(ctx, u.ID, bad); !errors.Is(err, ErrBadSex) {
+			t.Errorf("SetSex(%q) = %v, want ErrBadSex", bad, err)
+		}
+	}
+	if got, _ := s.ByID(ctx, u.ID); got.Sex != "m" {
+		t.Fatalf("a refused value changed sex to %q", got.Sex)
+	}
+	if err := s.SetSex(ctx, 9999, "f"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown id: %v", err)
+	}
+	// An admin's decision: a directory sync must not reset it.
+	s.Sync(ctx, []directory.User{dirUser("sam")})
+	if got, _ := s.ByID(ctx, u.ID); got.Sex != "m" {
+		t.Fatal("sync reset sex")
 	}
 }
 

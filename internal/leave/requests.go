@@ -446,6 +446,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return Quote{}, err
 	}
 	holidays := holidayDays(holidayNames)
+	// The real guard behind the pickers that hide maternity from a man: every
+	// path (apply, edit, record, import, preview) comes through here.
+	if t.Code == MaternityCode && u.Sex == "m" {
+		errs["type"] = fmt.Sprintf("%s's maternity leave policy does not apply here.", u.Name)
+		return qt, errs
+	}
 	if fe := checkHalves(in, t, start, end, holidays, st.Week, opt.mandatory); len(fe) > 0 {
 		return qt, fe
 	}

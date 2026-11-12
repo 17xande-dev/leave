@@ -4,11 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/17xande-dev/leave/internal/users"
 )
 
 // AnnualCode is the code of the seeded annual leave type. The code, not the
 // name, is what identifies it: it is unique and SaveType never changes it.
 const AnnualCode = "annual"
+
+// MaternityCode is the code of the maternity leave type, which is refused to
+// anyone recorded as male.
+const MaternityCode = "maternity"
+
+// OfferedTo reports whether a form should list this type for u. It is only the
+// picker's half of the rule; quote is the guard that actually refuses.
+func (t Type) OfferedTo(u users.User) bool {
+	return !(t.Code == MaternityCode && u.Sex == "m")
+}
 
 // Availability is every person's available balance for one leave type in the
 // current cycle, read in a single query so a list of people costs one query

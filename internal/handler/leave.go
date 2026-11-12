@@ -230,10 +230,13 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	if err != nil {
 		return applyData{}, err
 	}
-	types := make([]leave.Type, len(bs))
+	types := make([]leave.Type, 0, len(bs))
 	d := applyData{Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
-	for i, b := range bs {
-		types[i] = b.Type
+	for _, b := range bs {
+		if !b.Type.OfferedTo(currentUser(r)) {
+			continue
+		}
+		types = append(types, b.Type)
 		// The request being edited is already counted as pending in its own
 		// cycle; its days are the person's to move, so the label gives them back.
 		if edit != nil && b.Type.ID == edit.TypeID && b.CycleStart == edit.CycleStart {

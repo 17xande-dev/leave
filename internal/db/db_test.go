@@ -85,6 +85,20 @@ func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
 	}
 }
 
+// A users table from before users.sex is refused naming the column.
+func TestOldDatabaseWithoutUsersSexRefused(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	old, err := sql.Open("sqlite3", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, ext_id TEXT, long_weekend INTEGER) STRICT`)
+	old.Close()
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "users.sex") {
+		t.Fatalf("old database: err = %v", err)
+	}
+}
+
 // A requests table written before awaiting_hr existed has every column but the
 // status CHECK, which only the DDL shows.
 func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {

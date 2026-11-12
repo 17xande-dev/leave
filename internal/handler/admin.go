@@ -27,6 +27,7 @@ func (h *Handler) adminRoutes() []route {
 		a("POST /admin/users/{id}/approver", h.AdminSetApprover),
 		a("POST /admin/users/{id}/adjustments", h.AdminAddAdjustment),
 		a("POST /admin/users/{id}/long-weekend", h.AdminSetLongWeekend),
+		a("POST /admin/users/{id}/sex", h.AdminSetSex),
 		a("POST /admin/users/{id}/leave", h.AdminRecordLeave),
 		a("POST /admin/requests/{id}/unrecord", h.AdminUnrecord),
 		a("GET /admin/types", h.AdminTypes),
@@ -352,8 +353,14 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 	if d.Adjustments, err = h.leave.Adjustments(ctx, u.ID); err != nil {
 		return d, err
 	}
-	if d.Types, err = h.leave.Types(ctx, false); err != nil {
+	allTypes, err := h.leave.Types(ctx, false)
+	if err != nil {
 		return d, err
+	}
+	for _, t := range allTypes {
+		if t.OfferedTo(u) {
+			d.Types = append(d.Types, t)
+		}
 	}
 	if d.Teams, err = h.leave.TeamsFor(ctx, u.ID); err != nil {
 		return d, err
@@ -425,6 +432,37 @@ func (h *Handler) AdminSetLongWeekend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.users.SetLongWeekend(r.Context(), id, on); err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.serverError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, fmt.Sprintf("/admin/users/%d?notice=saved", id), http.StatusSeeOther)
+}
+
+// AdminSetSex records someone's sex, which only decides whether maternity leave
+// is offered to them. The value must be one of "", "f", "m"; the field must be
+// present, so a malformed post cannot silently clear it.
+func (h *Handler) AdminSetSex(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil || !r.PostForm.Has("sex") {
+		http.Error(w, "Choose a value.", http.StatusBadRequest)
+		return
+	}
+	sex := r.PostForm.Get("sex")
+	switch sex {
+	case "", "f", "m":
+	default:
+		http.Error(w, "Choose not recorded, female or male.", http.StatusBadRequest)
+		return
+	}
+	if err := h.users.SetSex(r.Context(), id, sex); err != nil {
 		if errors.Is(err, users.ErrNotFound) {
 			http.NotFound(w, r)
 			return

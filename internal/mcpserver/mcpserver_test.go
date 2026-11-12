@@ -144,6 +144,46 @@ func (f *fixture) refused(cs *mcp.ClientSession, tool string, args map[string]an
 	}
 }
 
+// The maternity refusal for a male-marked person comes out of the tools as an
+// ordinary tool error naming the problem, whichever tool reaches quote.
+func TestMaternityRefusedForMaleStaffThroughTools(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.makeAdmin("hr")
+	staff, hr := f.as("staff1"), f.as("hr")
+	u, err := f.us.ByUsername(ctx, "staff1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := map[string]any{"type": "maternity", "start": "2026-10-19", "end": "2026-10-23"}
+	if p := f.ok(staff, "preview_request", args); p.Data["ok"] == false {
+		t.Fatalf("unset sex blocked: %q", p.Text) // nobody is blocked by missing data
+	}
+
+	if err := f.us.SetSex(ctx, u.ID, "m"); err != nil {
+		t.Fatal(err)
+	}
+	const msg = "maternity leave policy does not apply here"
+	f.refused(staff, "apply_for_leave", args, msg)
+	rec := map[string]any{"person": "staff1", "type": "maternity", "start": "2026-06-22", "end": "2026-06-26", "note": "log"}
+	f.refused(hr, "record_leave", rec, msg)
+	if p := f.ok(staff, "preview_request", args); p.Data["ok"] != false || !strings.Contains(p.Text, msg) {
+		t.Fatalf("preview = %q %v", p.Text, p.Data)
+	}
+
+	// edit_request: an existing request, then the person is marked male.
+	if err := f.us.SetSex(ctx, u.ID, "f"); err != nil {
+		t.Fatal(err)
+	}
+	r := f.ok(staff, "apply_for_leave", args)
+	if err := f.us.SetSex(ctx, u.ID, "m"); err != nil {
+		t.Fatal(err)
+	}
+	f.refused(staff, "edit_request", map[string]any{"id": id(r), "type": "maternity", "start": "2026-10-19", "end": "2026-10-22"}, msg)
+	// Other types are unaffected.
+	f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-03"})
+}
+
 func get(m map[string]any, path ...string) any {
 	var v any = m
 	for _, p := range path {

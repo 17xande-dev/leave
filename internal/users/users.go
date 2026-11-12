@@ -30,19 +30,25 @@ type User struct {
 	// LongWeekend: this person's weekend off runs Friday to Sunday. Set by an
 	// admin; the directory sync never touches it.
 	LongWeekend bool
+	// Sex is "f", "m" or "" (not recorded). Set by an admin; the directory
+	// sync never touches it. Only used to keep maternity leave from a man.
+	Sex string
 }
 
 var ErrNotFound = errors.New("users: not found")
+
+// ErrBadSex is returned by SetSex for a value other than "", "f" or "m".
+var ErrBadSex = errors.New("users: sex must be f, m or empty")
 
 type Store struct{ db *sql.DB }
 
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
-const cols = `id, dn, username, name, email, department, manager_dn, is_admin, disabled, long_weekend`
+const cols = `id, dn, username, name, email, department, manager_dn, is_admin, disabled, long_weekend, sex`
 
 func scan(row interface{ Scan(...any) error }) (User, error) {
 	var u User
-	err := row.Scan(&u.ID, &u.DN, &u.Username, &u.Name, &u.Email, &u.Department, &u.ManagerDN, &u.Admin, &u.Disabled, &u.LongWeekend)
+	err := row.Scan(&u.ID, &u.DN, &u.Username, &u.Name, &u.Email, &u.Department, &u.ManagerDN, &u.Admin, &u.Disabled, &u.LongWeekend, &u.Sex)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -164,6 +170,23 @@ func (s *Store) ByDN(ctx context.Context, dn string) (User, error) {
 // SetLongWeekend sets whether someone's weekend off includes the Friday.
 func (s *Store) SetLongWeekend(ctx context.Context, id int64, on bool) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE users SET long_weekend = ? WHERE id = ?`, on, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetSex records someone's sex: "f", "m", or "" for not recorded.
+func (s *Store) SetSex(ctx context.Context, id int64, sex string) error {
+	switch sex {
+	case "", "f", "m":
+	default:
+		return ErrBadSex
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET sex = ? WHERE id = ?`, sex, id)
 	if err != nil {
 		return err
 	}

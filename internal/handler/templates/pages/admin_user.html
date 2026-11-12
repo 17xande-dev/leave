@@ -40,6 +40,21 @@
   </div>
 </form>
 
+<form method="post" action="/admin/users/{{.User.ID}}/sex" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Sex</h2>
+  <p class="hint">Used only to keep maternity leave unavailable to a man. Not recorded leaves it available.</p>
+  <div class="field">
+    <label for="sex">Sex</label>
+    <select id="sex" name="sex">
+      <option value=""{{if eq .User.Sex ""}} selected{{end}}>Not recorded</option>
+      <option value="f"{{if eq .User.Sex "f"}} selected{{end}}>Female</option>
+      <option value="m"{{if eq .User.Sex "m"}} selected{{end}}>Male</option>
+    </select>
+  </div>
+  <div class="actions"><button type="submit">Save</button></div>
+</form>
+
 <h2>Balances</h2>
 <div class="scroll-x">
 <table>

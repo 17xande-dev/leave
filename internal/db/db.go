@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS users (
 	-- Set by an admin, never by the sync: this person's weekend off runs
 	-- Friday to Sunday instead of Saturday to Sunday.
 	long_weekend INTEGER NOT NULL DEFAULT 0 CHECK (long_weekend IN (0, 1)),
+	-- Set by an admin, never by the sync: this person's sex, used only to keep
+	-- maternity leave unavailable to a male member of staff. Empty means not
+	-- recorded; maternity stays available until an admin sets it to 'm'.
+	sex TEXT NOT NULL DEFAULT '' CHECK (sex IN ('', 'f', 'm')),
 	synced_at   TEXT NOT NULL
 ) STRICT;
 
@@ -394,7 +398,7 @@ func Open(path string) (*sql.DB, error) {
 // While the app is greenfield the fix is a fresh database, not an ALTER.
 func checkCurrent(d *sql.DB) error {
 	want := map[string][]string{
-		"users":               {"ext_id", "long_weekend"},
+		"users":               {"ext_id", "long_weekend", "sex"},
 		"requests":            {"shutdown_part_id", "escalate", "allow_negative", "recorded_by_id", "days_x100", "half_start", "half_end"},
 		"leave_types":         {"restricted_rule", "coverage_rule", "backdate_days", "allowance_x100"},
 		"settings":            {"team_default_percent"},
