@@ -51,7 +51,10 @@ by hand. Days count against the cycle the leave starts in.
 
 **Half days** start OFF, including after upgrading an existing database. Under
 **Admin → Settings**, tick **Let people book half days** to offer them on apply/edit
-forms and through assistants. Admins can always record half days. Existing requests
+forms and through assistants. Admins can always record half days and change them on
+another person's live working-day leave from its request page, including approved leave.
+The change is audited and emailed to the person, and to the approver when pending.
+Existing requests
 keep their half days and can still be approved; accepted drafts can still be submitted.
 With the setting off, editing a pending request offers whole days only, so saving it
 removes its half-day flags. Turning it on restores half-day booking.
@@ -421,7 +424,7 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports both migrations pending until startup or `-migrate`. A database newer than
+reports all three migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse an upgrade before deployment.** These are operator instructions, not an
@@ -434,23 +437,24 @@ Make a separate rehearsal copy on the host's volume:
 ```sh
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM requests WHERE status IN ('"'"'pending'"'"','"'"'draft'"'"','"'"'awaiting_hr'"'"') AND (half_start=1 OR half_end=1); PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-kamal app exec --version "$VERSION" --env DB_PATH:/data/leave-rehearsal.db -- '-migrate'
+ssh work-docker02 "docker pull ghcr.io/17xande-dev/leave:$VERSION"
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
-Expect `migrating /data/leave-rehearsal.db: 1 -> 2` before the applied status lines;
+Expect `migrating /data/leave-rehearsal.db: 2 -> 3` before the applied status lines;
 verify that the resolved path names the rehearsal copy and the versions match the
-intended upgrade. A repeat run reports `2 -> 2`.
+intended upgrade. A repeat run reports `3 -> 3`.
 
-The migration command deliberately omits `--reuse`: it runs the new image against
-the copy. It passes **only `-migrate`** to the image's `leave` entrypoint. Do not pass
-`leave -migrate`, `env ...`, or `sh ...` as the command: those become arguments to
-`leave`. `--env` sets the copy's path; `--` ends Kamal's options. In contrast, with
-`--reuse`, commands execute inside the existing container and need the executable
-(`leave -migrate-status`, `sqlite3`, etc.). This follows
-[Kamal's exec implementation](https://github.com/basecamp/kamal/blob/main/lib/kamal/commands/app/execution.rb).
+Run the pushed image directly on the host: Kamal's parser rejects the documented
+`app exec --version ... --env ... -- '-migrate'` form before it can run. Pulling
+first makes the selected image available (Docker can also pull it on demand).
+The disposable container mounts the same named volume but points `DB_PATH` at
+the rehearsal copy. Pass **only `-migrate`** to the image's `leave` entrypoint.
+The `--reuse` commands above inspect the copy through the running container;
+they do not run the new binary.
 
-Require `0001` and `0002` applied, unchanged counts, `half_days_enabled=0`, integrity
+Require `0001`, `0002` and `0003` applied, unchanged counts, `half_days_enabled=0`, integrity
 `ok`, and no foreign-key rows. If any pending/draft/awaiting-HR request has half flags,
 tell the user before deploying. Stop on any discrepancy. Only after the rehearsal is
 accepted, deploy normally, then check `leave -migrate-status`, `/healthz`, the same
@@ -525,7 +529,8 @@ kamal app exec --reuse 'leave -migrate-status'
 ```
 
 The original baseline-only image reports `0001 applied 0001_baseline.sql`. The current
-image also applies and reports `0002 applied 0002_half_days_enabled.sql`; rehearse it
+image also applies and reports `0002 applied 0002_half_days_enabled.sql` and
+`0003 applied 0003_halves_audit.sql`; rehearse them
 on a copy first as described above. Adoption marks the existing baseline as applied
 without executing its DDL. The SQL is a
 one-time operation: it deliberately fails if the tracking table already exists. Do

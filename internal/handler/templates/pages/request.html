@@ -17,6 +17,20 @@
   {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}
   {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}{{end}}
 </table>
+{{if and .HalvesSetByID .HalvesSetAt}}<p class="hint">Half days set by {{.HalvesSetBy}} on {{date (slice .HalvesSetAt 0 10)}}</p>{{end}}
+{{end}}
+
+{{range .HalvesErrors}}{{template "err" .}}{{end}}
+{{if .CanSetHalves}}
+<form method="post" action="/admin/requests/{{.Request.ID}}/halves{{if .From}}?from={{.From}}{{end}}" class="panel">
+  {{template "csrf" $.CSRF}}
+  <h2>Half days <small>(admin)</small></h2>
+  <div class="checks">
+    <label><input type="checkbox" name="half_start" value="1"{{if .Request.HalfStart}} checked{{end}}> First (or only) day is a half day</label>
+    <label><input type="checkbox" name="half_end" value="1"{{if .Request.HalfEnd}} checked{{end}}> Last day is a half day</label>
+  </div>
+  <button type="submit" class="quiet">Save</button>
+</form>
 {{end}}
 
 {{if .Request.IsShutdown}}

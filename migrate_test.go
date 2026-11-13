@@ -33,7 +33,7 @@ func TestMigrateCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Recreate the pre-0002 schema to exercise a real upgrade.
-				if _, err := d.Exec(`BEGIN; ALTER TABLE settings DROP COLUMN half_days_enabled; DELETE FROM goose_db_version WHERE version_id=2; COMMIT;`); err != nil {
+				if _, err := d.Exec(`BEGIN; ALTER TABLE requests DROP COLUMN halves_set_at; ALTER TABLE requests DROP COLUMN halves_set_by_id; ALTER TABLE settings DROP COLUMN half_days_enabled; DELETE FROM goose_db_version WHERE version_id>=2; COMMIT;`); err != nil {
 					d.Close()
 					t.Fatal(err)
 				}
@@ -56,7 +56,7 @@ func TestMigrateCommand(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.Contains(string(out), "migrating "+path+": 1 -> 2\n") {
+			if err != nil || !strings.Contains(string(out), "migrating "+path+": 1 -> 3\n") {
 				t.Fatalf("existing DB: err=%v output=%s", err, out)
 			}
 			d, err := sql.Open("sqlite3", path)
@@ -65,7 +65,7 @@ func TestMigrateCommand(t *testing.T) {
 			}
 			defer d.Close()
 			var version, enabled int
-			if err := d.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil || version != 2 {
+			if err := d.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil || version != 3 {
 				t.Fatalf("version=%d err=%v", version, err)
 			}
 			if err := d.QueryRow(`SELECT half_days_enabled FROM settings WHERE id=1`).Scan(&enabled); err != nil || enabled != 0 {

@@ -77,7 +77,7 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 		t.Fatalf("event survived the cancellation: %+v", cal.Events)
 	}
 
-	// A half day is named in the event body, so the shared calendar shows it.
+	// Half-day corrections do not need to patch calendar event bodies.
 	rh, err := svc.Submit(ctx, staff, leave.Input{TypeID: types[0].ID, Start: "2026-11-09", End: "2026-11-10", HalfEnd: true})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	svc.Decide(ctx, boss, rh.ID, true, "")
 	w.RunDue(ctx)
 	rh, _ = svc.Get(ctx, rh.ID)
-	if ev, ok := cal.Events[rh.CalendarEventID]; !ok || !strings.Contains(ev.Body, "(last day a half day)") {
+	if ev, ok := cal.Events[rh.CalendarEventID]; !ok || strings.Contains(ev.Body, "half day") {
 		t.Fatalf("half-day event = %+v", ev)
 	}
 	ch, _ := svc.RequestCancellation(ctx, staff, rh.ID, "")

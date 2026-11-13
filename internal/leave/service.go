@@ -79,7 +79,8 @@ const (
 	EventUnimported EventKind = "unimported"
 	// EventEdited: the requester changed a pending request. Request is as it
 	// is now and Before as it was; the approver is told.
-	EventEdited EventKind = "edited"
+	EventEdited        EventKind = "edited"
+	EventHalvesChanged EventKind = "halves_changed"
 )
 
 type Event struct {

@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited", "halves")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -131,6 +131,23 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		if err := n.send(ctx, tx, "edited", to, r, false, "Review the request", "", special(e), changes(e)); err != nil {
 			return err
 		}
+	case leave.EventHalvesChanged:
+		to := []recipient{{r.UserName, r.UserEmail}}
+		if r.Status == leave.StatusPending {
+			approvers, err := approvers(ctx, tx, r)
+			if err != nil {
+				return err
+			}
+			to = append(to, approvers...)
+		}
+		if err := n.send(ctx, tx, "halves", to, r, false, "View the leave", "", func(d *msgData) {
+			d.Actor = e.Actor.Name
+			if e.Before != nil {
+				d.Was = daysOf(e.Before.Days, e.Before.TypeUnit)
+			}
+		}); err != nil {
+			return err
+		}
 	case leave.EventWithdrawn:
 		to, err := approvers(ctx, tx, r)
 		if err != nil {
@@ -189,6 +206,7 @@ func approvers(ctx context.Context, tx *sql.Tx, r leave.Request) ([]recipient, e
 }
 
 type msgData struct {
+	Owner      bool
 	To         string
 	Request    leave.Request
 	Dates      string
@@ -263,7 +281,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			slog.Warn("notify: recipient has no email address in the directory", "name", p.Name, "request", r.ID)
 			continue
 		}
-		d := msgData{To: firstName(p.Name), Request: r, Dates: Dates(r.Start, r.End),
+		d := msgData{To: firstName(p.Name), Owner: p.Email == r.UserEmail, Request: r, Dates: Dates(r.Start, r.End),
 			Days: days(r), Reassigned: reassigned}
 		for _, f := range extra {
 			f(&d)
@@ -332,7 +350,7 @@ func Dates(start, end string) string {
 
 // days is the request's figure with its unit, and which end is a half day when
 // one is ("1.5 working days, last day a half day"): every email, edit diff and
-// calendar event reads the figure through here, so none can leave it out.
+// notification reads the figure through here, so none can leave it out.
 func days(r leave.Request) string {
 	s := daysOf(r.Days, r.TypeUnit)
 	if h := r.HalfNote(); h != "" {

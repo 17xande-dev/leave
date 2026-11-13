@@ -212,6 +212,7 @@ var notices = map[string]string{
 	"declined":           "Request declined.",
 	"saved":              "Saved.",
 	"reassigned":         "Request reassigned.",
+	"halves-saved":       "Half days saved.",
 	"recorded":           "Leave recorded. It is approved, and they have been emailed.",
 	"recorded-negative":  "Leave recorded, and it takes their balance below zero. They have been emailed.",
 	"unrecorded":         "Recorded leave removed. It no longer counts against their balance.",

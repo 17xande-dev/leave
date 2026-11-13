@@ -1,0 +1,6 @@
+{{define "subject"}}Half days changed for {{.Request.UserName}}: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{if .Owner}}Your leave{{else}}{{.Request.UserName}}'s leave{{end}} for {{.Dates}} is now {{.Days}}, was {{.Was}}.
+
+{{.Actor}} changed the half days.{{if eq .Request.Status "pending"}} The request is still waiting for approval. Please read the new figure before deciding.{{end}}{{end}}

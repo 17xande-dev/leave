@@ -576,8 +576,10 @@ type requestData struct {
 	CanCancel           bool
 	CanDecide           bool
 	// CanUnrecord: an admin may remove this recorded leave.
-	CanUnrecord bool
-	CanSubmit   bool
+	CanUnrecord  bool
+	CanSetHalves bool
+	HalvesErrors leave.FieldErrors
+	CanSubmit    bool
 	// Coverage is the department and team warnings for a pending request
 	// needing special permission, as they stand now. Next names who it goes to if the viewer
 	// approves it; empty when their approval is the last.
@@ -616,13 +618,14 @@ func (h *Handler) loadRequest(w http.ResponseWriter, r *http.Request) (leave.Req
 func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, error) {
 	u := currentUser(r)
 	d := requestData{
-		Request:     req,
-		Back:        backLink{"/", "My leave"},
-		CanWithdraw: leave.CanWithdraw(u, req),
-		CanCancel:   h.leave.CanRequestCancellation(u, req),
-		CanDecide:   leave.CanDecide(u, req),
-		CanUnrecord: u.Admin && req.IsRecorded() && req.Status == leave.StatusApproved && req.UserID != u.ID,
-		CanSubmit:   req.UserID == u.ID && req.Status == leave.StatusDraft,
+		Request:      req,
+		Back:         backLink{"/", "My leave"},
+		CanWithdraw:  leave.CanWithdraw(u, req),
+		CanCancel:    h.leave.CanRequestCancellation(u, req),
+		CanDecide:    leave.CanDecide(u, req),
+		CanUnrecord:  u.Admin && req.IsRecorded() && req.Status == leave.StatusApproved && req.UserID != u.ID,
+		CanSetHalves: leave.CanSetHalves(u, req),
+		CanSubmit:    req.UserID == u.ID && req.Status == leave.StatusDraft,
 	}
 	if u.Admin && req.Status == leave.StatusPending {
 		all, err := h.users.Enabled(r.Context())
@@ -676,6 +679,7 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 			return d, err
 		}
 		d.PendingCancellation = pc
+		d.CanSetHalves = d.CanSetHalves && pc == nil
 		d.CanCancel = d.CanCancel && pc == nil
 	}
 	return d, nil

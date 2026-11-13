@@ -63,11 +63,14 @@ type Request struct {
 	// RecordedBy is the admin who wrote this leave down after the fact
 	// (RecordedByID 0: it went through approval); RemovedBy, with RemovedAt,
 	// the admin who later took it back out.
-	RecordedByID int64
-	RecordedBy   string
-	RemovedByID  int64
-	RemovedBy    string
-	RemovedAt    string
+	RecordedByID  int64
+	RecordedBy    string
+	RemovedByID   int64
+	RemovedBy     string
+	RemovedAt     string
+	HalvesSetByID int64
+	HalvesSetBy   string
+	HalvesSetAt   string
 }
 
 // RecordedPrefix starts the decision note RecordLeave writes, for display
@@ -79,8 +82,8 @@ const RecordedPrefix = "Recorded by "
 // it going through approval, whatever has become of it since.
 func (r Request) IsRecorded() bool { return r.RecordedByID != 0 }
 
-// HalfNote says which end of r is a half day, for pages, emails and the
-// calendar: "" when neither is. The day figure beside it already shows 0.5,
+// HalfNote says which end of r is a half day, for pages and emails:
+// "" when neither is. The day figure beside it already shows 0.5,
 // 1.5 and so on, so this only names the day.
 func (r Request) HalfNote() string {
 	switch {
@@ -109,7 +112,7 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
 	COALESCE(sd.name, ''),
 	COALESCE(r.recorded_by_id, 0), COALESCE(rb.name, ''), COALESCE(r.removed_by_id, 0), COALESCE(rm.name, ''),
-	COALESCE(r.removed_at, '')
+	COALESCE(r.removed_at, ''), COALESCE(r.halves_set_by_id, 0), COALESCE(hb.name, ''), COALESCE(r.halves_set_at, '')
 	FROM requests r
 	JOIN users u ON u.id = r.user_id
 	JOIN leave_types t ON t.id = r.type_id
@@ -118,7 +121,8 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 	LEFT JOIN shutdown_parts sp ON sp.id = r.shutdown_part_id
 	LEFT JOIN shutdowns sd ON sd.id = sp.shutdown_id
 	LEFT JOIN users rb ON rb.id = r.recorded_by_id
-	LEFT JOIN users rm ON rm.id = r.removed_by_id`
+	LEFT JOIN users rm ON rm.id = r.removed_by_id
+	LEFT JOIN users hb ON hb.id = r.halves_set_by_id`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
@@ -126,7 +130,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
 		&r.ApproverName, &r.DecidedBy, &r.ShutdownName, &r.RecordedByID, &r.RecordedBy, &r.RemovedByID, &r.RemovedBy,
-		&r.RemovedAt)
+		&r.RemovedAt, &r.HalvesSetByID, &r.HalvesSetBy, &r.HalvesSetAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
 	}
@@ -362,6 +366,12 @@ type quoteOpts struct {
 	// ImportHorizonDays from today (leave still running, or booked and already
 	// in payroll) instead of having to be over.
 	importing bool
+	// adjust corrects half days on existing leave, with record's policy
+	// relaxations but without requiring the leave to have ended.
+	adjust bool
+	// cycleStart preserves the cycle already charged by a half-day correction,
+	// even if the sick-cycle anchor has changed since the request was saved.
+	cycleStart string
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -388,7 +398,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, in.TypeID))
 	switch {
-	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory && !opt.record):
+	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory && !opt.record && !opt.adjust):
 		errs["type"] = "Choose a type of leave."
 	case err != nil:
 		return Quote{}, err
@@ -415,6 +425,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
 	case opt.mandatory:
+	case opt.adjust:
 	case opt.record:
 		// Only what has happened: future days must go through an application,
 		// or recording would bypass approval and coverage. The last day counts,
@@ -472,7 +483,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 			return qt, errs
 		}
-		if msg := restrictedDayRule(st, t, start, end, counted, holidays); msg != "" && !opt.mandatory && !opt.record {
+		if msg := restrictedDayRule(st, t, start, end, counted, holidays); msg != "" && !opt.mandatory && !opt.record && !opt.adjust {
 			errs["start"] = msg
 			return qt, errs
 		}
@@ -493,7 +504,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		}
 	}
 
-	if !opt.mandatory && !opt.record {
+	if !opt.mandatory && !opt.record && !opt.adjust {
 		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, start, end, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
@@ -506,6 +517,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// the year end is charged to the old year in full -- simpler to explain
 	// than a split, and the admin can adjust if it matters.
 	qt.CycleStart = CycleStart(start, t.CycleMonths, st.SickCycleAnchor)
+	if opt.cycleStart != "" {
+		qt.CycleStart, err = ParseDate(opt.cycleStart)
+		if err != nil {
+			return Quote{}, err
+		}
+	}
 	qt.CycleName = cycleName(qt.CycleStart, today, t, st.SickCycleAnchor)
 	if qt.Balance, err = s.balance(ctx, q, u.ID, t, qt.CycleStart, opt.excludeID); err != nil {
 		return Quote{}, err
@@ -516,7 +533,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		if after < 0 {
 			qt.Shortfall = -after
 		}
-		if after < 0 && !opt.mandatory && !opt.record && !opt.allowNegative {
+		if after < 0 && !opt.mandatory && !opt.record && !opt.adjust && !opt.allowNegative {
 			errs["end"] = fmt.Sprintf("This is %s %s, but you have %s left for this cycle.",
 				qt.Days, qt.Days.Plural("day", "days"), *avail)
 		}

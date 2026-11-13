@@ -74,6 +74,24 @@ func personInfo(u users.User) PersonInfo {
 
 // --- Recorded leave ---------------------------------------------------------
 
+type SetHalfDaysIn struct {
+	ID        int64 `json:"id" jsonschema:"the leave request id"`
+	HalfStart bool  `json:"half_start" jsonschema:"whether the first or only day is a half day"`
+	HalfEnd   bool  `json:"half_end" jsonschema:"whether the last day is a half day; false for a one-day request"`
+}
+
+func (d *deps) setHalfDays(ctx context.Context, u users.User, in SetHalfDaysIn) (RequestOut, string, error) {
+	if err := requireAdmin(u); err != nil {
+		return RequestOut{}, "", err
+	}
+	req, err := d.leave.SetHalves(ctx, u, in.ID, in.HalfStart, in.HalfEnd)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	msg := "Half days saved. The person has been emailed, and the approver too when the request is pending."
+	return RequestOut{Request: requestInfo(req), Message: msg}, msg, nil
+}
+
 type RecordLeaveIn struct {
 	Person    string `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
 	Type      string `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
@@ -372,6 +390,8 @@ func (d *deps) reassign(ctx context.Context, u users.User, in ReassignIn) (Reque
 }
 
 func (d *deps) registerAdminActions(s *mcp.Server) {
+	add(d, s, &mcp.Tool{Name: "set_half_days", Annotations: destructive("Change half days (administrators)"),
+		Description: "Administrators only: set or clear half days on another person's live working-day leave, including approved leave. Works even when applicant half days are off. Refuses shutdown leave and leave with a pending cancellation. The days and balance are recomputed, the change is audited, and the person (and approver when pending) is emailed. Only when the person has told you to."}, d.setHalfDays)
 	add(d, s, &mcp.Tool{Name: "person_balances", Annotations: readOnly("A person's balances (administrators)"),
 		Description: "Administrators only: one person's balances for the current cycle, with the cycle start dates, and every balance adjustment made for them."}, d.personBalances)
 	add(d, s, &mcp.Tool{Name: "permission_queue", Annotations: readOnly("Requests waiting for HR (administrators)"),
