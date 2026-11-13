@@ -76,7 +76,7 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 		if old.HalfStart == halfStart && old.HalfEnd == halfEnd {
 			return FieldErrors{"halves": MsgHalvesUnchanged}
 		}
-		in := Input{TypeID: old.TypeID, Start: old.Start, End: old.End, Note: old.Note,
+		in := Input{TypeID: old.TypeID, Ranges: old.Ranges, Note: old.Note,
 			HalfStart: halfStart, HalfEnd: halfEnd}
 		days := old.Days + halfDays(Input{HalfStart: old.HalfStart, HalfEnd: old.HalfEnd}) - halfDays(in)
 		qt, err := s.quote(ctx, tx, u, in, quoteOpts{adjust: true, adjustedDays: days, halvesAllowed: true, excludeID: id, cycleStart: old.CycleStart})

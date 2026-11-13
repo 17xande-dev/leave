@@ -271,6 +271,9 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	if !ok || ev.Subject != "Sam Staff — Annual leave" || ev.Start != "2026-10-12" || ev.End != "2026-10-16" {
 		t.Fatalf("calendar = %+v, request ranges %+v", cal.Events, ranges)
 	}
+	if want := "Annual leave, Mon 12 Oct – Fri 16 Oct 2026.\nApproved by Big Boss."; ev.Body != want {
+		t.Fatalf("single-range event body changed: %q, want %q", ev.Body, want)
+	}
 	// Running the create again (a retry) must not add a second event.
 	w.RunDue(ctx)
 	if len(cal.Events) != 1 {
@@ -282,6 +285,55 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	w.RunDue(ctx)
 	if len(cal.Events) != 0 {
 		t.Fatalf("event survived the cancellation: %+v", cal.Events)
+	}
+
+	// A real multi-range approval creates separate events, each identifying its
+	// place in the whole request; cancellation must remove both of them.
+	multi, err := svc.Submit(ctx, staff, leave.Input{TypeID: types[0].ID,
+		Ranges: []leave.Range{{Start: "2026-10-19", End: "2026-10-19"}, {Start: "2026-10-21", End: "2026-10-21"}}, HalfStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Decide(ctx, boss, multi.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.RunDue(ctx)
+	if len(cal.Events) != 2 {
+		t.Fatalf("multi-range approval created %d events, want 2", len(cal.Events))
+	}
+	multiRanges, err := svc.CalendarRanges(ctx, multi.ID)
+	if err != nil || len(multiRanges) != 2 {
+		t.Fatalf("multi-range events = %+v, %v", multiRanges, err)
+	}
+	for i, rr := range multiRanges {
+		ev, ok := cal.Events[rr.EventID]
+		want := fmt.Sprintf("Part %d of 2. Whole request: Mon 19 Oct and Wed 21 Oct 2026, 1.5 working days.", i+1)
+		if !ok || ev.Start != rr.Start || ev.End != rr.End || !strings.Contains(ev.Body, want) || strings.Contains(ev.Body, "half day") {
+			t.Fatalf("multi-range event = %+v, want %q", ev, want)
+		}
+	}
+	cMulti, err := svc.RequestCancellation(ctx, staff, multi.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cMulti.Ranges, multi.Ranges) {
+		t.Fatalf("cancellation ranges = %+v, want %+v", cMulti.Ranges, multi.Ranges)
+	}
+	cancelRanges, err := svc.CalendarRanges(ctx, cMulti.ID)
+	if err != nil || len(cancelRanges) != 2 {
+		t.Fatalf("cancellation event rows = %+v, %v", cancelRanges, err)
+	}
+	for _, rr := range cancelRanges {
+		if rr.EventID != "" || rr.LegacyEventID != "" {
+			t.Fatalf("cancellation copied event ids: %+v", cancelRanges)
+		}
+	}
+	if _, err := svc.Decide(ctx, boss, cMulti.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.RunDue(ctx)
+	if len(cal.Events) != 0 {
+		t.Fatalf("events survived multi-range cancellation: %+v", cal.Events)
 	}
 
 	// Half-day corrections do not need to patch calendar event bodies.

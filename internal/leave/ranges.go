@@ -3,6 +3,7 @@ package leave
 import (
 	"database/sql"
 	"slices"
+	"strings"
 )
 
 // Range is one inclusive, contiguous stretch of leave.
@@ -57,7 +58,18 @@ func normaliseRanges(ranges []Range) ([]Range, error) {
 		}
 		merged = append(merged, r)
 	}
+	if len(merged) > 3 {
+		return nil, FieldErrors{"start": "A request can have at most 3 separate ranges of days."}
+	}
 	return merged, nil
+}
+
+func rangesString(ranges []Range) string {
+	parts := make([]string, len(ranges))
+	for i, r := range ranges {
+		parts[i] = r.Start + "/" + r.End
+	}
+	return strings.Join(parts, " ")
 }
 
 // insertRanges is the sole application writer of range dates. The request's

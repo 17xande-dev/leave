@@ -237,7 +237,7 @@ func changes(e leave.Event) func(*msgData) {
 			return
 		}
 		b := *e.Before
-		d.Was = fmt.Sprintf("%s, %s (%s)", b.TypeName, Dates(b.Start, b.End), days(b))
+		d.Was = fmt.Sprintf("%s, %s (%s)", b.TypeName, RangesText(b), days(b))
 		d.Now = fmt.Sprintf("%s, %s (%s)", e.Request.TypeName, d.Dates, d.Days)
 		if b.Note != e.Request.Note {
 			d.NoteChanged = true
@@ -281,7 +281,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			slog.Warn("notify: recipient has no email address in the directory", "name", p.Name, "request", r.ID)
 			continue
 		}
-		d := msgData{To: firstName(p.Name), Owner: p.Email == r.UserEmail, Request: r, Dates: Dates(r.Start, r.End),
+		d := msgData{To: firstName(p.Name), Owner: p.Email == r.UserEmail, Request: r, Dates: RangesText(r),
 			Days: days(r), Reassigned: reassigned}
 		for _, f := range extra {
 			f(&d)
@@ -346,6 +346,39 @@ func Dates(start, end string) string {
 		return s.Format("Mon 2 Jan") + " – " + e.Format("Mon 2 Jan 2006")
 	}
 	return s.Format("Mon 2 Jan 2006") + " – " + e.Format("Mon 2 Jan 2006")
+}
+
+// RangesText renders the requested stretches, omitting a repeated year when
+// they all fall in the same year. A single stretch keeps Dates' exact format.
+func RangesText(r leave.Request) string {
+	if len(r.Ranges) <= 1 {
+		return Dates(r.Start, r.End)
+	}
+	first, err1 := time.Parse(time.DateOnly, r.Ranges[0].Start)
+	last, err2 := time.Parse(time.DateOnly, r.Ranges[len(r.Ranges)-1].End)
+	sameYear := err1 == nil && err2 == nil && first.Year() == last.Year()
+	parts := make([]string, 0, len(r.Ranges))
+	for _, rr := range r.Ranges {
+		s, err1 := time.Parse(time.DateOnly, rr.Start)
+		e, err2 := time.Parse(time.DateOnly, rr.End)
+		if !sameYear || err1 != nil || err2 != nil {
+			parts = append(parts, Dates(rr.Start, rr.End))
+			continue
+		}
+		text := e.Format("Mon 2 Jan")
+		if !s.Equal(e) {
+			startFormat := "Mon 2 Jan"
+			if s.Month() == e.Month() {
+				startFormat = "Mon 2"
+			}
+			text = s.Format(startFormat) + " – " + text
+		}
+		parts = append(parts, text)
+	}
+	if sameYear {
+		parts[len(parts)-1] += last.Format(" 2006")
+	}
+	return strings.Join(parts, " and ")
 }
 
 // days is the request's figure with its unit, and which end is a half day when

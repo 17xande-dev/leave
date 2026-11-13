@@ -954,7 +954,7 @@ func TestQuoteEditExclusion(t *testing.T) {
 		}
 	}
 	// The balance error of an edit points at withdrawing, and offers no HR button.
-	big := fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-11-30&edit=%s", hs.typeID("annual"), id)
+	big := fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-11-10&edit=%s", hs.typeID("annual"), id)
 	if _, body = hs.get(staff, big); !strings.Contains(body, "withdraw this request and ask HR") || strings.Contains(body, `name="negative"`) {
 		t.Fatalf("over-balance edit preview:\n%s", body)
 	}

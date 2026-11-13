@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"slices"
 	"strings"
 
 	"github.com/17xande-dev/leave/internal/users"
@@ -129,7 +128,7 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		}
 		if qt.Type.ID == old.TypeID && fmtDate(qt.Start) == old.Start && fmtDate(qt.End) == old.End &&
 			note == old.Note && escalate == old.Escalate && in.HalfStart == old.HalfStart && in.HalfEnd == old.HalfEnd &&
-			slices.Equal(ranges, old.Ranges) {
+			rangesString(ranges) == rangesString(old.Ranges) {
 			out = old // nothing to save, nobody to tell
 			return nil
 		}

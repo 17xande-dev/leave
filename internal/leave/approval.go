@@ -197,8 +197,12 @@ var ErrChanged = errors.New("leave: the request was changed after it was read")
 // a page read before the edit can be told apart (see DecideSeen). It is a hash,
 // opaque to callers, and covers nothing an approver's own actions change.
 func (r Request) Fingerprint() string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%d|%s|%d|%s|%s|%s|%t|%t|%t|%s",
-		r.ID, r.Kind, r.TypeID, r.Start, r.End, r.Days.String(), r.HalfStart, r.HalfEnd, r.Escalate, r.Note)))
+	text := fmt.Sprintf("%d|%s|%d|%s|%s|%s|%t|%t|%t|%s",
+		r.ID, r.Kind, r.TypeID, r.Start, r.End, r.Days.String(), r.HalfStart, r.HalfEnd, r.Escalate, r.Note)
+	if len(r.Ranges) > 1 {
+		text += "|" + rangesString(r.Ranges)
+	}
+	h := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(h[:12])
 }
 

@@ -71,7 +71,7 @@ func TestNotChargedAgreesWithCountDays(t *testing.T) {
 	}
 	week := WeekOf(time.Tuesday, time.Wednesday, time.Thursday, time.Friday, time.Sunday)
 	start, end := d(time.January, 1), d(time.December, 31)
-	lines, more := notCharged(start, end, UnitWorkdays, names, week)
+	lines, more := notCharged([]Range{{fmtDate(start), fmtDate(end)}}, UnitWorkdays, names, week)
 	if len(lines) != maxNotCharged {
 		t.Fatalf("lines = %d, want the cap %d", len(lines), maxNotCharged)
 	}

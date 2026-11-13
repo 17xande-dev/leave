@@ -99,9 +99,14 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 			if i > 0 {
 				key += "-" + rr.Start
 			}
+			eventBody := body
+			if len(ranges) > 1 {
+				eventBody += fmt.Sprintf("\nPart %d of %d. Whole request: %s, %s.",
+					i+1, len(ranges), notify.RangesText(r), r.Days.Label(r.TypeUnit))
+			}
 			id, err := cal.Create(ctx, calendar.Event{
 				Key: key, Subject: r.UserName + " — " + r.TypeName,
-				Body: body, Start: rr.Start, End: rr.End,
+				Body: eventBody, Start: rr.Start, End: rr.End,
 			})
 			if err != nil {
 				return err

@@ -191,7 +191,7 @@ func (s *Service) groupsFor(ctx context.Context, q querier, u users.User) ([]gro
 // though it still counts for everyone else's checks). excludeID is a request
 // of u's own to leave out, so a draft or pending request being re-evaluated
 // does not collide with itself.
-func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.User, t Type, start, end time.Time,
+func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.User, t Type, ranges []Range,
 	holidays map[time.Time]bool, excludeID int64) ([]Coverage, error) {
 	if t.CoverageRule != CoverageLimit {
 		return nil, nil
@@ -202,7 +202,7 @@ func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.Us
 	}
 	var out []Coverage
 	for _, g := range groups {
-		c, err := s.groupCoverage(ctx, q, week, g, u, t, start, end, holidays, excludeID)
+		c, err := s.groupCoverage(ctx, q, week, g, u, t, ranges, holidays, excludeID)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +215,7 @@ func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.Us
 
 // groupCoverage is the check against one limit: nil unless over it.
 func (s *Service) groupCoverage(ctx context.Context, q querier, week Week, g group, u users.User, t Type,
-	start, end time.Time, holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
+	ranges []Range, holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
 	var size int
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM (`+g.members+`)`, g.arg).Scan(&size); err != nil {
 		return nil, err
@@ -225,10 +225,11 @@ func (s *Service) groupCoverage(ctx context.Context, q querier, week Week, g gro
 	}
 
 	// Others' leave touching the range. A drafted request is not away yet.
-	rows, err := q.QueryContext(ctx, `SELECT r.user_id, r.start_date, r.end_date FROM requests r
+	rows, err := q.QueryContext(ctx, `SELECT r.user_id, rr.start_date, rr.end_date FROM requests r
+		JOIN request_ranges rr ON rr.request_id = r.id
 		WHERE r.user_id IN (`+g.members+`) AND r.user_id <> ? AND r.id <> ? AND r.kind = 'leave'
-		AND r.status IN ('pending', 'approved', 'awaiting_hr') AND r.start_date <= ? AND r.end_date >= ?`,
-		g.arg, u.ID, excludeID, fmtDate(end), fmtDate(start))
+		AND r.status IN ('pending', 'approved', 'awaiting_hr') AND rr.start_date <= ? AND rr.end_date >= ?`,
+		g.arg, u.ID, excludeID, ranges[len(ranges)-1].End, ranges[0].Start)
 	if err != nil {
 		return nil, err
 	}
@@ -253,19 +254,23 @@ func (s *Service) groupCoverage(ctx context.Context, q querier, week Week, g gro
 	// A weekend off is taken on days the week does not work, so for that unit
 	// every day counts; otherwise only days someone would actually be missed.
 	worst, worstDay := -1, ""
-	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if t.Unit != UnitWeekend && !week.Working(d, holidays) {
-			continue
-		}
-		ds := fmtDate(d)
-		away := map[int64]bool{}
-		for _, sp := range spans {
-			if sp.start <= ds && sp.end >= ds {
-				away[sp.user] = true
+	for _, r := range ranges {
+		start, _ := ParseDate(r.Start)
+		end, _ := ParseDate(r.End)
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			if t.Unit != UnitWeekend && !week.Working(d, holidays) {
+				continue
 			}
-		}
-		if len(away) > worst {
-			worst, worstDay = len(away), ds
+			ds := fmtDate(d)
+			away := map[int64]bool{}
+			for _, sp := range spans {
+				if sp.start <= ds && sp.end >= ds {
+					away[sp.user] = true
+				}
+			}
+			if len(away) > worst {
+				worst, worstDay = len(away), ds
+			}
 		}
 	}
 	// "More than", not "at least": one of two people at 50% is allowed. And
@@ -310,5 +315,5 @@ func (s *Service) coverageFor(ctx context.Context, q querier, r Request) ([]Cove
 	if err != nil {
 		return nil, err
 	}
-	return s.coverage(ctx, q, st.Week, u, t, start, end, holidays, r.ID)
+	return s.coverage(ctx, q, st.Week, u, t, r.Ranges, holidays, r.ID)
 }

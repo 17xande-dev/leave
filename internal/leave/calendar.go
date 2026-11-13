@@ -184,7 +184,7 @@ func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]
 		refuse(t.Name + " is not counted in working days, so it has no half days.")
 		return fe
 	}
-	if in.HalfEnd && end.Equal(start) {
+	if in.HalfEnd && len(in.Ranges) <= 1 && end.Equal(start) {
 		fe["half_end"] = "A one-day request has only a first day: tick \"First (or only) day is a half day\" instead."
 	}
 	for _, h := range []struct {
@@ -217,26 +217,30 @@ type NotCharged struct {
 // maxNotCharged caps the lines shown; the rest are counted in more.
 const maxNotCharged = 6
 
-// notCharged lists the days in start..end that CountDays skips, and why: one
+// notCharged lists the requested days that CountDays skips, and why: one
 // line for the weekdays the working week leaves out ("Saturday and Sunday
 // are not working days"), then one per public holiday, soonest first. A
 // holiday on a day off is already explained by the week. At most
 // maxNotCharged lines; more counts the holiday lines left out.
-func notCharged(start, end time.Time, unit string, names map[time.Time]string, week Week) (lines []NotCharged, more int) {
+func notCharged(ranges []Range, unit string, names map[time.Time]string, week Week) (lines []NotCharged, more int) {
 	holidays := holidayDays(names)
 	var off [7]bool
 	anyOff := false
 	var hols []NotCharged
-	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if charged(d, unit, holidays, week) {
-			continue
+	for _, r := range ranges {
+		start, _ := ParseDate(r.Start)
+		end, _ := ParseDate(r.End)
+		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+			if charged(d, unit, holidays, week) {
+				continue
+			}
+			if !week[d.Weekday()] {
+				anyOff = true
+				off[d.Weekday()] = true
+				continue
+			}
+			hols = append(hols, NotCharged{Text: d.Format("Mon 2 Jan") + ": " + names[d]})
 		}
-		if !week[d.Weekday()] {
-			anyOff = true
-			off[d.Weekday()] = true
-			continue
-		}
-		hols = append(hols, NotCharged{Text: d.Format("Mon 2 Jan") + ": " + names[d]})
 	}
 	if anyOff {
 		var days []string

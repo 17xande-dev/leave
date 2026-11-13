@@ -52,13 +52,14 @@ func (s *Service) AwayFor(ctx context.Context, viewer, subject users.User, start
 		OR u.id IN (SELECT user_id FROM approver_overrides WHERE approver_id = ?2))`
 	const subjectReport = `((u.manager_dn = ?7 AND ?7 <> '' AND u.id NOT IN (SELECT user_id FROM approver_overrides))
 		OR u.id IN (SELECT user_id FROM approver_overrides WHERE approver_id = ?8))`
-	rows, err := s.db.QueryContext(ctx, `SELECT u.id, u.name, r.start_date, r.end_date, r.status,
+	rows, err := s.db.QueryContext(ctx, `SELECT u.id, u.name, rr.start_date, rr.end_date, r.status,
 			CASE WHEN ?3 = 1 OR r.approver_id = ?2 OR `+viewerReport+` THEN t.name ELSE '' END
 		FROM requests r
+		JOIN request_ranges rr ON rr.request_id = r.id
 		JOIN users u ON u.id = r.user_id
 		JOIN leave_types t ON t.id = r.type_id
 		WHERE r.kind = 'leave' AND r.status IN ('pending', 'approved')
-		AND r.start_date <= ?5 AND r.end_date >= ?4
+		AND rr.start_date <= ?5 AND rr.end_date >= ?4
 		AND u.disabled = 0 AND u.id <> ?8
 		AND ((?6 <> '' AND u.department = ?6)
 			OR u.id IN (SELECT m2.user_id FROM team_members m1
@@ -66,7 +67,7 @@ func (s *Service) AwayFor(ctx context.Context, viewer, subject users.User, start
 				JOIN team_members m2 ON m2.team_id = m1.team_id
 				WHERE m1.user_id = ?8)
 			OR `+subjectReport+`)
-		ORDER BY r.start_date, u.name, r.id`,
+		ORDER BY rr.start_date, u.name, r.id`,
 		viewer.DN, viewer.ID, boolInt(viewer.Admin), start, end, subject.Department, subject.DN, subject.ID)
 	if err != nil {
 		return nil, err

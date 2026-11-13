@@ -361,8 +361,8 @@ func TestDomainRefusalsAreToolErrors(t *testing.T) {
 func TestPreviewOffersWhatTheButtonsOffer(t *testing.T) {
 	f := newFixture(t)
 	staff := f.as("staff1")
-	// About three months of working days against fifteen.
-	args := map[string]any{"type": "annual", "start": "2026-11-02", "end": "2027-01-29", "note": "long trip"}
+	// Twenty-one working days against fifteen, inside the 31-day span limit.
+	args := map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-30", "note": "long trip"}
 	p := f.ok(staff, "preview_request", args)
 	if p.Data["ok"] != false || p.Data["can_ask_hr"] != true || p.Data["can_ask_special_permission"] != false ||
 		p.Data["shortfall_days"].(float64) <= 0 || len(p.Data["problems"].([]any)) != 1 {
@@ -739,7 +739,7 @@ func TestNegativeBalancePermissions(t *testing.T) {
 	f := newFixture(t)
 	hr, staff := f.as("hr"), f.as("staff1")
 	ask := func(user *mcp.ClientSession) result {
-		return f.ok(user, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2027-01-29", "note": "trip", "ask_hr": true})
+		return f.ok(user, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-30", "note": "trip", "ask_hr": true})
 	}
 	a, b := ask(staff), ask(f.as("staff2"))
 	if q := f.ok(hr, "permission_queue", nil); len(q.Data["queue"].([]any)) != 2 ||
@@ -773,7 +773,7 @@ func TestNegativeBalancePermissions(t *testing.T) {
 func TestNobodyGrantsOrRefusesTheirOwnPermission(t *testing.T) {
 	f := newFixture(t)
 	hr := f.as("hr")
-	r := f.ok(hr, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2027-01-29", "note": "trip", "ask_hr": true})
+	r := f.ok(hr, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-30", "note": "trip", "ask_hr": true})
 	f.refused(hr, "grant_negative", map[string]any{"id": id(r)}, "That is not possible")
 	f.refused(hr, "refuse_negative", map[string]any{"id": id(r), "note": "no"}, "That is not possible")
 	// Another administrator can.
@@ -877,7 +877,7 @@ func TestEditRequestTool(t *testing.T) {
 	}
 	// Same rules as applying, same messages.
 	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-06-01"}, "can start at most 92 days ago")
-	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-12", "end": "2026-12-30"}, "withdraw this request and ask HR")
+	f.refused(staff, "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-12", "end": "2026-11-10"}, "withdraw this request and ask HR")
 	// Not yours: no such request. Someone who can see it but not edit it: the standard message.
 	f.refused(f.as("staff2"), "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-19"}, "No such request")
 	f.refused(f.as("headops"), "edit_request", map[string]any{"id": rid, "type": "annual", "start": "2026-10-19"}, "can no longer be edited")

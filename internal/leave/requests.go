@@ -343,6 +343,8 @@ func Offers(qt Quote, fe FieldErrors) (canOverride, canNegative bool) {
 // decades. Maternity leave, the longest, is four months.
 const maxSpan = 190
 
+const maxWorkdaySpan = 31
+
 // Preview validates a request without saving it.
 func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, error) {
 	if err := s.ensureYears(ctx, in); err != nil {
@@ -414,18 +416,16 @@ func (s *Service) ensureYears(ctx context.Context, in Input) error {
 }
 
 func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, opt quoteOpts) (Quote, error) {
-	if len(in.Ranges) > 0 {
-		ranges, err := in.ranges()
-		if err != nil {
-			return Quote{}, err
-		}
-		ranges, err = normaliseRanges(ranges)
-		if err != nil {
-			return Quote{}, err
-		}
-		// Phase 4 changes storage only: policy still judges the span.
-		in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
+	ranges, err := in.ranges()
+	if err != nil {
+		return Quote{}, err
 	}
+	ranges, err = normaliseRanges(ranges)
+	if err != nil {
+		return Quote{}, err
+	}
+	in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
+	in.Ranges = ranges
 	errs := FieldErrors{}
 	var qt Quote
 
@@ -454,6 +454,9 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		return qt, errs
 	}
 	qt.Start, qt.End = start, end
+	if len(ranges) > 1 && (t.Unit != UnitWorkdays || opt.mandatory) {
+		return qt, FieldErrors{"start": t.Name + " must be one continuous stretch of days."}
+	}
 
 	today := s.today()
 	switch {
@@ -461,6 +464,8 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
+	case t.Unit == UnitWorkdays && !opt.record && !opt.importing && !opt.adjust && !opt.mandatory && end.Sub(start) >= maxWorkdaySpan*24*time.Hour:
+		errs["end"] = fmt.Sprintf("A request can span at most %d days from its first day to its last day.", maxWorkdaySpan)
 	case opt.mandatory:
 	case opt.adjust:
 	case opt.record:
@@ -518,17 +523,22 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 			// Calendar changes must not reprice leave already booked.
 			qt.Days = opt.adjustedDays
 		} else {
-			counted = CountDays(start, end, t.Unit, holidays, st.Week)
+			for _, r := range ranges {
+				rs, _ := ParseDate(r.Start)
+				re, _ := ParseDate(r.End)
+				days := CountDays(rs, re, t.Unit, holidays, st.Week)
+				counted += days
+				if msg := restrictedDayRule(st, t, rs, re, days, holidays); msg != "" && !opt.mandatory && !opt.record {
+					errs["start"] = fmt.Sprintf("%s Stretch: %s – %s.", msg, rs.Format("Mon 2 Jan"), re.Format("Mon 2 Jan"))
+					return qt, errs
+				}
+			}
 			qt.Days = WholeDays(counted) - halfDays(in)
-			qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
+			qt.NotCharged, qt.NotChargedMore = notCharged(ranges, t.Unit, holidayNames, st.Week)
 			if counted == 0 {
 				errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 				return qt, errs
 			}
-		}
-		if msg := restrictedDayRule(st, t, start, end, counted, holidays); msg != "" && !opt.mandatory && !opt.record && !opt.adjust {
-			errs["start"] = msg
-			return qt, errs
 		}
 	}
 	if opt.adjust && qt.Days <= 0 {
@@ -539,10 +549,15 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// over days a shutdown already covers would charge the same days twice.
 	if !opt.adjust {
 		var overlap int
-		if err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND kind = 'leave'
-		AND status IN ('draft', 'awaiting_hr', 'pending', 'approved') AND start_date <= ? AND end_date >= ? AND id <> ?`,
-			u.ID, fmtDate(end), fmtDate(start), opt.excludeID).Scan(&overlap); err != nil {
-			return Quote{}, err
+		for _, rg := range ranges {
+			if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM request_ranges rr JOIN requests r ON r.id = rr.request_id
+			WHERE r.user_id = ? AND r.kind = 'leave' AND r.status IN ('draft', 'awaiting_hr', 'pending', 'approved')
+			AND rr.start_date <= ? AND rr.end_date >= ? AND r.id <> ?)`, u.ID, rg.End, rg.Start, opt.excludeID).Scan(&overlap); err != nil {
+				return Quote{}, err
+			}
+			if overlap > 0 {
+				break
+			}
 		}
 		if overlap > 0 {
 			errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
@@ -553,7 +568,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 
 	if !opt.mandatory && !opt.record && !opt.adjust {
-		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, start, end, holidays, opt.excludeID); err != nil {
+		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, ranges, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
 		if len(qt.Coverage) > 0 && !opt.override {

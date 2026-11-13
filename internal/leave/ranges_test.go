@@ -251,10 +251,14 @@ func TestEditRangesWithTransitionalTriggers(t *testing.T) {
 
 func TestSubmitDraftPreservesStoredRanges(t *testing.T) {
 	f := newFixture(t)
-	f.december(false)
-	draft := f.drafts("staff")[0]
 	want := []Range{{"2026-12-08", "2026-12-09"}, {"2026-12-11", "2026-12-11"}}
-	if err := f.svc.withTx(f.ctx, func(tx *sql.Tx) error { return insertRanges(tx, draft.ID, want) }); err != nil {
+	f.exhaustAnnual()
+	draft, err := f.svc.Submit(f.ctx, f.people["staff"], Input{TypeID: f.types["annual"].ID, Ranges: want, Negative: true, Note: "needed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRangeInvariants(t, f)
+	if _, err := f.svc.GrantNegative(f.ctx, f.people["hr"], draft.ID, "agreed"); err != nil {
 		t.Fatal(err)
 	}
 	r, err := f.svc.SubmitDraft(f.ctx, f.people["staff"], draft.ID, "")
@@ -263,6 +267,9 @@ func TestSubmitDraftPreservesStoredRanges(t *testing.T) {
 	}
 	if !reflect.DeepEqual(r.Ranges, want) {
 		t.Fatalf("submitted draft ranges=%v want %v", r.Ranges, want)
+	}
+	if r.Days != WholeDays(3) {
+		t.Fatalf("draft re-quoted its gap as leave: days=%s", r.Days)
 	}
 	assertRangeInvariants(t, f)
 }
