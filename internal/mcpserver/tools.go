@@ -17,24 +17,59 @@ import (
 // list longer than this is a question to narrow, not to page through.
 const listCap = 200
 
+// DateRange is the wire representation of one inclusive stretch of leave.
+type DateRange struct {
+	Start string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End   string `json:"end" jsonschema:"last day, YYYY-MM-DD"`
+}
+
+func dateRanges(rs []leave.Range) []DateRange {
+	out := make([]DateRange, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, DateRange{Start: r.Start, End: r.End})
+	}
+	return out
+}
+
+// requestDates preserves the single-date shorthand while leaving range
+// validation and normalisation to the same core used by the forms.
+func requestDates(start, end string, ranges []DateRange) (leave.Input, error) {
+	start, end = strings.TrimSpace(start), strings.TrimSpace(end)
+	if ranges != nil {
+		if start != "" || end != "" {
+			return leave.Input{}, leave.FieldErrors{"start": "Use either ranges or first and last day, not both."}
+		}
+		in := leave.Input{}
+		for _, r := range ranges {
+			in.Ranges = append(in.Ranges, leave.Range{Start: strings.TrimSpace(r.Start), End: strings.TrimSpace(r.End)})
+		}
+		return in, nil
+	}
+	if end == "" {
+		end = start
+	}
+	return leave.Input{Start: start, End: end}, nil
+}
+
 // --- Shapes -----------------------------------------------------------------
 
 // RequestInfo is a request as the assistant sees it: names, not ids, wherever a
 // person would use a name.
 type RequestInfo struct {
-	ID         int64      `json:"id"`
-	Kind       string     `json:"kind" jsonschema:"leave, or cancellation (a request to cancel approved leave)"`
-	Person     string     `json:"person"`
-	Department string     `json:"department,omitempty"`
-	Type       string     `json:"type"`
-	Unit       string     `json:"unit" jsonschema:"what days are counted in: workdays, calendar or weekend"`
-	Start      string     `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End        string     `json:"end" jsonschema:"last day, YYYY-MM-DD"`
-	Days       leave.Days `json:"days"`
-	HalfStart  bool       `json:"half_start,omitempty" jsonschema:"the first (or only) day is a half day, charged 0.5"`
-	HalfEnd    bool       `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5"`
-	Status     string     `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
-	Note       string     `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
+	ID         int64       `json:"id"`
+	Kind       string      `json:"kind" jsonschema:"leave, or cancellation (a request to cancel approved leave)"`
+	Person     string      `json:"person"`
+	Department string      `json:"department,omitempty"`
+	Type       string      `json:"type"`
+	Unit       string      `json:"unit" jsonschema:"what days are counted in: workdays, calendar or weekend"`
+	Start      string      `json:"start" jsonschema:"first day, YYYY-MM-DD"`
+	End        string      `json:"end" jsonschema:"last day, YYYY-MM-DD"`
+	Ranges     []DateRange `json:"ranges" jsonschema:"the actual inclusive stretches of leave; start and end above are the span bounds"`
+	Days       leave.Days  `json:"days"`
+	HalfStart  bool        `json:"half_start,omitempty" jsonschema:"the first (or only) day is a half day, charged 0.5"`
+	HalfEnd    bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5"`
+	Status     string      `json:"status" jsonschema:"draft, awaiting_hr, pending, approved, declined, withdrawn or cancelled"`
+	Note       string      `json:"note,omitempty" jsonschema:"the person's note; on leave an administrator recorded (recorded_by set) it is that administrator's reason"`
 	// RecordedBy is set when an administrator wrote the leave down after the fact.
 	RecordedBy string `json:"recorded_by,omitempty" jsonschema:"set when an administrator recorded this leave after the fact instead of it being requested"`
 	// Approver is who must decide it while it is pending; empty means any administrator.
@@ -51,7 +86,7 @@ type RequestInfo struct {
 
 func requestInfo(r leave.Request) RequestInfo {
 	return RequestInfo{ID: r.ID, Kind: r.Kind, Person: r.UserName, Department: r.Department,
-		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Days: r.Days, HalfStart: r.HalfStart, HalfEnd: r.HalfEnd, Status: r.Status,
+		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Ranges: dateRanges(r.Ranges), Days: r.Days, HalfStart: r.HalfStart, HalfEnd: r.HalfEnd, Status: r.Status,
 		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
 		CreatedAt: r.CreatedAt, RemovedBy: r.RemovedBy, RemovedAt: r.RemovedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
 		SpecialPermission: r.Escalate}
@@ -339,12 +374,13 @@ func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool, 
 }
 
 type RequestIn struct {
-	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
+	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`
+	Note      string      `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	HalfStart bool        `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 // input is the request as the applicant u made it; u only shapes the hint when
@@ -354,12 +390,13 @@ func (d *deps) input(ctx context.Context, u users.User, in RequestIn) (leave.Inp
 	if err != nil {
 		return leave.Input{}, err
 	}
-	end := strings.TrimSpace(in.End)
-	if end == "" {
-		end = strings.TrimSpace(in.Start)
+	li, err := requestDates(in.Start, in.End, in.Ranges)
+	if err != nil {
+		return leave.Input{}, err
 	}
-	return leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note,
-		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd}, nil
+	li.TypeID, li.Note = t.ID, in.Note
+	li.HalfStart, li.HalfEnd = in.HalfStart, in.HalfEnd
+	return li, nil
 }
 
 type Problem struct {
@@ -450,14 +487,15 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 }
 
 type ApplyIn struct {
-	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
-	AskHR     bool   `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
+	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`
+	Note      string      `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Override  bool        `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+	AskHR     bool        `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
+	HalfStart bool        `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 type RequestOut struct {
@@ -466,7 +504,7 @@ type RequestOut struct {
 }
 
 func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut, string, error) {
-	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Ranges: in.Ranges, Note: in.Note,
 		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
@@ -487,14 +525,15 @@ func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut,
 }
 
 type EditIn struct {
-	ID        int64  `json:"id" jsonschema:"the pending request's id"`
-	Type      string `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
-	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
-	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
+	ID        int64       `json:"id" jsonschema:"the pending request's id"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
+	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`
+	Note      string      `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
+	Override  bool        `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
+	HalfStart bool        `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 // edit changes a pending request of the person's own, as the Edit form does.
@@ -505,7 +544,7 @@ func (d *deps) edit(ctx context.Context, u users.User, in EditIn) (RequestOut, s
 	if err != nil {
 		return RequestOut{}, "", err
 	}
-	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Note: in.Note,
+	li, err := d.input(ctx, u, RequestIn{Type: in.Type, Start: in.Start, End: in.End, Ranges: in.Ranges, Note: in.Note,
 		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
 	if err != nil {
 		return RequestOut{}, "", err
@@ -796,9 +835,18 @@ func (d *deps) whoIsAway(ctx context.Context, u users.User, in AwayIn) (AwayOut,
 		if name == "" {
 			name = "(no department)"
 		}
-		byDept[name] = append(byDept[name], AwayPerson{Person: r.UserName, Type: r.TypeName,
-			Start: r.Start, End: r.End, Status: r.Status})
-		n++
+		matched := false
+		for _, span := range r.Ranges {
+			if span.Start > t || span.End < f {
+				continue
+			}
+			byDept[name] = append(byDept[name], AwayPerson{Person: r.UserName, Type: r.TypeName,
+				Start: span.Start, End: span.End, Status: r.Status})
+			matched = true
+		}
+		if matched {
+			n++
+		}
 	}
 	out := AwayOut{From: f, To: t, Departments: []AwayDepartment{}}
 	for _, k := range sortedKeys(byDept) {

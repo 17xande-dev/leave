@@ -167,11 +167,17 @@ func (h *Handler) buildGrid(r *http.Request, month, cur, today time.Time) (teamG
 		if rq.Kind != leave.KindLeave || rq.End < leave.FormatDate(first) || rq.Start > leave.FormatDate(last) {
 			continue
 		}
+		status := ""
 		switch rq.Status {
 		case leave.StatusApproved:
-			byUser[u.ID] = append(byUser[u.ID], span{rq.Start, rq.End, "approved"})
+			status = "approved"
 		case leave.StatusPending, leave.StatusAwaitingHR:
-			byUser[u.ID] = append(byUser[u.ID], span{rq.Start, rq.End, "pending"})
+			status = "pending"
+		}
+		if status != "" {
+			for _, rg := range requestRanges(rq) {
+				byUser[u.ID] = append(byUser[u.ID], span{rg.Start, rg.End, status})
+			}
 		}
 	}
 	names[u.ID] = u.Name

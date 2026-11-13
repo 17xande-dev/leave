@@ -9,7 +9,7 @@
   <tbody>
   {{range .Rows}}
     <tr>
-      <td><a href="/leave/{{.ID}}{{if $.From}}?from={{$.From}}{{end}}">{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a></td>
+      <td><a href="/leave/{{.ID}}{{if $.From}}?from={{$.From}}{{end}}">{{template "requestdates" .}}</a></td>
       <td>{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</td>
       <td class="num">{{.Days}}{{with .HalfNote}}<br><small>{{.}}</small>{{end}}</td>
       <td><span class="badge {{status .Status}}">{{statuslabel .Status}}</span>{{if .Escalate}} <span class="badge special">special permission</span>{{end}}{{if .IsRecorded}} <span class="badge">recorded</span>{{end}}</td>
@@ -21,3 +21,4 @@
 {{end}}
 
 {{define "status"}}<span class="badge {{status .}}">{{statuslabel .}}</span>{{end}}
+{{define "requestdates"}}{{if gt (len .Ranges) 1}}{{ranges .}}{{else}}{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}{{end}}{{end}}

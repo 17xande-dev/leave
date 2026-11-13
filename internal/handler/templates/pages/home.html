@@ -8,9 +8,9 @@
   <div class="up-next-main">
     <h2>Up next</h2>
     {{with .Next}}
-      <p class="up-next-lead"><a href="/leave/{{.Request.ID}}">{{.Request.TypeName}}, {{date .Request.Start}}{{if ne .Request.Start .Request.End}} – {{date .Request.End}}{{end}}</a></p>
+      <p class="up-next-lead"><a href="/leave/{{.Request.ID}}">{{.Request.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a></p>
       <p class="muted">{{.Request.Days}} {{dplural .Request.Days "day" "days"}}{{with .Request.HalfNote}} ({{.}}){{end}}.
-        {{if .Now}}On leave now, until {{date .Request.End}}.{{else if eq .In 1}}Starts tomorrow.{{else}}Starts in {{.In}} days.{{end}}</p>
+        {{if .Now}}On leave now, until {{date .End}}.{{else if eq .In 1}}Starts tomorrow.{{else}}Starts in {{.In}} days.{{end}}</p>
     {{else}}
       <p class="muted">No leave booked.</p>
     {{end}}
@@ -25,7 +25,7 @@
   <h2>Waiting for you to submit</h2>
   <p class="hint">Open each one, check it and submit it.</p>
   <ul>
-  {{range .}}<li><a href="/leave/{{.ID}}">{{if .IsShutdown}}{{.ShutdownName}}: {{end}}{{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a> ({{.Days}} {{dplural .Days "day" "days"}}{{with .HalfNote}}, {{.}}{{end}}){{if .IsShutdown}} <small>Filled in for you for a company shutdown.</small>{{else}} <small>HR has allowed this to go below zero.</small>{{end}}</li>{{end}}
+  {{range .}}<li><a href="/leave/{{.ID}}">{{if .IsShutdown}}{{.ShutdownName}}: {{end}}{{.TypeName}}, {{template "requestdates" .}}</a> ({{.Days}} {{dplural .Days "day" "days"}}{{with .HalfNote}}, {{.}}{{end}}){{if .IsShutdown}} <small>Filled in for you for a company shutdown.</small>{{else}} <small>HR has allowed this to go below zero.</small>{{end}}</li>{{end}}
   </ul>
 </section>
 {{end}}

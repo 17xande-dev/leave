@@ -295,6 +295,8 @@ type Input struct {
 // Quote is what a request would cost, for the form's live preview and for
 // Submit's own checks.
 type Quote struct {
+	// Ranges are the normalised stretches used to calculate this quote.
+	Ranges     []Range
 	Type       Type
 	Start, End time.Time
 	Days       Days
@@ -433,7 +435,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		in.Ranges = ranges
 	}
 	errs := FieldErrors{}
-	var qt Quote
+	qt := Quote{Ranges: ranges}
 
 	st, err := s.settings(ctx, q)
 	if err != nil {

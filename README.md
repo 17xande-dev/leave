@@ -49,6 +49,26 @@ Sunday costs a day. The holidays are computed from the Public Holidays Act,
 including the Sunday-to-Monday rule. Admins add proclaimed days, such as election days,
 by hand. Days count against the cycle the leave starts in.
 
+**Several stretches in one request.** Apply, edit and admin Record leave accept up to
+3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
+Applicants' working-day leave must fit within 31 days from its first to last day,
+including a single stretch; admin recording and imports are exempt from this guard.
+Calendar-day types and weekends off remain one continuous stretch. The restricted-day
+minimum applies to each stretch separately. Half-day flags mean the first day of the
+first range and the last day of the last range. Gap days cost nothing and stay free in
+the team view, coverage checks and picker marks. Each approved range has its own shared
+calendar event. Without JavaScript the form still accepts one first/last-day pair.
+
+The picker supports click-click selection, drag selection and removing a day to split
+a stretch; Done closes it. Its upstream is `~/dev/libraries/date-range-input`: change
+the widget there and re-vendor it into `internal/handler/static/`, recording its commit,
+size and SHA-256 in that directory's README.
+
+MCP `apply_for_leave`, `preview_request`, `edit_request` and `record_leave` accept
+`ranges: [{start, end}]` instead of `start`/`end`; sending both is an error. Request
+results include `ranges`, while `start` and `end` remain the span bounds. The admin CSV
+also includes a `ranges` column alongside its span columns.
+
 **Half days** start OFF, including after upgrading an existing database. Under
 **Admin → Settings**, tick **Let people book half days** to offer them on apply/edit
 forms and through assistants. Admins can always record half days and change them on

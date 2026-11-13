@@ -155,11 +155,11 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	var buf bytes.Buffer
 	cw := csv.NewWriter(&buf)
-	cw.Write([]string{"id", "name", "department", "type", "kind", "start", "end", "days", "half_day", "status",
+	cw.Write([]string{"id", "name", "department", "type", "kind", "start", "end", "ranges", "days", "half_day", "status",
 		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at", "recorded_by"})
 	for _, q := range rs {
 		cw.Write([]string{strconv.FormatInt(q.ID, 10), csvText(q.UserName), csvText(q.Department),
-			csvText(q.TypeName), q.Kind, q.Start, q.End, q.Days.String(), q.HalfNote(), q.Status,
+			csvText(q.TypeName), q.Kind, q.Start, q.End, rangeValue(requestRanges(q)), q.Days.String(), q.HalfNote(), q.Status,
 			csvText(q.ApproverName), csvText(q.DecidedBy), q.DecidedAt, csvText(q.Note),
 			csvText(q.DecisionNote), q.CreatedAt, csvText(q.RecordedBy)})
 	}
@@ -519,10 +519,11 @@ func (h *Handler) AdminRecordLeave(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	typeID, _ := strconv.ParseInt(r.PostFormValue("type"), 10, 64)
-	in := leave.Input{TypeID: typeID, Start: r.PostFormValue("start"), End: r.PostFormValue("end"),
-		Note: r.PostFormValue("note"), HalfStart: r.PostFormValue("half_start") == "1", HalfEnd: r.PostFormValue("half_end") == "1"}
-	rec, err := h.leave.RecordLeave(r.Context(), currentUser(r), id, in)
+	in, err := inputFrom(r)
+	var rec leave.Request
+	if err == nil {
+		rec, err = h.leave.RecordLeave(r.Context(), currentUser(r), id, in)
+	}
 	var fe leave.FieldErrors
 	switch {
 	case errors.Is(err, users.ErrNotFound):

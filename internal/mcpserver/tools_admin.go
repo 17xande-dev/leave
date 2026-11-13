@@ -94,13 +94,14 @@ func (d *deps) setHalfDays(ctx context.Context, u users.User, in SetHalfDaysIn) 
 }
 
 type RecordLeaveIn struct {
-	Person    string `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
-	Type      string `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
-	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
-	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
-	Note      string `json:"note" jsonschema:"why it is being recorded; required"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; admins recording leave can always use half days"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; admins recording leave can always use half days"`
+	Person    string      `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
+	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
+	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
+	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3; recording is exempt from the applicants' 31-day limit"`
+	Note      string      `json:"note" jsonschema:"why it is being recorded; required"`
+	HalfStart bool        `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; admins recording leave can always use half days"`
+	HalfEnd   bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; admins recording leave can always use half days"`
 }
 
 type RecordedOut struct {
@@ -122,12 +123,13 @@ func (d *deps) recordLeave(ctx context.Context, u users.User, in RecordLeaveIn) 
 	if err != nil {
 		return RecordedOut{}, "", err
 	}
-	end := strings.TrimSpace(in.End)
-	if end == "" {
-		end = strings.TrimSpace(in.Start)
+	li, err := requestDates(in.Start, in.End, in.Ranges)
+	if err != nil {
+		return RecordedOut{}, "", err
 	}
-	req, err := d.leave.RecordLeave(ctx, u, who.ID, leave.Input{TypeID: t.ID, Start: strings.TrimSpace(in.Start), End: end, Note: in.Note,
-		HalfStart: in.HalfStart, HalfEnd: in.HalfEnd})
+	li.TypeID, li.Note = t.ID, in.Note
+	li.HalfStart, li.HalfEnd = in.HalfStart, in.HalfEnd
+	req, err := d.leave.RecordLeave(ctx, u, who.ID, li)
 	if err != nil {
 		return RecordedOut{}, "", err
 	}
@@ -401,7 +403,9 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "record_leave", Annotations: additive("Record leave a person took (administrators)"),
 		Description: "Administrators only: write down leave a person has already started or taken, stored as approved. The person is emailed and it goes on the shared calendar. " +
 			"A note saying why is required. Leave whose last day is still to come is refused (future days go through an application); a retired type is allowed; the balance may go below zero (reported as below_zero). " +
-			"You cannot record your own leave; another administrator does that. Only when the person has told you to. half_start / half_end make the first (or only) / last day a half day (0.5), as in apply_for_leave."}, d.recordLeave)
+			"You cannot record your own leave; another administrator does that. Only when the person has told you to. " +
+			"Use start/end for one stretch or ranges: [{start, end}] instead, never both. Several stretches are for workdays types only, max 3; recording is exempt from the applicants' 31-day limit. " +
+			"half_start / half_end apply to the first day of the first range and last day of the last range of the whole request (0.5); admins recording leave can always use half days."}, d.recordLeave)
 	add(d, s, &mcp.Tool{Name: "remove_recorded_leave", Annotations: destructive("Remove recorded leave (administrators)"),
 		Description: "Administrators only: remove leave an administrator recorded (not ordinary approved leave). It no longer counts against their balance, the calendar event goes and the person is emailed. Cannot be undone. You cannot remove leave recorded for you. Only when the person has told you to."}, d.removeRecorded)
 	add(d, s, &mcp.Tool{Name: "adjust_balance", Annotations: additive("Adjust a balance (administrators)"),

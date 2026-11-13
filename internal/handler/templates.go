@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/17xande-dev/leave/internal/leave"
+	"github.com/17xande-dev/leave/internal/notify"
 )
 
 //go:embed templates
@@ -84,6 +85,13 @@ var funcs = template.FuncMap{
 	// shortrange renders two YYYY-MM-DD strings as "13 Mar", "12–14 Mar" or
 	// "30 Mar – 2 Apr" (with years when they differ).
 	"shortrange": shortRange,
+	"ranges":     notify.RangesText,
+	"rangevalue": func(in leave.Input) string {
+		return rangeValue(inputRanges(in))
+	},
+	"firstdate": func(in leave.Input) string { return inputRanges(in)[0].Start },
+	"lastdate":  func(in leave.Input) string { rr := inputRanges(in); return rr[len(rr)-1].End },
+	"stretch":   stretchText,
 	"plural": func(n int, one, many string) string {
 		if n == 1 || n == -1 {
 			return one
@@ -261,4 +269,37 @@ func shortRange(start, end string) string {
 		return s.Format("2 Jan") + " – " + e.Format("2 Jan")
 	}
 	return s.Format("2") + "–" + e.Format("2 Jan")
+}
+
+func rangeValue(ranges []leave.Range) string {
+	parts := make([]string, 0, len(ranges))
+	for _, rg := range ranges {
+		if rg.Start != "" && rg.End != "" {
+			parts = append(parts, rg.Start+"/"+rg.End)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func stretchText(ranges []leave.Range) string {
+	parts := make([]string, 0, len(ranges))
+	for _, rg := range ranges {
+		s, e1 := leave.ParseDate(rg.Start)
+		e, e2 := leave.ParseDate(rg.End)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		text := e.Format("Mon 2 Jan")
+		if s.Year() != e.Year() {
+			text = s.Format("Mon 2 Jan 2006") + " - " + e.Format("Mon 2 Jan 2006")
+		} else if !s.Equal(e) {
+			format := "Mon 2 Jan"
+			if s.Month() == e.Month() {
+				format = "Mon 2"
+			}
+			text = s.Format(format) + " - " + text
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, ", ")
 }

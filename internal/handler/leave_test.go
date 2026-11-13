@@ -195,6 +195,12 @@ func TestQuotePartial(t *testing.T) {
 	if !strings.Contains(body, "Choose a type") {
 		t.Fatalf("empty quote:\n%s", body)
 	}
+	// A start-only preview has always quoted one day, including clients that
+	// omit end entirely while the person is still picking dates.
+	_, body = hs.get(c, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12", hs.typeID("annual")))
+	if !strings.Contains(body, "1 working day") || !strings.Contains(body, "14 left") {
+		t.Fatalf("start-only quote:\n%s", body)
+	}
 }
 
 func TestCancellationThroughPages(t *testing.T) {

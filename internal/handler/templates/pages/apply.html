@@ -47,17 +47,17 @@
          of value: the component treats it as blank, so the native inputs below
          keep whatever was typed. locale="en-GB" puts the day before the month,
          as the server's own dates do ("Mon 2 Jan 2006"). */}}
-    <date-range-input label="Dates" start-name="start" end-name="end" required
+    <date-range-input label="Dates" start-name="start" end-name="end" required multiple max-ranges="3"
         months="2" first-day-of-week="1" with-clear locale="en-GB" {{- if .MinDate}} min="{{.MinDate}}"{{end}} marks="#apply-marks"
-        {{- if and .Input.Start .Input.End}} value="{{.Input.Start}}/{{.Input.End}}"{{end}}>
+        {{with rangevalue .Input}}value="{{.}}"{{end}}>
       <div class="field-row">
         <div class="field">
           <label for="start">First day</label>
-          <input type="date" id="start" name="start" value="{{.Input.Start}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
+          <input type="date" id="start" name="start" value="{{firstdate .Input}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
         </div>
         <div class="field">
           <label for="end">Last day</label>
-          <input type="date" id="end" name="end" value="{{.Input.End}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
+          <input type="date" id="end" name="end" value="{{lastdate .Input}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
         </div>
       </div>
     </date-range-input>

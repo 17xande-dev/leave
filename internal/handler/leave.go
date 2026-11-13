@@ -63,7 +63,8 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 // nextLeave is an approved leave that has not finished, with where it sits
 // relative to today.
 type nextLeave struct {
-	Request leave.Request
+	Request    leave.Request
+	Start, End string
 	// Now: it has started. Otherwise it starts In days from today.
 	Now bool
 	In  int
@@ -118,12 +119,20 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 				d.PendingFirst = r.ID
 			}
 		}
-		if d.Next == nil && r.Status == leave.StatusApproved && r.Kind == leave.KindLeave {
-			n := &nextLeave{Request: r, Now: r.Start <= day}
-			if start, err := leave.ParseDate(r.Start); err == nil && !n.Now {
-				n.In = leave.DaysBetween(today, start)
+		if r.Status == leave.StatusApproved && r.Kind == leave.KindLeave {
+			for _, rg := range requestRanges(r) {
+				if rg.End < day {
+					continue
+				}
+				n := &nextLeave{Request: r, Start: rg.Start, End: rg.End, Now: rg.Start <= day}
+				if start, err := leave.ParseDate(rg.Start); err == nil && !n.Now {
+					n.In = leave.DaysBetween(today, start)
+				}
+				if d.Next == nil || n.Start < d.Next.Start {
+					d.Next = n
+				}
+				break
 			}
-			d.Next = n
 		}
 	}
 	return d
@@ -211,11 +220,17 @@ func (h *Handler) pickerMarks(ctx context.Context, rs []leave.Request) (pickerMa
 		if r.Kind != leave.KindLeave || r.End < from || r.Start > to {
 			continue
 		}
+		status := ""
 		switch r.Status {
 		case leave.StatusApproved:
-			m.Booked = append(m.Booked, markedRange{r.Start, r.End, "approved"})
+			status = "approved"
 		case leave.StatusPending, leave.StatusAwaitingHR:
-			m.Booked = append(m.Booked, markedRange{r.Start, r.End, "pending"})
+			status = "pending"
+		}
+		if status != "" {
+			for _, rg := range requestRanges(r) {
+				m.Booked = append(m.Booked, markedRange{rg.Start, rg.End, status})
+			}
 		}
 	}
 	return m, nil
@@ -283,7 +298,7 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	// form reads the same as it did before the button was pressed. The field
 	// errors are already beside their fields; only the coverage warning, which
 	// has no field, is shown with the preview.
-	if in.TypeID != 0 && in.Start != "" && in.End != "" {
+	if in.TypeID != 0 && (len(in.Ranges) > 0 || (in.Start != "" && in.End != "")) {
 		var qt leave.Quote
 		var err error
 		if edit != nil {
@@ -293,7 +308,7 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 		}
 		var fe leave.FieldErrors
 		if err == nil || errors.As(err, &fe) {
-			if d.Preview, err = h.withAway(r, newQuoteData(&qt, fe, edit != nil), in.Start, in.End); err != nil {
+			if d.Preview, err = h.withAway(r, newQuoteData(&qt, fe, edit != nil), qt.Ranges); err != nil {
 				return applyData{}, err
 			}
 			d.Preview.Errors = leave.FieldErrors{}
@@ -326,12 +341,41 @@ func (h *Handler) ApplyForm(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, http.StatusOK, "apply.html", view{Title: "Apply for leave", Data: d})
 }
 
-func inputFrom(r *http.Request, get func(string) string) leave.Input {
+func inputFrom(r *http.Request) (leave.Input, error) {
+	_ = r.ParseForm()
+	get := r.Form.Get
 	id, _ := strconv.ParseInt(get("type"), 10, 64)
-	return leave.Input{TypeID: id, Start: strings.TrimSpace(get("start")),
+	in := leave.Input{TypeID: id, Start: strings.TrimSpace(get("start")),
 		End: strings.TrimSpace(get("end")), Note: get("note"),
 		HalfStart: get("half_start") == "1", HalfEnd: get("half_end") == "1",
 		Override: get("override") == "1", Negative: get("negative") == "1"}
+	starts, ends := r.Form["start"], r.Form["end"]
+	// Preserve the single-pair fallback: an omitted end is a field error on
+	// submit, and the preview treats a start alone as a one-day request.
+	if len(starts) != len(ends) && (len(starts) > 1 || len(ends) > 1) {
+		return in, leave.FieldErrors{"start": "Choose the first and last day of each stretch."}
+	}
+	if len(starts) > 1 {
+		in.Start, in.End = "", ""
+		for i := range starts {
+			in.Ranges = append(in.Ranges, leave.Range{Start: strings.TrimSpace(starts[i]), End: strings.TrimSpace(ends[i])})
+		}
+	}
+	return in, nil
+}
+
+func inputRanges(in leave.Input) []leave.Range {
+	if len(in.Ranges) > 0 {
+		return in.Ranges
+	}
+	return []leave.Range{{Start: in.Start, End: in.End}}
+}
+
+func requestRanges(r leave.Request) []leave.Range {
+	if len(r.Ranges) > 0 {
+		return r.Ranges
+	}
+	return []leave.Range{{Start: r.Start, End: r.End}}
 }
 
 // quoteData is the live preview under the apply form.
@@ -404,27 +448,43 @@ func groupAway(away []leave.Away, withType bool, exclude int64) []awayView {
 	return all
 }
 
-// withAway adds who else is away between start and end, for the chosen dates.
+// withAway adds who else is away during any of the chosen stretches.
 // It is information only: unusable dates just leave the hint out.
-func (h *Handler) withAway(r *http.Request, d quoteData, start, end string) (quoteData, error) {
-	s, err1 := leave.ParseDate(start)
-	e, err2 := leave.ParseDate(end)
-	if err1 != nil || err2 != nil || e.Before(s) {
+
+func (h *Handler) withAway(r *http.Request, d quoteData, ranges []leave.Range) (quoteData, error) {
+	if len(ranges) == 0 {
 		return d, nil
 	}
-	away, err := h.leave.Away(r.Context(), currentUser(r), start, end)
+	for _, rg := range ranges {
+		s, err1 := leave.ParseDate(rg.Start)
+		e, err2 := leave.ParseDate(rg.End)
+		if err1 != nil || err2 != nil || e.Before(s) {
+			return d, nil
+		}
+	}
+	rows, err := h.leave.Away(r.Context(), currentUser(r), ranges[0].Start, ranges[len(ranges)-1].End)
 	if err != nil {
 		return d, err
 	}
 	// One entry per person, so the cap counts people, not requests. The
 	// quote is type-free by construction, for approver and colleague alike.
-	all := groupAway(away, false, 0)
+	all := groupAway(awayDuring(rows, ranges), false, 0)
 	if len(all) > awayShown {
 		d.AwayMore = len(all) - awayShown
 		all = all[:awayShown]
 	}
 	d.Away = all
 	return d, nil
+}
+
+func awayDuring(rows []leave.Away, ranges []leave.Range) []leave.Away {
+	var away []leave.Away
+	for _, row := range rows {
+		if slices.ContainsFunc(ranges, func(rg leave.Range) bool { return row.Start <= rg.End && row.End >= rg.Start }) {
+			away = append(away, row)
+		}
+	}
+	return away
 }
 
 // newQuoteData reads what a refused quote leaves open to the person; see
@@ -444,12 +504,16 @@ func newQuoteData(qt *leave.Quote, fe leave.FieldErrors, editing bool) quoteData
 // without it.
 func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	in := inputFrom(r, q.Get)
-	if in.TypeID == 0 || in.Start == "" {
+	in, parseErr := inputFrom(r)
+	if parseErr != nil {
+		h.renderPartial(w, r, "quote", quoteData{Errors: parseErr.(leave.FieldErrors)})
+		return
+	}
+	if in.TypeID == 0 || (len(in.Ranges) == 0 && in.Start == "") {
 		h.renderPartial(w, r, "quote", quoteData{Incomplete: true})
 		return
 	}
-	if in.End == "" {
+	if len(in.Ranges) == 0 && in.End == "" {
 		in.End = in.Start
 	}
 	// edit names the request being edited so it is left out of the sums; the
@@ -464,7 +528,7 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	// A missing note is not worth shouting about while someone is still
 	// picking dates; Apply will say so if it is still missing.
 	delete(fe, "note")
-	d, err := h.withAway(r, newQuoteData(&qt, fe, editing), in.Start, in.End)
+	d, err := h.withAway(r, newQuoteData(&qt, fe, editing), qt.Ranges)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
@@ -473,8 +537,11 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
-	in := inputFrom(r, r.PostFormValue)
-	req, err := h.leave.Submit(r.Context(), currentUser(r), in)
+	in, err := inputFrom(r)
+	var req leave.Request
+	if err == nil {
+		req, err = h.leave.Submit(r.Context(), currentUser(r), in)
+	}
 	var fe leave.FieldErrors
 	if errors.As(err, &fe) {
 		d, derr := h.applyData(r, in, fe, nil)
@@ -502,7 +569,7 @@ func (h *Handler) EditForm(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in := leave.Input{TypeID: req.TypeID, Start: req.Start, End: req.End, Note: req.Note,
+	in := leave.Input{TypeID: req.TypeID, Ranges: req.Ranges, Note: req.Note,
 		HalfStart: req.HalfStart, HalfEnd: req.HalfEnd}
 	d, err := h.applyData(r, in, nil, &req)
 	if err != nil {
@@ -520,8 +587,10 @@ func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	in := inputFrom(r, r.PostFormValue)
-	_, err := h.leave.Edit(r.Context(), currentUser(r), req.ID, in)
+	in, err := inputFrom(r)
+	if err == nil {
+		_, err = h.leave.Edit(r.Context(), currentUser(r), req.ID, in)
+	}
 	var fe leave.FieldErrors
 	switch {
 	case errors.As(err, &fe):
@@ -997,7 +1066,7 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 		if err != nil {
 			return queueData{}, err
 		}
-		row.Away, row.AwayMore = queueAway(away, req.UserID)
+		row.Away, row.AwayMore = queueAway(awayDuring(away, requestRanges(req)), req.UserID)
 		anyBulk = anyBulk || row.Bulk
 		rows = append(rows, row)
 	}

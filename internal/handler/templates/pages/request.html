@@ -7,7 +7,7 @@
 </div>
 <table class="facts">
   <tr><th>Who</th><td>{{.UserName}}{{with .Department}} <small>{{.}}</small>{{end}}</td></tr>
-  <tr><th>Dates</th><td>{{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</td></tr>
+  <tr><th>Dates</th><td>{{template "requestdates" .}}</td></tr>
   <tr><th>Days</th><td>{{.Days}} {{units .Days .TypeUnit}}{{with .HalfNote}} ({{.}}){{end}}</td></tr>
   {{with .Note}}<tr><th>{{if $.Data.Request.IsRecorded}}Why it was recorded{{else}}Note{{end}}</th><td>{{.}}</td></tr>{{end}}
   {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.RecordedBy}}{{with .DecidedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
@@ -75,7 +75,7 @@
 {{end}}
 
 {{with .Original}}
-<p class="notice">This asks to cancel <a href="/leave/{{.ID}}">{{.TypeName}}, {{date .Start}}{{if ne .Start .End}} – {{date .End}}{{end}}</a>, which is currently {{.Status}}. If it is approved, the days go back to the balance.</p>
+<p class="notice">This asks to cancel <a href="/leave/{{.ID}}">{{.TypeName}}, {{template "requestdates" .}}</a>, which is currently {{.Status}}. If it is approved, the days go back to the balance.</p>
 {{end}}
 {{with .PendingCancellation}}
 <p class="notice">A <a href="/leave/{{.ID}}">cancellation of this leave</a> is waiting for approval. Until then the leave stays booked.</p>

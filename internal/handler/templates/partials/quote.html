@@ -9,7 +9,7 @@
 {{else}}
   {{with .Errors}}{{range .}}<p class="error">{{.}}</p>{{end}}{{end}}
   {{with .Quote}}{{if .Days}}
-    <p><strong>{{.Days}} {{units .Days .Type.Unit}}</strong>
+    <p><strong>{{.Days}} {{units .Days .Type.Unit}}{{if gt (len .Ranges) 1}} in {{len .Ranges}} stretches: {{stretch .Ranges}}{{end}}</strong>
     {{with .After}} — {{.}} left in {{with $.Quote.CycleName}}{{.}}{{else}}this cycle{{end}} afterwards{{end}}</p>
     {{with .NotCharged}}
     <p class="hint">Not charged:</p>
