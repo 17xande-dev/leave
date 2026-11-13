@@ -2,8 +2,10 @@
  * <date-range-input>: a free stand-in for Web Awesome Pro's
  * <wa-date-input mode="range">. The calendar is Cally (<calendar-range>), which the
  * host page loads separately; this module deliberately does not import it.
+ * Multiple mode uses Cally's <calendar-multi>.
  *
- * Value format: "YYYY-MM-DD/YYYY-MM-DD" (start/end, inclusive).
+ * Value format: "YYYY-MM-DD/YYYY-MM-DD" (start/end, inclusive); multiple mode
+ * accepts space-separated start/end pairs.
  *
  * Marks (advisory, never disable a day): `marks="#id"` names an element in the same tree
  * holding JSON, normally <script type="application/json">:
@@ -129,7 +131,7 @@ label {
 
 .months { display: flex; gap: 1.5rem; }
 
-calendar-range {
+calendar-range, calendar-multi {
   color: var(--_color);
   &::part(container) { position: relative; }
   &::part(heading) { display: none; }
@@ -220,8 +222,21 @@ calendar-month {
 }
 `;
 
+const MULTIPLE_CSS = /* css */ `
+:host([multiple]) calendar-month::part(button) { touch-action: none; }
+calendar-month::part(tentative) { outline: 2px dashed var(--_accent); outline-offset: -3px; background-color: var(--_range-background); color: var(--_color); }
+.range-controls { max-inline-size: 33rem; }
+.range-list { list-style: none; margin: .75rem 0; padding: 0; display: grid; gap: .5rem; }
+.range-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.range-controls button { font: inherit; color: var(--_color); background: var(--_background); border: 1px solid var(--_border-color); border-radius: var(--_border-radius); padding: .375rem .625rem; cursor: pointer; }
+.range-controls button:focus-visible { outline: var(--_focus-ring); outline-offset: 2px; }
+/* Status updates must not resize the anchored popup and move a pressed day.
+   Keep wrapped messages readable without letting their length affect layout. */
+.range-status { font-size: .875em; margin-block: .5rem; max-inline-size: 30rem; block-size: 2lh; overflow: auto; }
+`;
+
 const SHEET = new CSSStyleSheet();
-SHEET.replaceSync(CSS);
+SHEET.replaceSync(CSS + MULTIPLE_CSS);
 
 const CHEVRON =
   '<svg part="expand-icon" class="expand-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
@@ -280,15 +295,15 @@ const toIso = (d) =>
 // Cally hands day parts a Date at UTC midnight.
 const utcIso = (d) => d.toISOString().slice(0, 10);
 
-const STRING_ATTRS = ['label', 'hint', 'placeholder', 'min', 'max', 'locale', 'name', 'start-name', 'end-name', 'disabled-days-of-week', 'marks'];
-const BOOL_ATTRS = ['required', 'disabled', 'readonly', 'with-clear'];
+const STRING_ATTRS = ['label', 'hint', 'placeholder', 'min', 'max', 'locale', 'name', 'start-name', 'end-name', 'disabled-days-of-week', 'marks', 'max-ranges'];
+const BOOL_ATTRS = ['required', 'disabled', 'readonly', 'with-clear', 'multiple'];
 const camel = (s) => s.replace(/-(\w)/g, (_, c) => c.toUpperCase());
 
 const UPGRADE_PROPS = [
-  'value', 'valueAsRange', 'isDateDisabled', 'open', 'months', 'firstDayOfWeek', 'disabledDaysOfWeek',
+  'value', 'valueAsRange', 'valueAsRanges', 'isDateDisabled', 'open', 'months', 'firstDayOfWeek', 'disabledDaysOfWeek',
   ...[...STRING_ATTRS, ...BOOL_ATTRS].map(camel),
 ];
-const CALENDAR_ATTRS = ['min', 'max', 'locale', 'months', 'first-day-of-week', 'disabled-days-of-week', 'marks'];
+const CALENDAR_ATTRS = ['min', 'max', 'locale', 'months', 'first-day-of-week', 'disabled-days-of-week', 'marks', 'multiple'];
 const FALLBACK_CONTROLS = 'input, select, textarea, button[name]';
 
 /** Accepts a string, or `{from, to}` with Dates or ISO strings. */
@@ -299,6 +314,36 @@ function valueFrom(v) {
   }
   return normalize(String(v ?? ''));
 }
+
+// Range arithmetic uses UTC dates so DST never changes adjacency or splitting.
+const shiftDay = (iso, amount) => utcIso(new Date(utcDate(iso).getTime() + amount * 864e5));
+const serializeRanges = (ranges) => ranges.map(({ start, end }) => `${start}/${end}`).join(' ');
+function mergedRanges(ranges) {
+  const out = [];
+  for (const r of ranges.map((r) => ({ ...r })).sort((a, b) => a.start.localeCompare(b.start))) {
+    const last = out.at(-1);
+    if (last && utcDate(r.start) - utcDate(last.end) <= 864e5) {
+      if (r.end > last.end) last.end = r.end;
+    } else out.push(r);
+  }
+  return out;
+}
+function multipleValue(v) {
+  const values = Array.isArray(v) ? v.map((r) => r && 'start' in r ? `${r.start}/${r.end}` : valueFrom(r)) : String(v ?? '').trim().split(/\s+/);
+  if (!values.length || values.some((r) => !normalize(r))) return '';
+  return serializeRanges(mergedRanges(values.map((r) => {
+    const [start, end] = normalize(r).split('/');
+    return { start, end };
+  })));
+}
+const eachDate = (ranges) => {
+  const days = [];
+  for (const { start, end } of ranges) {
+    const last = utcDate(end).getTime();
+    for (let t = utcDate(start).getTime(); t <= last; t += 864e5) days.push(utcIso(new Date(t)));
+  }
+  return days.join(' ');
+};
 
 export class DateRangeInput extends HTMLElement {
   static formAssociated = true;
@@ -320,6 +365,16 @@ export class DateRangeInput extends HTMLElement {
   #reflecting = false;
   #pendingOpen = false;
   #isDateDisabled = null;
+  #pendingStart = '';
+  #previewEnd = '';
+  #drag = null;
+  #gestureEvents = null;
+  #swallowSelect = false;
+  #swallowTimer;
+  #paintTimer;
+  #paintSettings = false;
+  #multipleControls = null;
+  #status = '';
   #observer = new MutationObserver(() => this.#adoptFallback());
 
   constructor() {
@@ -346,6 +401,21 @@ export class DateRangeInput extends HTMLElement {
     clear.addEventListener('click', () => { this.clear(); this.#els.field.focus(); });
     popup.addEventListener('beforetoggle', (e) => this.#onBeforeToggle(e));
     popup.addEventListener('toggle', (e) => this.#onToggle(e));
+    popup.addEventListener('keydown', (e) => {
+      this.#swallowSelect = false;
+      if (this.multiple && e.key === 'Escape' && (this.#pendingStart || this.#drag)) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.#cancelMultiple('Selection cancelled.');
+      } else if (this.multiple && e.key === 'Escape') {
+        e.preventDefault();
+        this.hide();
+      }
+    });
+    popup.addEventListener('pointerdown', (e) => this.#pointerDown(e));
+    popup.addEventListener('pointermove', (e) => this.#pointerMove(e));
+    popup.addEventListener('pointerup', (e) => this.#pointerUp(e));
+    popup.addEventListener('pointercancel', () => this.#cancelMultiple('Selection cancelled.'));
     this.#els.label.querySelector('slot').addEventListener('slotchange', () => this.#render());
     this.#els.hint.querySelector('slot').addEventListener('slotchange', () => this.#render());
     this.addEventListener('invalid', () => { this.#touched = true; this.#render(); });
@@ -368,6 +438,8 @@ export class DateRangeInput extends HTMLElement {
 
   disconnectedCallback() {
     this.#observer.disconnect();
+    clearTimeout(this.#paintTimer);
+    this.#cancelMultiple('');
     // Removal hides the popover silently (no toggle event), so `open` is already false here.
     this.#reflect(false);
     this.#render();
@@ -381,9 +453,14 @@ export class DateRangeInput extends HTMLElement {
       return;
     }
     if (name === 'value') {
-      this.#defaultValue = normalize(val ?? '');
+      this.#defaultValue = this.#normalizeValue(val ?? '');
       if (!this.#dirty) this.#setValue(this.#defaultValue);
       return;
+    }
+    if (name === 'multiple') {
+      this.#defaultValue = this.#normalizeValue(this.getAttribute('value') ?? '');
+      this.#value = this.#normalizeValue(this.#dirty ? this.#value : this.#defaultValue);
+      this.#cancelMultiple('');
     }
     if ((name === 'disabled' || name === 'readonly') && val !== null && this.open) this.hide();
     this.#render();
@@ -396,13 +473,22 @@ export class DateRangeInput extends HTMLElement {
   /** A `start/end` string, or `{from, to}` with Dates or ISO strings. */
   set value(v) {
     this.#dirty = true;
-    this.#setValue(valueFrom(v));
+    this.#setValue(this.multiple ? multipleValue(v && !Array.isArray(v) && typeof v === 'object' ? [v] : v) : valueFrom(v));
   }
   get defaultValue() { return this.#defaultValue; }
   set defaultValue(v) { this.setAttribute('value', String(v ?? '')); }
 
-  get start() { return this.#value ? this.#value.split('/')[0] : ''; }
-  get end() { return this.#value ? this.#value.split('/')[1] : ''; }
+  get ranges() {
+    return this.#value ? this.#value.split(' ').map((r) => {
+      const [start, end] = r.split('/');
+      return { start, end };
+    }) : [];
+  }
+  get start() { return this.ranges[0]?.start ?? ''; }
+  get end() { return this.ranges.at(-1)?.end ?? ''; }
+  get valueAsRanges() { return this.ranges.map(({ start, end }) => ({ from: localDate(start), to: localDate(end) })); }
+  set valueAsRanges(v) { this.value = v; }
+  #normalizeValue(v) { return this.multiple ? multipleValue(v) : normalize(v); }
 
   /** `{from: Date, to: Date}` at local midnight, or null when blank. */
   get valueAsRange() {
@@ -421,6 +507,11 @@ export class DateRangeInput extends HTMLElement {
   }
 
   #setValue(v) {
+    this.#gestureEvents?.abort();
+    this.#gestureEvents = null;
+    this.#pendingStart = this.#previewEnd = '';
+    this.#drag = null;
+    this.#setStatus('');
     this.#value = v;
     this.#render();
     this.#refreshCalendar();
@@ -468,7 +559,7 @@ export class DateRangeInput extends HTMLElement {
   }
   formStateRestoreCallback(state) {
     this.#dirty = true;
-    this.#setValue(normalize(String(state ?? '')));
+    this.#setValue(this.#normalizeValue(String(state ?? '')));
   }
   formDisabledCallback(disabled) {
     this.#formDisabled = disabled;
@@ -481,7 +572,15 @@ export class DateRangeInput extends HTMLElement {
   #syncFormValue() {
     const { start, end, startName, endName } = this;
     let fd = null;
-    if (!this.#value) {
+    if (this.multiple && this.#value && (startName || endName || this.name)) {
+      fd = new FormData();
+      for (const r of this.ranges) {
+        if (startName || endName) {
+          if (startName) fd.append(startName, r.start);
+          if (endName) fd.append(endName, r.end);
+        } else fd.append(this.name, `${r.start}/${r.end}`);
+      }
+    } else if (!this.#value) {
       fd = null;
     } else if (startName || endName) {
       fd = new FormData();
@@ -554,8 +653,8 @@ export class DateRangeInput extends HTMLElement {
 
   #format(iso) { return this.#formatter().format(utcDate(iso)); }
 
-  #formatRange() {
-    return this.#formatter().formatRange(utcDate(this.start), utcDate(this.end));
+  #formatRange(start = this.start, end = this.end) {
+    return this.#formatter().formatRange(utcDate(start), utcDate(end));
   }
 
   #updateLabelling() {
@@ -578,7 +677,7 @@ export class DateRangeInput extends HTMLElement {
     hintText.textContent = this.hint;
     label.hidden = !hasLabel;
     hint.hidden = !hasHint;
-    value.textContent = blank ? this.placeholder || ' ' : this.#formatRange();
+    value.textContent = blank ? this.placeholder || ' ' : this.ranges.map(({ start, end }) => this.#formatRange(start, end)).join(', ');
     this.#updateLabelling();
     if (hasHint) field.setAttribute('aria-describedby', 'hint');
     else field.removeAttribute('aria-describedby');
@@ -600,8 +699,8 @@ export class DateRangeInput extends HTMLElement {
    * connected element has `value` / `focusedDate` set (or is moved) around connect/disconnect in
    * one task. So every open builds a FRESH calendar with all state set before it is connected.
    */
-  #buildCalendar() {
-    const cal = document.createElement('calendar-range');
+  #buildCalendar(focusedDate) {
+    const cal = document.createElement(this.multiple ? 'calendar-multi' : 'calendar-range');
     cal.setAttribute('part', 'calendar');
     cal.setAttribute('exportparts',
       'container:calendar-container,header:calendar-header,heading:calendar-heading,previous:previous-button,next:next-button');
@@ -617,9 +716,21 @@ export class DateRangeInput extends HTMLElement {
         'heading:month-heading,table:month-table,th:weekday,td:day-cell,button:day-button,selected:day-selected,' +
         'today:day-today,disallowed:day-disallowed,outside:day-outside,range-start:day-range-start,' +
         'range-end:day-range-end,range-inner:day-range-inner,holiday:day-holiday,booked:day-booked,' +
-        'booked-approved:day-booked-approved,booked-pending:day-booked-pending');
+        'booked-approved:day-booked-approved,booked-pending:day-booked-pending,tentative:day-tentative');
       m.setAttribute('part', 'calendar-month');
       m.offset = i;
+      if (this.multiple) {
+        m.addEventListener('selectday', (e) => {
+          e.stopPropagation();
+          if (this.#swallowSelect) { this.#swallowSelect = false; return; }
+          this.#activateDay(String(e.detail));
+        });
+        for (const type of ['hoverday', 'focusday']) m.addEventListener(type, (e) => {
+          if (!this.#pendingStart || this.#drag) return;
+          const iso = String(e.detail);
+          if (this.#canPick(iso)) { this.#previewEnd = iso; this.#schedulePaint(); }
+        });
+      }
       wrap.append(m);
     }
     const min = isoValid(this.min) ? this.min : '';
@@ -631,13 +742,16 @@ export class DateRangeInput extends HTMLElement {
     cal.firstDayOfWeek = this.firstDayOfWeek;
     cal.isDateDisallowed = this.#isDisallowed;
     const dayParts = this.#dayParts();
-    if (dayParts) cal.getDayParts = dayParts;
-    if (this.#value) cal.value = this.#value;
+    if (this.multiple) { cal.getDayParts = this.#multipleParts(dayParts); cal.value = eachDate(this.ranges); }
+    else {
+      if (dayParts) cal.getDayParts = dayParts;
+      if (this.#value) cal.value = this.#value;
+    }
     const today = toIso(new Date());
-    cal.focusedDate = this.start || (min && today < min ? min : max && today > max ? max : undefined);
+    cal.focusedDate = focusedDate || this.start || (min && today < min ? min : max && today > max ? max : undefined);
     cal.addEventListener('change', (e) => {
       e.stopPropagation();
-      this.#onCalendarChange();
+      if (!this.multiple) this.#onCalendarChange();
     });
     cal.addEventListener('rangestart', (e) => {
       e.stopPropagation();
@@ -658,20 +772,275 @@ export class DateRangeInput extends HTMLElement {
     return document.documentElement.clientWidth >= needed ? 2 : 1;
   }
 
-  #installCalendar() {
-    const cal = this.#buildCalendar();
+  #installCalendar(focusedDate) {
+    const cal = this.#buildCalendar(focusedDate);
     const old = this.#calendar;
     this.#calendar = cal;
     if (old) old.replaceWith(cal);
-    else this.#els.popup.append(cal);
+    else this.#els.popup.prepend(cal);
+    this.#renderRangeControls();
   }
 
   /** While open, replaces the calendar so it reflects the current value and settings. */
   #refreshCalendar() {
     if (!this.open) return;
+    if (this.multiple && this.#calendar?.localName === 'calendar-multi') {
+      this.#schedulePaint(true);
+      this.#renderRangeControls();
+      return;
+    }
     this.#installCalendar();
     this.#focusCalendar();
   }
+
+  // Connected calendar-multi updates are safe once settled (see demo spike). Coalesce
+  // them into a later task: a caller may set value and remove/reparent us in one task.
+  #schedulePaint(settings = false) {
+    this.#paintSettings ||= settings;
+    clearTimeout(this.#paintTimer);
+    const cal = this.#calendar;
+    this.#paintTimer = setTimeout(() => {
+      if (!this.multiple || !this.open || !this.isConnected || this.#calendar !== cal || !cal?.isConnected) return;
+      const updateSettings = this.#paintSettings;
+      this.#paintSettings = false;
+      if (updateSettings && cal.months !== this.#visibleMonths) {
+        this.#installCalendar(cal.focusedDate);
+        this.#focusCalendar();
+        return;
+      }
+      if (updateSettings) {
+        cal.min = isoValid(this.min) ? this.min : '';
+        cal.max = isoValid(this.max) ? this.max : '';
+        cal.locale = this.#locale;
+        cal.firstDayOfWeek = this.firstDayOfWeek;
+        cal.isDateDisallowed = this.#isDisallowed;
+      }
+      cal.value = eachDate(this.ranges);
+      cal.getDayParts = this.#multipleParts(this.#dayParts());
+    });
+  }
+
+  #multipleParts(marks) {
+    const ranges = this.ranges;
+    const start = this.#drag?.origin || this.#pendingStart;
+    const end = this.#drag?.end || this.#previewEnd || start;
+    const low = start < end ? start : end;
+    const high = start < end ? end : start;
+    return (date) => {
+      const iso = utcIso(date);
+      const out = [`d-${iso}`, marks?.(date) || ''];
+      for (const r of ranges) {
+        if (iso === r.start) out.push('range-start');
+        if (iso === r.end) out.push('range-end');
+        if (r.start < iso && iso < r.end) out.push('range-inner');
+      }
+      if (start && low <= iso && iso <= high) out.push('tentative');
+      return out.join(' ');
+    };
+  }
+
+  #canPick(iso) {
+    return this.multiple && !this.#isDisabled && !this.readonly && isoValid(iso)
+      && !(isoValid(this.min) && iso < this.min) && !(isoValid(this.max) && iso > this.max)
+      && !this.#isDisallowed(utcDate(iso));
+  }
+
+  #selected(iso) { return this.ranges.some((r) => r.start <= iso && iso <= r.end); }
+
+  #setStatus(message) {
+    this.#status = message;
+    const status = this.#multipleControls?.querySelector('[part="status"]');
+    if (status) status.textContent = message;
+  }
+
+  #renderRangeControls() {
+    if (!this.multiple) {
+      this.#multipleControls?.remove();
+      this.#multipleControls = null;
+      return;
+    }
+    if (!this.#multipleControls) {
+      const controls = document.createElement('div');
+      controls.className = 'range-controls';
+      const list = document.createElement('ul');
+      list.className = 'range-list';
+      list.setAttribute('part', 'range-list');
+      const status = document.createElement('p');
+      status.className = 'range-status';
+      status.setAttribute('part', 'status');
+      status.setAttribute('aria-live', 'polite');
+      status.setAttribute('aria-atomic', 'true');
+      const done = document.createElement('button');
+      done.type = 'button';
+      done.setAttribute('part', 'done-button');
+      done.textContent = 'Done';
+      done.addEventListener('click', () => this.hide());
+      controls.append(list, status, done);
+      this.#multipleControls = controls;
+      this.#els.popup.append(controls);
+    }
+    const list = this.#multipleControls.querySelector('ul');
+    const focusedRemove = [...list.querySelectorAll('button')].indexOf(this.#root.activeElement);
+    const items = this.ranges.map((r, index) => {
+      const item = document.createElement('li');
+      const text = document.createElement('span');
+      text.textContent = this.#formatRange(r.start, r.end);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.setAttribute('part', 'range-remove');
+      remove.setAttribute('aria-label', `Remove ${text.textContent}`);
+      remove.addEventListener('click', () => {
+        this.#commitRanges(this.ranges.filter((x) => x.start !== r.start), 'Removed range.');
+        const buttons = list.querySelectorAll('button');
+        (buttons[Math.min(index, buttons.length - 1)] || this.#multipleControls.querySelector('[part="done-button"]') || this.#els.field).focus();
+      });
+      item.append(text, remove);
+      return item;
+    });
+    list.replaceChildren(...items);
+    this.#setStatus(this.#status);
+    if (focusedRemove >= 0) (items[Math.min(focusedRemove, items.length - 1)]?.querySelector('button') || this.#multipleControls.querySelector('[part="done-button"]') || this.#els.field).focus();
+  }
+
+  #commitRanges(ranges, message) {
+    const merged = mergedRanges(ranges);
+    const limit = Number(this.maxRanges);
+    if (this.maxRanges && Number.isInteger(limit) && limit >= 0 && merged.length > limit && merged.length > this.ranges.length) {
+      this.#pendingStart = this.#previewEnd = '';
+      this.#drag = null;
+      this.#setStatus(`Choose at most ${limit} ranges.`);
+      this.#schedulePaint();
+      return;
+    }
+    const value = serializeRanges(merged);
+    const changed = value !== this.#value;
+    this.#dirty = true;
+    this.#touched = true;
+    this.#setValue(value);
+    this.#setStatus(`${message} ${merged.length} ${merged.length === 1 ? 'range' : 'ranges'}.`);
+    if (changed) this.#emit('change');
+  }
+
+  #applySpan(a, b, erase) {
+    if (!this.#canPick(a) || !this.#canPick(b)) return;
+    const start = a < b ? a : b;
+    const end = a < b ? b : a;
+    let ranges;
+    if (!erase) ranges = [...this.ranges, { start, end }];
+    else {
+      ranges = [];
+      for (const r of this.ranges) {
+        if (r.end < start || r.start > end) ranges.push(r);
+        else {
+          // Only the newly exposed edges need to be pickable. Trim them inward;
+          // preserve old endpoints and unrelated ranges, even outside min/max.
+          if (r.start < start) {
+            let pieceEnd = shiftDay(start, -1);
+            while (pieceEnd >= r.start && !this.#canPick(pieceEnd)) pieceEnd = shiftDay(pieceEnd, -1);
+            if (pieceEnd >= r.start) ranges.push({ start: r.start, end: pieceEnd });
+          }
+          if (r.end > end) {
+            let pieceStart = shiftDay(end, 1);
+            while (pieceStart <= r.end && !this.#canPick(pieceStart)) pieceStart = shiftDay(pieceStart, 1);
+            if (pieceStart <= r.end) ranges.push({ start: pieceStart, end: r.end });
+          }
+        }
+      }
+    }
+    this.#commitRanges(ranges, `${erase ? 'Removed' : 'Added'} ${this.#formatRange(start, end)}.`);
+  }
+
+  #activateDay(iso) {
+    if (!this.#canPick(iso)) { this.#setStatus('That day is unavailable.'); return; }
+    if (this.#pendingStart) { this.#applySpan(this.#pendingStart, iso, false); return; }
+    if (this.#selected(iso)) { this.#applySpan(iso, iso, true); return; }
+    this.#pendingStart = this.#previewEnd = iso;
+    this.#setStatus(`Start chosen: ${this.#format(iso)}. Choose the last day.`);
+    this.#schedulePaint();
+    this.dispatchEvent(new CustomEvent('dri-range-start', { bubbles: true, composed: true, detail: { start: iso } }));
+  }
+
+  #dayAtPoint(x, y) {
+    for (const month of this.#calendar?.querySelectorAll('calendar-month') || []) {
+      const button = month.shadowRoot?.elementFromPoint(x, y)?.closest('button');
+      if (!button || button.part.contains('outside')) continue;
+      const token = [...button.part].find((part) => /^d-\d{4}-\d{2}-\d{2}$/.test(part));
+      if (token) return token.slice(2);
+    }
+    return '';
+  }
+
+  #pointerDown(e) {
+    if (!this.multiple || !this.open || !e.isPrimary || e.button !== 0) return;
+    // Clear any suppression left by a browser that did not generate a click.
+    this.#swallowSelect = false;
+    clearTimeout(this.#swallowTimer);
+    const origin = this.#dayAtPoint(e.clientX, e.clientY);
+    if (!this.#canPick(origin)) return;
+    this.#setStatus('');
+    this.#gestureEvents?.abort();
+    this.#gestureEvents = new AbortController();
+    const { signal } = this.#gestureEvents;
+    // Before capture starts a release may occur outside the popup entirely.
+    // Listen only for this gesture and tear the listeners down on every exit.
+    window.addEventListener('pointerup', (event) => this.#pointerUp(event), { signal });
+    window.addEventListener('pointercancel', (event) => {
+      if (this.#drag?.id === event.pointerId) this.#cancelMultiple('Selection cancelled.');
+    }, { signal });
+    this.#drag = { id: e.pointerId, origin, end: origin, erase: this.#selected(origin), moved: false };
+  }
+
+  #pointerMove(e) {
+    const drag = this.#drag;
+    if (!drag || e.pointerId !== drag.id) return;
+    const day = this.#dayAtPoint(e.clientX, e.clientY);
+    if (this.#canPick(day)) {
+      drag.end = day;
+      drag.moved ||= day !== drag.origin;
+      if (drag.moved) {
+        try { this.#els.popup.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+        e.preventDefault();
+        this.#schedulePaint();
+      }
+    }
+  }
+
+  #pointerUp(e) {
+    const drag = this.#drag;
+    if (!drag || e.pointerId !== drag.id) return;
+    const here = this.#dayAtPoint(e.clientX, e.clientY);
+    const end = this.#canPick(here) ? here : drag.end;
+    this.#gestureEvents?.abort();
+    this.#gestureEvents = null;
+    this.#drag = null;
+    try { this.#els.popup.releasePointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
+    if (drag.moved) {
+      this.#swallowSelect = true;
+      clearTimeout(this.#swallowTimer);
+      // A compatibility click follows pointerup. New pointer presses and keyboard
+      // events clear this flag, and expiry handles browsers that omit that click.
+      this.#swallowTimer = setTimeout(() => { this.#swallowSelect = false; }, 500);
+      this.#pendingStart = this.#previewEnd = '';
+      if (end === drag.origin) this.#activateDay(end);
+      else if (this.#canPick(end)) this.#applySpan(drag.origin, end, drag.erase);
+      else this.#setStatus('That day is unavailable.');
+    }
+    this.#schedulePaint();
+  }
+
+  #cancelMultiple(message) {
+    this.#gestureEvents?.abort();
+    this.#gestureEvents = null;
+    if (this.#drag) {
+      try { this.#els.popup.releasePointerCapture(this.#drag.id); } catch { /* no active pointer */ }
+    }
+    this.#pendingStart = this.#previewEnd = '';
+    this.#drag = null;
+    this.#setStatus(message);
+    if (this.multiple) this.#schedulePaint();
+  }
+
 
   /** Cally's getDayParts for the `marks` data, or null when there is none or it is not valid JSON. */
   #dayParts() {
@@ -747,12 +1116,12 @@ export class DateRangeInput extends HTMLElement {
       this.#reflect(false);
       return;
     }
-    if (!customElements.get('calendar-range')) {
+    if (!customElements.get(this.multiple ? 'calendar-multi' : 'calendar-range')) {
       // Cally not loaded (yet): open once it registers, if still requested.
       this.#reflect(false);
       if (!this.#pendingOpen) {
         this.#pendingOpen = true;
-        customElements.whenDefined('calendar-range').then(() => {
+        customElements.whenDefined(this.multiple ? 'calendar-multi' : 'calendar-range').then(() => {
           if (this.#pendingOpen) {
             this.#pendingOpen = false;
             this.show();
@@ -794,6 +1163,7 @@ export class DateRangeInput extends HTMLElement {
 
   #onBeforeToggle(e) {
     if (e.newState === 'closed') {
+      this.#cancelMultiple('');
       this.#hadFocus = this.#hadFocus || this.#els.popup.matches(':focus-within');
       // Escape and light dismiss can't be cancelled, so they report a non-cancelable dri-hide.
       if (!this.#hiding) {

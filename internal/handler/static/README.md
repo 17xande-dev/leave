@@ -49,19 +49,18 @@ bypass the content-hashed URL).
 
 ## date-range-input
 
-The `<date-range-input>` web component on the apply page and the admin Record leave form. It
-started as our own standalone component (originally taken at commit `33999ff` of a
-separate repository) and is now a vendored copy maintained here: edit it in place, there
-is no upstream to sync from.
+The `<date-range-input>` web component on the apply/edit page and the admin Record
+leave form. Upstream is `~/dev/libraries/date-range-input`; change it there and
+re-vendor. Keep this copy byte-identical to upstream.
 
 - Licence: MIT (`date-range-input.LICENSE`)
-- Size: 32 691 bytes
-- SHA-256: `810848d17b3a249e412b0493a0d1ba6bf1679e4d86bc8421365b9def3ab08ecd`
+- Library commit: `675fee29bba048351535955090f21a44cef7b5b5`
+- Size: 49 047 bytes
+- SHA-256: `3c69903d13b43a6fd10bc12bc5c5e76431c079bcf6216ef66030fbf0ef1b0a49`
 
-**Local changes:** the `marks` attribute (holiday and booked-day parts via Cally's
-`getDayParts`, documented at the top of the file) and the `::part(holiday)` /
-`::part(booked*)` styles (plus background-color in the hover rules, and a selected-day
-hover rule).
+The upstream includes holiday and booked-day marks, multiple ranges, click and drag
+selection, day removal, the range list and Done button. Its styles use the same
+`--dri-*` properties as single mode, all mapped to theme tokens in `styles.css`.
 
 After changing `date-range-input.js` or `cally.js`, record the new size and hash above:
 
