@@ -324,6 +324,11 @@ func (s *Service) DeleteShutdown(ctx context.Context, admin users.User, id int64
 		if live > 0 {
 			return ErrNotAllowed
 		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM request_ranges WHERE request_id IN
+			(SELECT r.id FROM requests r JOIN shutdown_parts p ON p.id = r.shutdown_part_id
+			 WHERE p.shutdown_id = ?)`, id); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM requests WHERE shutdown_part_id IN
 			(SELECT id FROM shutdown_parts WHERE shutdown_id = ?)`, id); err != nil {
 			return err

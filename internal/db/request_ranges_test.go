@@ -202,8 +202,16 @@ func TestRequestRangesMigration(t *testing.T) {
 	if _, err := d.Exec(`DELETE FROM request_ranges WHERE request_id=4 AND start_date='2026-12-10'`); err != nil {
 		t.Fatal(err)
 	}
+	// An old worker can write only the legacy column after the range was created.
+	if _, err := d.Exec(`UPDATE requests SET calendar_event_id='legacy-worker-event' WHERE id=4`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := p.Down(ctx); err != nil {
 		t.Fatalf("Down after correcting refusal: %v", err)
+	}
+	var eventID string
+	if err := d.QueryRow(`SELECT calendar_event_id FROM requests WHERE id=4`).Scan(&eventID); err != nil || eventID != "legacy-worker-event" {
+		t.Fatalf("Down lost old worker event: %q %v", eventID, err)
 	}
 	if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN ('requests_sync_range','requests_default_range')`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("Down left transitional triggers: %d %v", n, err)

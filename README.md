@@ -474,6 +474,10 @@ step (preserving the event id), and the foreign key cascades old shutdown
 request deletes. Multi-range requests are left alone by the update trigger.
 Migration 0005 will remove both triggers, the transitional cascade, the shim
 and the legacy column after the multi-range release has been stable.
+Before its "none remain" guard, 0005 must blank legacy
+`requests.calendar_event_id` values that equal their range's id: about 870
+production rows still have these values after 0004. Differing legacy ids must
+remain available for the compatibility shim to adopt.
 
 Before migrating the host copy, also record the number of non-empty legacy
 calendar ids. After migrating it, run these exact checks through the existing
@@ -500,6 +504,8 @@ since that backup, or fixing forward. A previous image refuses schema version
 the failed state, and use the restore procedure below before starting the
 previous image. The guarded Down exists for testing and refuses multiple
 ranges; it is not the production rollback procedure.
+Before restoring, export the range event ids and manually delete the Outlook
+events for requests created or approved since the backup, as described below.
 
 **Recovery if deployment fails after migration 0003.** Stop writes and back up the
 migrated database first. To return to an image supporting 0002, remove 0003's audit
@@ -605,6 +611,20 @@ torn state.
 To restore or roll the data back, `kamal app stop` first, before copying into or removing
 the `leave-data` volume. A leftover `-journal`/`-wal` file next to a copied database can
 corrupt it, so copy the database in with no stale sidecar files, then `kamal app boot`.
+
+For a restore after 0004, while writes and workers are stopped and **before
+restoring the backup**, export the failed state's range event ids:
+
+```sql
+SELECT request_id, calendar_event_id FROM request_ranges WHERE calendar_event_id <> '';
+```
+
+Use the export to identify requests created or approved after the backup and
+delete their Outlook events by hand **before restoring**. Include requests that
+existed but were not yet approved in the backup. Restoring the database does not
+remove Outlook events: skipping this cleanup leaves orphan events, and approving
+the requests again creates duplicates. Retain the export with the failed-state
+backup.
 
 **Cutover / data migration from the old compose stack.** The old compose volume is
 `leave_leave-data`; the new one is `leave-data`. Keep the old volume until the new app is

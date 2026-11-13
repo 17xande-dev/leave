@@ -159,6 +159,55 @@ func TestDeclinedShutdownRequestCanBeRegenerated(t *testing.T) {
 	}
 }
 
+func TestDeleteShutdownWithoutRangeCascade(t *testing.T) {
+	f := newFixture(t)
+	// Model 0005's restrictive foreign key: a cascade would hide missing cleanup.
+	for _, q := range []string{
+		`DROP TABLE request_ranges`,
+		`CREATE TABLE request_ranges (
+			request_id INTEGER NOT NULL REFERENCES requests(id),
+			start_date TEXT NOT NULL,
+			end_date TEXT NOT NULL,
+			calendar_event_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (request_id, start_date),
+			CHECK (end_date >= start_date)
+		) STRICT`,
+	} {
+		if _, err := f.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := f.december(false)
+	var before int
+	if err := f.db.QueryRow(`SELECT count(*) FROM request_ranges`).Scan(&before); err != nil || before == 0 {
+		t.Fatalf("shutdown ranges before deletion: %d %v", before, err)
+	}
+	// A failure after child cleanup must roll the ranges back with their requests.
+	if _, err := f.db.Exec(`CREATE TRIGGER refuse_shutdown_delete BEFORE DELETE ON shutdowns
+		BEGIN SELECT RAISE(ABORT, 'forced deletion failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.DeleteShutdown(f.ctx, f.people["hr"], id); err == nil {
+		t.Fatal("forced deletion failure was ignored")
+	}
+	var after int
+	if err := f.db.QueryRow(`SELECT count(*) FROM request_ranges`).Scan(&after); err != nil || after != before {
+		t.Fatalf("failed deletion lost ranges: before=%d after=%d %v", before, after, err)
+	}
+	if _, err := f.db.Exec(`DROP TRIGGER refuse_shutdown_delete`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.DeleteShutdown(f.ctx, f.people["hr"], id); err != nil {
+		t.Fatalf("delete without cascade: %v", err)
+	}
+	for _, table := range []string{"request_ranges", "requests", "shutdown_parts", "shutdowns"} {
+		var remaining int
+		if err := f.db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&remaining); err != nil || remaining != 0 {
+			t.Fatalf("%s after deletion: %d %v", table, remaining, err)
+		}
+	}
+}
+
 func TestShutdownValidationAndDelete(t *testing.T) {
 	f := newFixture(t)
 	bad := []ShutdownInput{

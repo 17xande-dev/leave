@@ -1,4 +1,7 @@
 -- +goose Up
+-- Before 0005's "none remain" guard, blank legacy requests.calendar_event_id
+-- values that equal their range's id; about 870 production rows retain them
+-- after 0004. Preserve differing legacy ids for the compatibility shim to adopt.
 CREATE TABLE request_ranges (
     -- Transitional: old shutdown deletion relies on CASCADE during the swap;
     -- remove it with the compatibility triggers in the 0005 contract step.
@@ -45,8 +48,8 @@ INSERT INTO _down_guard SELECT count(*) FROM
     (SELECT request_id FROM request_ranges GROUP BY request_id HAVING count(*) > 1);
 DROP TABLE _down_guard;
 -- +goose StatementEnd
-UPDATE requests SET calendar_event_id = COALESCE((SELECT rr.calendar_event_id
-    FROM request_ranges rr WHERE rr.request_id = requests.id), '');
+UPDATE requests SET calendar_event_id = COALESCE(NULLIF((SELECT rr.calendar_event_id
+    FROM request_ranges rr WHERE rr.request_id = requests.id), ''), calendar_event_id);
 DROP TRIGGER requests_default_range;
 DROP TRIGGER requests_sync_range;
 DROP TABLE request_ranges;
