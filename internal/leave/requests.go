@@ -33,6 +33,7 @@ type Request struct {
 	Kind       string
 	CancelsID  int64 // 0 for a leave request
 	Start, End string
+	Ranges     []Range
 	Days       Days
 	// HalfStart and HalfEnd: the first / last day is a half day (see Input).
 	HalfStart, HalfEnd bool
@@ -43,7 +44,6 @@ type Request struct {
 	DecidedByID        int64
 	DecidedAt          string
 	DecisionNote       string
-	CalendarEventID    string
 	CreatedAt          string
 	// ShutdownPartID is set on a request generated for a company shutdown.
 	ShutdownPartID int64
@@ -107,7 +107,8 @@ func (r Request) IsShutdown() bool { return r.ShutdownPartID != 0 }
 
 const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.cancels_request_id, 0),
 	r.start_date, r.end_date, r.days_x100, r.half_start, r.half_end, r.cycle_start, r.note, r.status, COALESCE(r.approver_id, 0),
-	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note, r.calendar_event_id, r.created_at,
+	COALESCE(r.decided_by_id, 0), COALESCE(r.decided_at, ''), r.decision_note,
+	(SELECT group_concat(start_date || '/' || end_date, ' ' ORDER BY start_date) FROM request_ranges WHERE request_id = r.id), r.created_at,
 	COALESCE(r.shutdown_part_id, 0), r.escalate, r.allow_negative,
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
 	COALESCE(sd.name, ''),
@@ -126,13 +127,23 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
+	var ranges string
 	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.HalfStart, &r.HalfEnd, &r.CycleStart,
-		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &r.CalendarEventID,
+		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &ranges,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
 		&r.ApproverName, &r.DecidedBy, &r.ShutdownName, &r.RecordedByID, &r.RecordedBy, &r.RemovedByID, &r.RemovedBy,
 		&r.RemovedAt, &r.HalvesSetByID, &r.HalvesSetBy, &r.HalvesSetAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
+	}
+	if err == nil {
+		for _, pair := range strings.Fields(ranges) {
+			start, end, ok := strings.Cut(pair, "/")
+			if !ok {
+				return Request{}, fmt.Errorf("invalid stored request range %q", pair)
+			}
+			r.Ranges = append(r.Ranges, Range{start, end})
+		}
 	}
 	return r, err
 }
@@ -268,6 +279,7 @@ type Input struct {
 	TypeID int64
 	Start  string
 	End    string
+	Ranges []Range
 	Note   string
 	// HalfStart and HalfEnd make the first / last day a half day, charged 0.5
 	// instead of 1. A one-day request uses HalfStart only. Only workdays-unit
@@ -377,6 +389,17 @@ type quoteOpts struct {
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
+	if len(in.Ranges) > 0 {
+		ranges, err := in.ranges()
+		if err != nil {
+			return err
+		}
+		ranges, err = normaliseRanges(ranges)
+		if err != nil {
+			return nil
+		}
+		in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
+	}
 	start, err1 := ParseDate(in.Start)
 	end, err2 := ParseDate(in.End)
 	if err1 != nil || err2 != nil || end.Before(start) || end.Sub(start) > maxSpan*24*time.Hour {
@@ -391,6 +414,18 @@ func (s *Service) ensureYears(ctx context.Context, in Input) error {
 }
 
 func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, opt quoteOpts) (Quote, error) {
+	if len(in.Ranges) > 0 {
+		ranges, err := in.ranges()
+		if err != nil {
+			return Quote{}, err
+		}
+		ranges, err = normaliseRanges(ranges)
+		if err != nil {
+			return Quote{}, err
+		}
+		// Phase 4 changes storage only: policy still judges the span.
+		in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
+	}
 	errs := FieldErrors{}
 	var qt Quote
 
@@ -658,6 +693,13 @@ func (s *Service) Submit(ctx context.Context, u users.User, in Input) (Request, 
 			return err
 		}
 		id, _ := res.LastInsertId()
+		ranges, err := in.ranges()
+		if err != nil {
+			return err
+		}
+		if err := insertRanges(tx, id, ranges); err != nil {
+			return err
+		}
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
@@ -681,6 +723,13 @@ func (s *Service) saveAwaitingHR(ctx context.Context, tx *sql.Tx, u users.User, 
 		return err
 	}
 	id, _ := res.LastInsertId()
+	ranges, err := in.ranges()
+	if err != nil {
+		return err
+	}
+	if err := insertRanges(tx, id, ranges); err != nil {
+		return err
+	}
 	if *out, err = s.get(ctx, tx, id); err != nil {
 		return err
 	}

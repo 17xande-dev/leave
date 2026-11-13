@@ -72,8 +72,12 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 			return err
 		}
 		// Cancelled before the create ran (Graph was down), or already done.
-		if r.Status != leave.StatusApproved || r.CalendarEventID != "" {
+		if r.Status != leave.StatusApproved {
 			return nil
+		}
+		ranges, err := svc.CalendarRanges(ctx, r.ID)
+		if err != nil {
+			return err
 		}
 		approved := "Approved automatically."
 		if r.DecidedBy != "" {
@@ -87,28 +91,53 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 		if r.Department != "" {
 			body += "\nDepartment: " + r.Department
 		}
-		id, err := cal.Create(ctx, calendar.Event{
-			Key:     fmt.Sprintf("leave-request-%d", r.ID),
-			Subject: r.UserName + " — " + r.TypeName,
-			Body:    body, Start: r.Start, End: r.End,
-		})
-		if err != nil {
-			return err
+		for i, rr := range ranges {
+			if rr.EventID != "" {
+				continue
+			}
+			key := fmt.Sprintf("leave-request-%d", r.ID)
+			if i > 0 {
+				key += "-" + rr.Start
+			}
+			id, err := cal.Create(ctx, calendar.Event{
+				Key: key, Subject: r.UserName + " — " + r.TypeName,
+				Body: body, Start: rr.Start, End: rr.End,
+			})
+			if err != nil {
+				return err
+			}
+			if err := svc.SetRangeEventID(ctx, r.ID, rr.Start, id); err != nil {
+				return err
+			}
 		}
-		return svc.SetCalendarEventID(ctx, r.ID, id)
+		return nil
 	}
 	remove = func(ctx context.Context, payload []byte) error {
 		r, err := load(ctx, payload)
 		if err != nil {
 			return err
 		}
-		if r.CalendarEventID == "" {
-			return nil // never made it onto the calendar
-		}
-		if err := cal.Delete(ctx, r.CalendarEventID); err != nil {
+		ranges, err := svc.CalendarRanges(ctx, r.ID)
+		if err != nil {
 			return err
 		}
-		return svc.SetCalendarEventID(ctx, r.ID, "")
+		for _, rr := range ranges {
+			if rr.LegacyEventID != "" {
+				if err := cal.Delete(ctx, rr.LegacyEventID); err != nil {
+					return err
+				}
+			}
+			if rr.EventID == "" {
+				continue
+			}
+			if err := cal.Delete(ctx, rr.EventID); err != nil {
+				return err
+			}
+			if err := svc.SetRangeEventID(ctx, r.ID, rr.Start, ""); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return create, remove
 }

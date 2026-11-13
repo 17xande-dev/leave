@@ -157,6 +157,9 @@ func (s *Service) RequestCancellation(ctx context.Context, u users.User, id int6
 			return ErrNotAllowed
 		}
 		newID, _ := res.LastInsertId()
+		if err := insertRanges(tx, newID, orig.Ranges); err != nil {
+			return err
+		}
 		if out, err = s.get(ctx, tx, newID); err != nil {
 			return err
 		}
@@ -574,10 +577,4 @@ func (s *Service) Reassign(ctx context.Context, admin users.User, id, approverID
 		return s.emit(ctx, tx, Event{Kind: EventReassigned, Request: out, Actor: admin})
 	})
 	return out, err
-}
-
-// SetCalendarEventID records the shared-calendar event made for approved leave.
-func (s *Service) SetCalendarEventID(ctx context.Context, id int64, eventID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE requests SET calendar_event_id = ? WHERE id = ?`, eventID, id)
-	return err
 }

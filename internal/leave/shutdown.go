@@ -204,8 +204,11 @@ func (s *Service) GenerateDrafts(ctx context.Context, shutdownID int64) (int, er
 					continue
 				}
 				created++
+				rid, _ := res.LastInsertId()
+				if err := insertRanges(tx, rid, []Range{{p.Start, p.End}}); err != nil {
+					return err
+				}
 				if first == nil {
-					rid, _ := res.LastInsertId()
 					r, err := s.get(ctx, tx, rid)
 					if err != nil {
 						return err
@@ -376,7 +379,7 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 			return Request{}, err
 		}
 	}
-	in := Input{TypeID: d.TypeID, Start: d.Start, End: d.End, Note: note, HalfStart: d.HalfStart, HalfEnd: d.HalfEnd}
+	in := Input{TypeID: d.TypeID, Ranges: d.Ranges, Note: note, HalfStart: d.HalfStart, HalfEnd: d.HalfEnd}
 	if err := s.ensureYears(ctx, in); err != nil {
 		return Request{}, err
 	}
@@ -408,6 +411,9 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
+		}
+		if err := insertRanges(tx, id, d.Ranges); err != nil {
+			return err
 		}
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err

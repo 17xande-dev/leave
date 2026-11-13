@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"context"
 	"path/filepath"
 	"reflect"
@@ -31,8 +30,7 @@ func TestHalvesAuditMigration(t *testing.T) {
 		}
 	}
 	before := applicationRows(t, d)
-	var out bytes.Buffer
-	if err := Migrate(ctx, path, &out); err != nil {
+	if _, err := p.UpTo(ctx, 3); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, applicationRows(t, d)) {
@@ -58,7 +56,7 @@ func TestHalvesAuditMigration(t *testing.T) {
 	if !reflect.DeepEqual(before, applicationRows(t, d)) {
 		t.Fatal("Down changed original rows")
 	}
-	if _, err := p.Up(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 3); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, applicationRows(t, d)) {

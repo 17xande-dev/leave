@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/17xande-dev/leave/internal/users"
@@ -118,8 +119,17 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		}
 		escalate := in.Override && len(qt.Coverage) > 0
 		note := strings.TrimSpace(in.Note)
+		ranges, err := in.ranges()
+		if err != nil {
+			return err
+		}
+		ranges, err = normaliseRanges(ranges)
+		if err != nil {
+			return err
+		}
 		if qt.Type.ID == old.TypeID && fmtDate(qt.Start) == old.Start && fmtDate(qt.End) == old.End &&
-			note == old.Note && escalate == old.Escalate && in.HalfStart == old.HalfStart && in.HalfEnd == old.HalfEnd {
+			note == old.Note && escalate == old.Escalate && in.HalfStart == old.HalfStart && in.HalfEnd == old.HalfEnd &&
+			slices.Equal(ranges, old.Ranges) {
 			out = old // nothing to save, nobody to tell
 			return nil
 		}
@@ -136,6 +146,9 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
+		}
+		if err := insertRanges(tx, id, ranges); err != nil {
+			return err
 		}
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err

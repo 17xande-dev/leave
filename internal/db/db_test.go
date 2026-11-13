@@ -42,8 +42,8 @@ func TestEveryTableIsStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Count application tables and migration tracking so the check cannot pass vacuously.
-	if n != 21 {
-		t.Fatalf("found %d tables, want 20 application tables and goose_db_version", n)
+	if n != 22 {
+		t.Fatalf("found %d tables, want 21 application tables and goose_db_version", n)
 	}
 }
 
@@ -53,7 +53,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -65,7 +65,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -76,7 +76,7 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (4, 1)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (5, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -287,7 +287,7 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
 			t.Fatal(err)
 		}
-		if version != 3 || applied != 1 || rows != 4 {
+		if version != 4 || applied != 1 || rows != 5 {
 			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
 		}
 		d.Close()
@@ -313,7 +313,7 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 || version != 3 || applied != 3 {
+	if count != 4 || version != 4 || applied != 4 {
 		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
 	}
 }
@@ -382,14 +382,15 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }
 
 func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 	t.Helper()
-	tables, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'goose_db_version' ORDER BY name`)
+	// Baseline hashes deliberately omit added tables, as they omit added columns.
+	tables, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('goose_db_version','request_ranges') ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}

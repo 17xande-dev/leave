@@ -424,7 +424,7 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all three migrations pending until startup or `-migrate`. A database newer than
+reports all four migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse an upgrade before deployment.** These are operator instructions, not an
@@ -442,9 +442,10 @@ ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v lea
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
-Expect `migrating /data/leave-rehearsal.db: 2 -> 3` before the applied status lines;
+Expect `migrating /data/leave-rehearsal.db: 2 -> 4` before the applied status lines
+(or `3 -> 4` when 0003 is already applied);
 verify that the resolved path names the rehearsal copy and the versions match the
-intended upgrade. A repeat run reports `3 -> 3`.
+intended upgrade. A repeat run reports `4 -> 4`.
 
 Run the pushed image directly on the host: Kamal's parser rejects the documented
 `app exec --version ... --env ... -- '-migrate'` form before it can run. Pulling
@@ -454,7 +455,7 @@ the rehearsal copy. Pass **only `-migrate`** to the image's `leave` entrypoint.
 The `--reuse` commands above inspect the copy through the running container;
 they do not run the new binary.
 
-Require `0001`, `0002` and `0003` applied, unchanged counts, `half_days_enabled=0`,
+Require `0001` through `0004` applied, unchanged counts, `half_days_enabled=0`,
 `SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL` returning `0`, integrity
 `ok`, and no foreign-key rows. If any pending/draft/awaiting-HR request has half flags,
 tell the user before deploying. Stop on any discrepancy. Only after the rehearsal is
@@ -462,6 +463,43 @@ accepted, deploy normally, then check `leave -migrate-status`, `/healthz`, the s
 counts and integrity checks on the live database, and the setting/form behavior.
 Remove the in-volume backup and rehearsal copies after verification; retain the
 off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
+
+**0004 expands storage; 0005 contracts it later.** Every existing request gets
+one `request_ranges` row with identical dates and calendar event id. New code
+stores calendar ids on ranges. `requests.calendar_event_id` remains frozen,
+except for the compatibility shim that adopts ids written by the old container
+and clears the legacy value. During the swap, `requests_default_range` supplies
+ranges for old inserts, `requests_sync_range` keeps old single-range edits in
+step (preserving the event id), and the foreign key cascades old shutdown
+request deletes. Multi-range requests are left alone by the update trigger.
+Migration 0005 will remove both triggers, the transitional cascade, the shim
+and the legacy column after the multi-range release has been stable.
+
+Before migrating the host copy, also record the number of non-empty legacy
+calendar ids. After migrating it, run these exact checks through the existing
+container (these commands inspect only the rehearsal copy):
+
+```sh
+# Before migration: retain this count for comparison with range_event_ids below.
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS legacy_event_ids FROM requests WHERE calendar_event_id <> '\'''\'';"'
+# After migration: counts match; every mismatch count is zero.
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS requests FROM requests; SELECT count(*) AS ranges FROM request_ranges; SELECT count(*) AS range_event_ids FROM request_ranges WHERE calendar_event_id <> '\'''\''; SELECT count(*) AS missing_or_extra_ranges FROM requests r WHERE (SELECT count(*) FROM request_ranges rr WHERE rr.request_id=r.id) <> 1; SELECT count(*) AS date_mismatches FROM requests r JOIN request_ranges rr ON rr.request_id=r.id WHERE rr.start_date<>r.start_date OR rr.end_date<>r.end_date; SELECT count(*) AS event_mismatches FROM requests r JOIN request_ranges rr ON rr.request_id=r.id WHERE rr.calendar_event_id<>r.calendar_event_id; SELECT count(*) AS misplaced_event_ids FROM requests r WHERE r.calendar_event_id<>'\'''\'' AND (SELECT count(*) FROM request_ranges rr WHERE rr.request_id=r.id AND rr.calendar_event_id=r.calendar_event_id)<>1; SELECT name FROM sqlite_master WHERE type='\''trigger'\'' AND name IN ('\''requests_default_range'\'','\''requests_sync_range'\'') ORDER BY name; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+```
+
+Require equal request/range counts, unchanged non-empty event-id count, both
+trigger names, integrity `ok`, and no foreign-key rows. Repeat `-migrate` on the
+copy and all checks: the second run must change nothing. After deployment,
+check counts/integrity again on live data; the legacy-id equality check is a
+rehearsal check before workers run, since workers subsequently clear adopted
+legacy ids. The migration tests also exercise old inserts, edits, deletes,
+single-range Down/Up, and refusal of Down with multiple ranges.
+
+**Rollback after 0004 means restoring the pre-deploy backup**, losing writes
+since that backup, or fixing forward. A previous image refuses schema version
+4; `kamal rollback` alone cannot recover it. Stop writes, preserve a backup of
+the failed state, and use the restore procedure below before starting the
+previous image. The guarded Down exists for testing and refuses multiple
+ranges; it is not the production rollback procedure.
 
 **Recovery if deployment fails after migration 0003.** Stop writes and back up the
 migrated database first. To return to an image supporting 0002, remove 0003's audit

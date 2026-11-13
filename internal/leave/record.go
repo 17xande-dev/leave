@@ -103,6 +103,13 @@ func (s *Service) recordApproved(ctx context.Context, admin users.User, userID i
 			return err
 		}
 		id, _ := res.LastInsertId()
+		ranges, err := in.ranges()
+		if err != nil {
+			return err
+		}
+		if err := insertRanges(tx, id, ranges); err != nil {
+			return err
+		}
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
