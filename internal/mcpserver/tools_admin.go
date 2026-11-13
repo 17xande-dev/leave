@@ -80,8 +80,8 @@ type RecordLeaveIn struct {
 	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
 	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD, today or earlier: only leave that has already happened can be recorded; default the same as start"`
 	Note      string `json:"note" jsonschema:"why it is being recorded; required"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; admins recording leave can always use half days"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; admins recording leave can always use half days"`
 }
 
 type RecordedOut struct {

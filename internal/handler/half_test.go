@@ -157,6 +157,33 @@ func TestAdminRecordLeaveWithAHalfDay(t *testing.T) {
 	}
 }
 
+// A stale form can still post half-day flags after an admin disables them.
+// Both forms must explain the refusal even though the controls are hidden.
+func TestHalfDaysOffRefusalIsShownOnApplyAndEdit(t *testing.T) {
+	hs := newHarness(t)
+	setHalfDays(t, hs, false)
+	staff := hs.signIn("staff1")
+	form := url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"}, "end": {"2026-10-13"}}
+	res, body := hs.post(staff, "/leave", form)
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("whole-day apply: %d\n%s", res.StatusCode, body)
+	}
+	path, _, _ := strings.Cut(res.Header.Get("Location"), "?")
+	for _, endpoint := range []string{"/leave", path + "/edit"} {
+		for _, field := range []string{"half_start", "half_end"} {
+			t.Run(endpoint+"/"+field, func(t *testing.T) {
+				form.Set(field, "1")
+				defer form.Del(field)
+				res, body := hs.post(staff, endpoint, form)
+				if res.StatusCode != http.StatusUnprocessableEntity ||
+					!strings.Contains(body, "Half days are not available. Book whole days.") {
+					t.Fatalf("refused half day: %d\n%s", res.StatusCode, body)
+				}
+			})
+		}
+	}
+}
+
 func TestHalfDaysSettingControlsFormsAndEdit(t *testing.T) {
 	hs := newHarness(t)
 	staff, hr := hs.signIn("staff1"), hs.signIn("hr")

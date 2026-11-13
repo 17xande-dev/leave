@@ -127,8 +127,17 @@ func Status(ctx context.Context, path string, w io.Writer) error {
 }
 
 // Migrate applies pending migrations with the same safeguards as Open, then
-// reports their status. It does not start the application or load its config.
+// reports the resolved path, version change and status. The file must already
+// exist so a typo cannot silently migrate a new database instead of the copy.
+// It does not start the application or load its config.
 func Migrate(ctx context.Context, path string, w io.Writer) error {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve database path: %w", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("refusing to migrate database %s: file must already exist: %w", path, err)
+	}
 	d, p, err := openProvider(path)
 	if err != nil {
 		return err
@@ -136,8 +145,19 @@ func Migrate(ctx context.Context, path string, w io.Writer) error {
 	defer d.Close()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
+	before, _, err := p.GetVersions(ctx)
+	if err != nil {
+		return err
+	}
 	if _, err := p.Up(ctx); err != nil {
 		return fmt.Errorf("apply database migrations: %w", err)
+	}
+	after, _, err := p.GetVersions(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "migrating %s: %d -> %d\n", path, before, after); err != nil {
+		return err
 	}
 	return writeStatus(ctx, p, w)
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -59,7 +60,11 @@ func TestHalfDaysMigration(t *testing.T) {
 				t.Fatal(err)
 			}
 			const applied = "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n"
-			if out.String() != applied {
+			beforeVersion := 0
+			if fromV1 {
+				beforeVersion = 1
+			}
+			if out.String() != fmt.Sprintf("migrating %s: %d -> 2\n", path, beforeVersion)+applied {
 				t.Fatalf("migrate status: %q", out.String())
 			}
 			assertHalfDaysOff(t, d)
@@ -88,7 +93,7 @@ func TestHalfDaysMigration(t *testing.T) {
 				t.Fatal("Down/Up changed existing application data")
 			}
 			out.Reset()
-			if err := Migrate(ctx, path, &out); err != nil || out.String() != applied {
+			if err := Migrate(ctx, path, &out); err != nil || out.String() != fmt.Sprintf("migrating %s: 2 -> 2\n", path)+applied {
 				t.Fatalf("repeated migrate: %q, err=%v", out.String(), err)
 			}
 		})

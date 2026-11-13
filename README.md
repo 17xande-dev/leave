@@ -419,8 +419,10 @@ by goose. Add each schema change as a new migration; never edit an applied migra
 `go run . -migrate-status` reports applied/pending migrations without applying them or
 starting the server. `go run . -migrate` applies pending migrations, prints status and
 exits, without loading LDAP/Graph configuration or starting the server. Both use
-`DB_PATH` (default `data/leave.db`). An empty database reports both migrations pending
-until startup or `-migrate`. A database newer than the binary is refused by both.
+`DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
+a missing path exits with code 1 without creating it. An existing empty database
+reports both migrations pending until startup or `-migrate`. A database newer than
+the binary is refused by both.
 
 **Rehearse an upgrade before deployment.** These are operator instructions, not an
 automatic deployment step. Start with a committed, checked image; build and push it
@@ -435,6 +437,10 @@ kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) 
 kamal app exec --version "$VERSION" --env DB_PATH:/data/leave-rehearsal.db -- '-migrate'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
+
+Expect `migrating /data/leave-rehearsal.db: 1 -> 2` before the applied status lines;
+verify that the resolved path names the rehearsal copy and the versions match the
+intended upgrade. A repeat run reports `2 -> 2`.
 
 The migration command deliberately omits `--reuse`: it runs the new image against
 the copy. It passes **only `-migrate`** to the image's `leave` entrypoint. Do not pass
@@ -451,6 +457,23 @@ accepted, deploy normally, then check `leave -migrate-status`, `/healthz`, the s
 counts and integrity checks on the live database, and the setting/form behavior.
 Remove the in-volume backup and rehearsal copies after verification; retain the
 off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
+
+**Recovery if deployment fails after migration 0002.** The previous binary refuses
+to start with `database migration version 2 is newer than this binary`. Stop writes
+and back up the migrated database before recovery. If 0002 is the only migration
+to undo, manually remove its column and version record in one transaction using
+an existing container with access to the volume:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0002.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db "BEGIN IMMEDIATE; ALTER TABLE settings DROP COLUMN half_days_enabled; DELETE FROM goose_db_version WHERE version_id=2; COMMIT;"'
+```
+
+This discards the half-days setting; requests and their half-day flags remain.
+Check integrity and foreign keys using the queries above, then roll back to the
+previous image. Alternatively, restore the pre-deploy backup using the restore
+procedure below and start the previous image; that loses changes made since the
+backup. Do not restart the new image during recovery: it would apply 0002 again.
 
 An existing database without `goose_db_version` is refused before any migration runs.
 For disposable local data, use `make recreate-db`.

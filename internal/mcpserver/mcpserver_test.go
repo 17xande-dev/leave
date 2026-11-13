@@ -936,13 +936,13 @@ func TestAdjustBalanceTakesFractionalDays(t *testing.T) {
 	f.refused(hr, "adjust_balance", map[string]any{"person": "staff1", "type": "annual", "days": 1.234, "reason": "x"}, "")
 }
 
-// half_start / half_end flow through preview, apply, edit and record, and the
-// request results say which end is a half day.
 func TestHalfDaysOffRefusesApplyTool(t *testing.T) {
 	f := newFixture(t)
 	f.refused(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "half_start": true}, "Half days are not available. Book whole days.")
 }
 
+// half_start / half_end flow through preview, apply, edit and record, and the
+// request results say which end is a half day.
 func TestHalfDaysThroughTheTools(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
