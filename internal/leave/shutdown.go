@@ -386,9 +386,9 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 	}
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		opt := quoteOpts{mandatory: true, excludeID: id}
+		opt := quoteOpts{mandatory: true, excludeID: id, halvesAllowed: true}
 		if !d.IsShutdown() {
-			opt = quoteOpts{allowNegative: d.AllowNegative, override: override, excludeID: id}
+			opt = quoteOpts{allowNegative: d.AllowNegative, override: override, excludeID: id, halvesAllowed: true}
 		}
 		qt, err := s.quote(ctx, tx, u, in, opt)
 		if err != nil {

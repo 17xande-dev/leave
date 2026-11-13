@@ -15,6 +15,8 @@ import (
 // operation and never cached across requests, so a change applies to the very
 // next quote.
 type Settings struct {
+	// HalfDaysEnabled lets applicants book half days; admins can always record them.
+	HalfDaysEnabled bool
 	// Week is the days people normally work; leave costs only these.
 	Week Week
 	// RestrictedDay, when set, is a working day that cannot be taken off on
@@ -110,10 +112,10 @@ func (s *Service) settings(ctx context.Context, q querier) (Settings, error) {
 		approver sql.NullInt64
 	)
 	err := q.QueryRowContext(ctx, `SELECT s.work_days, s.restricted_day, s.restricted_min_days, s.final_approver_id,
-		s.sick_cycle_start_year, s.team_default_percent, COALESCE(u.name, ''), s.updated_at
+		s.sick_cycle_start_year, s.team_default_percent, s.half_days_enabled, COALESCE(u.name, ''), s.updated_at
 		FROM settings s LEFT JOIN users u ON u.id = s.updated_by_id WHERE s.id = 1`).
 		Scan(&days, &rd, &st.RestrictedMinDays, &approver, &st.SickCycleAnchor,
-			&st.TeamDefaultPercent, &st.UpdatedBy, &st.UpdatedAt)
+			&st.TeamDefaultPercent, &st.HalfDaysEnabled, &st.UpdatedBy, &st.UpdatedAt)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -166,9 +168,9 @@ func (s *Service) SaveSettings(ctx context.Context, admin users.User, in Setting
 	}
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE settings SET work_days = ?, restricted_day = ?, restricted_min_days = ?,
-			final_approver_id = ?, sick_cycle_start_year = ?, team_default_percent = ?, updated_by_id = ?, updated_at = ?
+			final_approver_id = ?, sick_cycle_start_year = ?, team_default_percent = ?, half_days_enabled = ?, updated_by_id = ?, updated_at = ?
 			WHERE id = 1`, in.Week.codes(), rd, in.RestrictedMinDays, nullID(in.FinalApproverID),
-			in.SickCycleAnchor, in.TeamDefaultPercent, admin.ID, stampNow(s.Now()))
+			in.SickCycleAnchor, in.TeamDefaultPercent, in.HalfDaysEnabled, admin.ID, stampNow(s.Now()))
 		return err
 	})
 }

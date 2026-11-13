@@ -59,6 +59,10 @@
     <span class="hint">The most of a volunteer team that may be away on one day, for every team with no limit of its own (set those on Teams). 1 to 100, or empty for no default.</span>
     {{template "err" index .Errors "team_default"}}
   </div>
+  <div class="field">
+    <label><input type="checkbox" name="half_days_enabled" value="1"{{if .Form.HalfDaysEnabled}} checked{{end}}> Let people book half days</label>
+    <span class="hint">Admins can always record and change half days.</span>
+  </div>
   <div class="actions"><button type="submit">Save</button></div>
 </form>
 {{if .UpdatedAt}}<p class="muted">Last changed by {{.UpdatedBy}} at {{.UpdatedAt}} (UTC).</p>{{else}}<p class="muted">Not changed since the defaults were created.</p>{{end}}

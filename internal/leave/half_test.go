@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+func newHalfFixture(t *testing.T) *fixture {
+	f := newFixture(t)
+	f.setSettings(func(st *Settings) { st.HalfDaysEnabled = true })
+	return f
+}
+
 // Mon 12 Oct 2026 starts a plain working week (the fixture's "today" is Mon 5
 // Oct): Mon 12, Tue 13, Wed 14, Thu 15, Fri 16, Sat 17. Wed 16 Dec 2026 is the
 // Day of Reconciliation, a public holiday.
@@ -61,7 +67,7 @@ func TestHalfDayRequestsAreChargedExactly(t *testing.T) {
 		{"half day on the Monday after a weekend", "2026-10-15", "2026-10-19", false, true, "2.5", "12.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newFixture(t)
+			f := newHalfFixture(t)
 			r := f.mustSubmitHalf("staff", "annual", tc.start, tc.end, tc.hs, tc.he)
 			if r.Days.String() != tc.days || r.HalfStart != tc.hs || r.HalfEnd != tc.he {
 				t.Fatalf("request = %s days, half_start=%v half_end=%v; want %s, %v, %v",
@@ -75,7 +81,7 @@ func TestHalfDayRequestsAreChargedExactly(t *testing.T) {
 }
 
 func TestHalfDayRefusals(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	for _, tc := range []struct {
 		name       string
 		code       string
@@ -111,7 +117,7 @@ func TestHalfDayRefusals(t *testing.T) {
 // Without a flag the same dates behave as before: a request whose last day is a
 // Saturday still counts only its working days.
 func TestNoHalfFlagLeavesWholeDayCountingAlone(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	r := f.mustSubmit("staff", "annual", "2026-10-16", "2026-10-18")
 	if r.Days != WholeDays(1) || r.HalfStart || r.HalfEnd {
 		t.Fatalf("request = %+v", r)
@@ -121,7 +127,7 @@ func TestNoHalfFlagLeavesWholeDayCountingAlone(t *testing.T) {
 // An edit that changes only a flag changes the days, the balance and the
 // fingerprint, so an approver who read the old page cannot approve the new one.
 func TestEditChangingOnlyAFlag(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	staff := f.people["staff"]
 	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-13")
 	if f.availableDays("staff", "annual") != WholeDays(13) {
@@ -168,7 +174,7 @@ func TestEditChangingOnlyAFlag(t *testing.T) {
 // distinguish the two versions: the fingerprint must still change, or an
 // approver who read "first day half" would approve "last day half" unseen.
 func TestEditSwappingTheHalfDayChangesTheFingerprint(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	r := f.mustSubmitHalf("staff", "annual", "2026-10-12", "2026-10-13", true, false)
 	seen := r.Fingerprint()
 	e, err := f.svc.Edit(f.ctx, f.people["staff"], r.ID, Input{TypeID: r.TypeID, Start: r.Start, End: r.End, Note: r.Note, HalfEnd: true})
@@ -189,7 +195,7 @@ func TestEditSwappingTheHalfDayChangesTheFingerprint(t *testing.T) {
 // A refusal about the request itself (not one box) is reported once, under the
 // first ticked box.
 func TestHalfRefusalAboutTheTypeIsReportedOnce(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	_, err := f.submitHalf("staff", "maternity", "2026-10-12", "2026-10-14", true, true)
 	var fe FieldErrors
 	if !errors.As(err, &fe) || fe["half_start"] == "" || fe["half_end"] != "" || len(fe) != 1 {
@@ -203,7 +209,7 @@ func TestHalfRefusalAboutTheTypeIsReportedOnce(t *testing.T) {
 
 // An edit that shrinks the request to one day cannot keep half_end.
 func TestEditToOneDayRefusesHalfEnd(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	r := f.mustSubmitHalf("staff", "annual", "2026-10-12", "2026-10-13", false, true)
 	_, err := f.svc.Edit(f.ctx, f.people["staff"], r.ID, Input{TypeID: r.TypeID, Start: "2026-10-12", End: "2026-10-12", Note: "n", HalfEnd: true})
 	if !fieldErr(err, "half_end") {
@@ -224,7 +230,7 @@ func TestCancellationGivesBackExactlyTheHalfDays(t *testing.T) {
 		{"a day and a half", "2026-10-12", "2026-10-13", false, true, "1.5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newFixture(t)
+			f := newHalfFixture(t)
 			r := f.mustSubmitHalf("staff", "annual", tc.start, tc.end, tc.hs, tc.he)
 			if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
 				t.Fatal(err)
@@ -247,7 +253,7 @@ func TestCancellationGivesBackExactlyTheHalfDays(t *testing.T) {
 }
 
 func TestRecordLeaveWithHalfDays(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	// Mon 22 - Tue 23 June 2026, in the past: the log's "1 and 1/2 days".
 	r, err := f.svc.RecordLeave(f.ctx, f.people["hr"], f.people["staff"].ID, Input{
 		TypeID: f.types["annual"].ID, Start: "2026-06-22", End: "2026-06-23", Note: "from the log", HalfEnd: true})
@@ -272,7 +278,7 @@ func TestRecordLeaveWithHalfDays(t *testing.T) {
 // A request HR allowed to go below zero keeps its half day when the person
 // submits the draft; it is not recomputed as whole days.
 func TestHalfDayRequestSurvivesTheHRDraftRoundTrip(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	// Family leave allows 3 days; 3.5 is over by half a day.
 	r, err := f.svc.Submit(f.ctx, f.people["staff"], Input{TypeID: f.types["family"].ID,
 		Start: "2026-10-12", End: "2026-10-15", Note: "wedding abroad", HalfEnd: true, Negative: true})
@@ -285,6 +291,7 @@ func TestHalfDayRequestSurvivesTheHRDraftRoundTrip(t *testing.T) {
 	if _, err := f.svc.GrantNegative(f.ctx, f.people["hr"], r.ID, "once"); err != nil {
 		t.Fatal(err)
 	}
+	f.setSettings(func(st *Settings) { st.HalfDaysEnabled = false })
 	r, err = f.svc.SubmitDraft(f.ctx, f.people["staff"], r.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +304,7 @@ func TestHalfDayRequestSurvivesTheHRDraftRoundTrip(t *testing.T) {
 // Shutdown days are mandatory and whole: a draft that somehow carries a flag is
 // refused rather than submitted with half days.
 func TestShutdownDraftsNeverHaveHalfDays(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	f.december(false)
 	d := f.drafts("staff")[0]
 	if d.HalfStart || d.HalfEnd {
@@ -315,7 +322,7 @@ func TestShutdownDraftsNeverHaveHalfDays(t *testing.T) {
 // Two half days on the same date are still an overlap: a half day occupies the
 // date (allowing two is out of scope).
 func TestTwoHalfDaysOnOneDateOverlap(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	f.mustSubmitHalf("staff", "annual", "2026-10-12", "2026-10-12", true, false)
 	if _, err := f.submitHalf("staff", "annual", "2026-10-12", "2026-10-12", true, false); !fieldErr(err, "start") {
 		t.Fatalf("second half day on the same date: %v", err)
@@ -341,7 +348,7 @@ func TestHalfNote(t *testing.T) {
 
 // Sanity caps: a slipped decimal point is refused, not saved.
 func TestDaysSanityCaps(t *testing.T) {
-	f := newFixture(t)
+	f := newHalfFixture(t)
 	adj := func(d Days) error {
 		return f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: f.people["staff"].ID,
 			TypeID: f.types["annual"].ID, CycleStart: "2026-01-01", Days: d, Reason: "payroll"})

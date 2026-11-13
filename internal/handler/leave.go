@@ -130,11 +130,12 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 }
 
 type applyData struct {
-	Types    []leave.Type
-	Input    leave.Input
-	Errors   leave.FieldErrors
-	Preview  quoteData
-	Approver string
+	HalfDaysEnabled bool
+	Types           []leave.Type
+	Input           leave.Input
+	Errors          leave.FieldErrors
+	Preview         quoteData
+	Approver        string
 	// MinDate is the picker's earliest selectable day: the selected type's
 	// cut-off, or with none chosen the earliest across all offered types.
 	MinDate string
@@ -224,6 +225,14 @@ func (h *Handler) pickerMarks(ctx context.Context, rs []leave.Request) (pickerMa
 // new one: it is then left out of the picker's marks and the preview, and the
 // approver shown is the one it is already with.
 func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErrors, edit *leave.Request) (applyData, error) {
+	st, err := h.leave.Settings(r.Context())
+	if err != nil {
+		return applyData{}, err
+	}
+	// Hidden boxes submit no flags. Preview that whole-day edit before Save.
+	if edit != nil && !st.HalfDaysEnabled {
+		in.HalfStart, in.HalfEnd = false, false
+	}
 	// One balances lookup serves both the type list (active types, in display
 	// order) and the "n left" in each option.
 	bs, err := h.leave.Balances(r.Context(), currentUser(r).ID)
@@ -231,7 +240,7 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 		return applyData{}, err
 	}
 	types := make([]leave.Type, 0, len(bs))
-	d := applyData{Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
+	d := applyData{HalfDaysEnabled: st.HalfDaysEnabled, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
 	for _, b := range bs {
 		if !b.Type.OfferedTo(currentUser(r)) {
 			continue

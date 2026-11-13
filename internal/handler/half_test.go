@@ -8,10 +8,27 @@ import (
 	"testing"
 )
 
+func setHalfDays(t *testing.T, hs *harness, enabled bool) {
+	t.Helper()
+	st, err := hs.svc.Settings(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hr, err := hs.us.ByUsername(t.Context(), "hr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.HalfDaysEnabled = enabled
+	if err := hs.svc.SaveSettings(t.Context(), hr, st); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The apply form carries both checkboxes, a posted box makes the half day, and
 // the request page, the preview and the lists all say which day is half.
 func TestHalfDayThroughTheApplyForm(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	staff := hs.signIn("staff1")
 
 	_, body := hs.get(staff, "/leave/new")
@@ -46,6 +63,7 @@ func TestHalfDayThroughTheApplyForm(t *testing.T) {
 
 func TestHalfDayOnASingleDay(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	staff := hs.signIn("staff1")
 	res, body := hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-14"},
 		"end": {"2026-10-14"}, "note": {"n"}, "half_start": {"1"}})
@@ -63,6 +81,7 @@ func TestHalfDayOnASingleDay(t *testing.T) {
 // boxes still ticked, so nothing has to be re-entered.
 func TestHalfDayRefusalIsShownInline(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	staff := hs.signIn("staff1")
 	res, body := hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
 		"end": {"2026-10-12"}, "note": {"n"}, "half_end": {"1"}})
@@ -78,6 +97,7 @@ func TestHalfDayRefusalIsShownInline(t *testing.T) {
 // The live preview reads the boxes from the form's query.
 func TestQuotePartialCountsHalfDays(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	c := hs.signIn("staff1")
 	_, body := hs.get(c, fmt.Sprintf("/leave/quote?type=%s&start=2026-10-12&end=2026-10-14&half_end=1", hs.typeID("annual")))
 	if !strings.Contains(body, "2.5 working days") || !strings.Contains(body, "12.5 left") {
@@ -92,6 +112,7 @@ func TestQuotePartialCountsHalfDays(t *testing.T) {
 // Editing starts from the request's own flags, and saving can change them.
 func TestEditFormKeepsAndChangesHalfDays(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	staff := hs.signIn("staff1")
 	res, _ := hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
 		"end": {"2026-10-13"}, "note": {"n"}, "half_end": {"1"}})
@@ -133,5 +154,53 @@ func TestAdminRecordLeaveWithAHalfDay(t *testing.T) {
 		"end": {"2026-06-24"}, "note": {"x"}, "half_end": {"1"}})
 	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "A one-day request has only a first day") {
 		t.Fatalf("refused record: %d\n%s", res.StatusCode, body)
+	}
+}
+
+func TestHalfDaysSettingControlsFormsAndEdit(t *testing.T) {
+	hs := newHarness(t)
+	staff, hr := hs.signIn("staff1"), hs.signIn("hr")
+	boxes := func(path string, present bool, client *http.Client) string {
+		t.Helper()
+		code, body := hs.get(client, path)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d\n%s", path, code, body)
+		}
+		for _, name := range []string{"half_start", "half_end"} {
+			if strings.Contains(body, `name="`+name+`"`) != present {
+				t.Errorf("%s: %s presence, want %v", path, name, present)
+			}
+		}
+		if !present && strings.Contains(body, `class="checks"`) {
+			t.Errorf("%s: hidden half-day checks block remains", path)
+		}
+		return body
+	}
+	boxes("/leave/new", false, staff)
+	page := "/admin/users/" + itoa(hs.staffID("staff1"))
+	boxes(page, true, hr)
+	setHalfDays(t, hs, true)
+	boxes("/leave/new", true, staff)
+	form := url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"}, "end": {"2026-10-13"}, "half_end": {"1"}}
+	res, body := hs.post(staff, "/leave", form)
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("apply: %d\n%s", res.StatusCode, body)
+	}
+	path, _, _ := strings.Cut(res.Header.Get("Location"), "?")
+	boxes(path+"/edit", true, staff)
+	setHalfDays(t, hs, false)
+	body = boxes(path+"/edit", false, staff)
+	if !strings.Contains(body, "2 working days") {
+		t.Fatalf("edit preview must show whole days before saving:\n%s", body)
+	}
+	boxes(page, true, hr)
+	form.Del("half_end")
+	res, body = hs.post(staff, path+"/edit", form)
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("whole-day edit: %d\n%s", res.StatusCode, body)
+	}
+	_, body = hs.get(staff, path)
+	if !strings.Contains(body, "2 working days") || strings.Contains(body, "last day a half day") {
+		t.Fatalf("saved edit must be whole days:\n%s", body)
 	}
 }

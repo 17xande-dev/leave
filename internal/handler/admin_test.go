@@ -613,6 +613,7 @@ func TestAdjustmentAndAllowanceFormsTakeDecimals(t *testing.T) {
 // The export says which day is half, so a 1.5 can be told from two days.
 func TestCSVHasHalfDayColumn(t *testing.T) {
 	hs := newHarness(t)
+	setHalfDays(t, hs, true)
 	staff := hs.signIn("staff1")
 	hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
 		"end": {"2026-10-13"}, "note": {"n"}, "half_end": {"1"}})

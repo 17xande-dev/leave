@@ -35,7 +35,15 @@ func main() {
 		os.Exit(runImport2026(os.Args[2:], os.Stdout, time.Now))
 	}
 	migrateStatus := flag.Bool("migrate-status", false, "Print database migration status and exit")
+	migrate := flag.Bool("migrate", false, "Apply pending database migrations, print status and exit")
 	flag.Parse()
+	if *migrate {
+		if err := db.Migrate(context.Background(), config.DatabasePath(), os.Stdout); err != nil {
+			slog.Error("migrate database", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *migrateStatus {
 		if err := db.Status(context.Background(), config.DatabasePath(), os.Stdout); err != nil {
 			slog.Error("migration status", "err", err)

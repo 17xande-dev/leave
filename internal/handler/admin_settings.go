@@ -16,12 +16,13 @@ import (
 // settingsForm is the form as typed, as text, so a rejected submission comes
 // back showing exactly what was entered rather than a normalised version.
 type settingsForm struct {
-	Days          map[string]bool
-	RestrictedDay string
-	RestrictedMin string
-	FinalApprover int64
-	SickCycle     string
-	TeamDefault   string
+	HalfDaysEnabled bool
+	Days            map[string]bool
+	RestrictedDay   string
+	RestrictedMin   string
+	FinalApprover   int64
+	SickCycle       string
+	TeamDefault     string
 }
 
 type settingsData struct {
@@ -37,8 +38,8 @@ type settingsData struct {
 
 func formFrom(st leave.Settings) settingsForm {
 	f := settingsForm{Days: map[string]bool{}, RestrictedMin: strconv.Itoa(st.RestrictedMinDays),
-		FinalApprover: st.FinalApproverID,
-		SickCycle:     strconv.Itoa(st.SickCycleAnchor)}
+		FinalApprover: st.FinalApproverID, HalfDaysEnabled: st.HalfDaysEnabled,
+		SickCycle: strconv.Itoa(st.SickCycleAnchor)}
 	if st.TeamDefaultPercent > 0 {
 		f.TeamDefault = strconv.Itoa(st.TeamDefaultPercent)
 	}
@@ -114,6 +115,13 @@ func (h *Handler) AdminSaveSettings(w http.ResponseWriter, r *http.Request) {
 		RestrictedMin: strings.TrimSpace(f.Get("restricted_min")),
 		SickCycle:     strings.TrimSpace(f.Get("sick_cycle")), TeamDefault: strings.TrimSpace(f.Get("team_default"))}
 	var in leave.Settings
+	if values, present := f["half_days_enabled"]; present {
+		if len(values) != 1 || values[0] != "1" {
+			http.Error(w, "Unknown half-days setting.", http.StatusBadRequest)
+			return
+		}
+		in.HalfDaysEnabled, form.HalfDaysEnabled = true, true
+	}
 
 	// A day code outside the seven is a hand-made post, not a typo to
 	// explain next to a checkbox.

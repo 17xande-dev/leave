@@ -123,6 +123,26 @@ func Status(ctx context.Context, path string, w io.Writer) error {
 		return err
 	}
 	defer d.Close()
+	return writeStatus(ctx, p, w)
+}
+
+// Migrate applies pending migrations with the same safeguards as Open, then
+// reports their status. It does not start the application or load its config.
+func Migrate(ctx context.Context, path string, w io.Writer) error {
+	d, p, err := openProvider(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	if _, err := p.Up(ctx); err != nil {
+		return fmt.Errorf("apply database migrations: %w", err)
+	}
+	return writeStatus(ctx, p, w)
+}
+
+func writeStatus(ctx context.Context, p *goose.Provider, w io.Writer) error {
 	statuses, err := p.Status(ctx)
 	if err != nil {
 		return err

@@ -34,6 +34,7 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	root, _ := us.Upsert(ctx, directory.User{ID: "CN=root", DN: "CN=root", Username: "root", Name: "Root", Admin: true})
 	st, _ := svc.Settings(ctx)
 	st.FinalApproverID = boss.ID
+	st.HalfDaysEnabled = true
 	if err := svc.SaveSettings(ctx, root, st); err != nil {
 		t.Fatal(err)
 	}

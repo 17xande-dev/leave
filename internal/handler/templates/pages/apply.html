@@ -67,12 +67,14 @@
     <p class="legend muted"><span class="mark-holiday">public holiday</span> <span class="mark-booked">booked or requested</span></p>
     {{template "err" index .Errors "start"}}
     {{template "err" index .Errors "end"}}
+    {{if .HalfDaysEnabled}}
     <div class="checks">
       <label><input type="checkbox" name="half_start" value="1"{{if .Input.HalfStart}} checked{{end}}> First (or only) day is a half day</label>
       <label><input type="checkbox" name="half_end" value="1"{{if .Input.HalfEnd}} checked{{end}}> Last day is a half day</label>
     </div>
     {{template "err" index .Errors "half_start"}}
     {{template "err" index .Errors "half_end"}}
+    {{end}}
   </div>
   <div class="field">
     <label for="note">Note <small>(optional for most types)</small></label>

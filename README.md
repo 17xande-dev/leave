@@ -49,6 +49,13 @@ Sunday costs a day. The holidays are computed from the Public Holidays Act,
 including the Sunday-to-Monday rule. Admins add proclaimed days, such as election days,
 by hand. Days count against the cycle the leave starts in.
 
+**Half days** start OFF, including after upgrading an existing database. Under
+**Admin → Settings**, tick **Let people book half days** to offer them on apply/edit
+forms and through assistants. Admins can always record half days. Existing requests
+keep their half days and can still be approved; accepted drafts can still be submitted.
+With the setting off, editing a pending request offers whole days only, so saving it
+removes its half-day flags. Turning it on restores half-day booking.
+
 **The restricted day.** The restricted day (e.g. Sunday, chosen on **Admin → Settings**,
 none by default) is a working day nobody can take off by itself. Leave that includes it
 must cover at least the minimum number of working days (3 by default), counting that day.
@@ -410,8 +417,40 @@ guard; this is expected protection against running code on an incompatible schem
 Numbered SQL migrations in `internal/db/migrations` are embedded and applied at startup
 by goose. Add each schema change as a new migration; never edit an applied migration.
 `go run . -migrate-status` reports applied/pending migrations without applying them or
-starting the server. An empty database therefore reports baseline 1 pending until its
-first normal startup. A database newer than the binary is refused.
+starting the server. `go run . -migrate` applies pending migrations, prints status and
+exits, without loading LDAP/Graph configuration or starting the server. Both use
+`DB_PATH` (default `data/leave.db`). An empty database reports both migrations pending
+until startup or `-migrate`. A database newer than the binary is refused by both.
+
+**Rehearse an upgrade before deployment.** These are operator instructions, not an
+automatic deployment step. Start with a committed, checked image; build and push it
+without swapping the running app (`VERSION=$(git rev-parse HEAD)` then
+`kamal build push --version "$VERSION"`). Take a fresh `.backup` of the live database
+using the running container and copy it off the host using the backup procedure below.
+Make a separate rehearsal copy on the host's volume:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehearsal.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM requests WHERE status IN ('"'"'pending'"'"','"'"'draft'"'"','"'"'awaiting_hr'"'"') AND (half_start=1 OR half_end=1); PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+kamal app exec --version "$VERSION" --env DB_PATH:/data/leave-rehearsal.db -- '-migrate'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+```
+
+The migration command deliberately omits `--reuse`: it runs the new image against
+the copy. It passes **only `-migrate`** to the image's `leave` entrypoint. Do not pass
+`leave -migrate`, `env ...`, or `sh ...` as the command: those become arguments to
+`leave`. `--env` sets the copy's path; `--` ends Kamal's options. In contrast, with
+`--reuse`, commands execute inside the existing container and need the executable
+(`leave -migrate-status`, `sqlite3`, etc.). This follows
+[Kamal's exec implementation](https://github.com/basecamp/kamal/blob/main/lib/kamal/commands/app/execution.rb).
+
+Require `0001` and `0002` applied, unchanged counts, `half_days_enabled=0`, integrity
+`ok`, and no foreign-key rows. If any pending/draft/awaiting-HR request has half flags,
+tell the user before deploying. Stop on any discrepancy. Only after the rehearsal is
+accepted, deploy normally, then check `leave -migrate-status`, `/healthz`, the same
+counts and integrity checks on the live database, and the setting/form behavior.
+Remove the in-volume backup and rehearsal copies after verification; retain the
+off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
 
 An existing database without `goose_db_version` is refused before any migration runs.
 For disposable local data, use `make recreate-db`.
@@ -462,8 +501,10 @@ make deploy
 kamal app exec --reuse 'leave -migrate-status'
 ```
 
-The expected status is `0001 applied 0001_baseline.sql`, with no pending migrations.
-This marks the existing baseline as applied without executing its DDL. The SQL is a
+The original baseline-only image reports `0001 applied 0001_baseline.sql`. The current
+image also applies and reports `0002 applied 0002_half_days_enabled.sql`; rehearse it
+on a copy first as described above. Adoption marks the existing baseline as applied
+without executing its DDL. The SQL is a
 one-time operation: it deliberately fails if the tracking table already exists. Do
 not use `goose up` to adopt an existing schema; `goose fix` only renumbers files and
 does not mark migrations applied.

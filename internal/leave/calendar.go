@@ -159,7 +159,7 @@ func halfDays(in Input) Days {
 // same day as its first), or on a day that costs nothing (a Saturday, a day
 // the working week leaves out, a public holiday) -- a half of nothing. The
 // errors are keyed by the checkbox they belong to.
-func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]bool, week Week, mandatory bool) FieldErrors {
+func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]bool, st Settings, opt quoteOpts) FieldErrors {
 	if !in.HalfStart && !in.HalfEnd {
 		return nil
 	}
@@ -174,7 +174,10 @@ func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]
 		}
 	}
 	switch {
-	case mandatory:
+	case !st.HalfDaysEnabled && !opt.halvesAllowed:
+		refuse("Half days are not available. Book whole days.")
+		return fe
+	case opt.mandatory:
 		refuse("A company shutdown is always whole days.")
 		return fe
 	case t.Unit != UnitWorkdays:
@@ -189,7 +192,7 @@ func checkHalves(in Input, t Type, start, end time.Time, holidays map[time.Time]
 		on        bool
 		day       time.Time
 	}{{"half_start", "first", in.HalfStart, start}, {"half_end", "last", in.HalfEnd, end}} {
-		if h.on && fe[h.key] == "" && !charged(h.day, t.Unit, holidays, week) {
+		if h.on && fe[h.key] == "" && !charged(h.day, t.Unit, holidays, st.Week) {
 			fe[h.key] = fmt.Sprintf("The %s day (%s) is not a working day, or is a public holiday, so it cannot be a half day.",
 				h.name, h.day.Format("Mon 2 Jan"))
 		}

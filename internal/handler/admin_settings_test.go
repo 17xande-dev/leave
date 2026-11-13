@@ -87,3 +87,33 @@ func TestAdminSettingsSaveApplies(t *testing.T) {
 		t.Error("the page does not show the saved working days")
 	}
 }
+
+func TestAdminHalfDaysSetting(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	for _, enabled := range []bool{false, true, false} {
+		values := validSettingsPost(nil)
+		if enabled {
+			values.Set("half_days_enabled", "1")
+		}
+		res, body := hs.post(hr, "/admin/settings", values)
+		if res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("save enabled=%v: %d\n%s", enabled, res.StatusCode, body)
+		}
+		st, err := hs.svc.Settings(t.Context())
+		if err != nil || st.HalfDaysEnabled != enabled {
+			t.Fatalf("saved enabled=%v: %+v, %v", enabled, st, err)
+		}
+		_, body = hs.get(hr, "/admin/settings")
+		if !strings.Contains(body, "Let people book half days") || !strings.Contains(body, "Admins can always record and change half days.") ||
+			strings.Contains(body, `name="half_days_enabled" value="1" checked`) != enabled {
+			t.Fatalf("settings checkbox enabled=%v:\n%s", enabled, body)
+		}
+	}
+	for _, raw := range []string{"", "0", "true", "2", " 1 "} {
+		res, _ := hs.post(hr, "/admin/settings", validSettingsPost(url.Values{"half_days_enabled": {raw}}))
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("checkbox %q: %d, want 400", raw, res.StatusCode)
+		}
+	}
+}

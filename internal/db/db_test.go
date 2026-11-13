@@ -53,7 +53,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -65,7 +65,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -76,7 +76,7 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (2, 1)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (3, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -287,7 +287,7 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
 			t.Fatal(err)
 		}
-		if version != 1 || applied != 1 || rows != 2 {
+		if version != 2 || applied != 1 || rows != 3 {
 			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
 		}
 		d.Close()
@@ -313,7 +313,7 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 || version != 1 || applied != 1 {
+	if count != 2 || version != 2 || applied != 2 {
 		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
 	}
 }
@@ -322,8 +322,11 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 // and compare every application row before adoption and after the first boot.
 func TestAdoptBaselinePreservesData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "unversioned.db")
-	d, err := Open(path)
+	d, p, err := openProvider(path)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
@@ -374,11 +377,12 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if after := applicationRows(t, d); !reflect.DeepEqual(before, after) {
 		t.Fatalf("application rows changed during adoption/boot:\nbefore: %v\nafter: %v", before, after)
 	}
+	assertHalfDaysOff(t, d)
 	var out bytes.Buffer
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }
@@ -406,7 +410,13 @@ func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 	}
 	snapshot := make(map[string][32]byte, len(names))
 	for _, name := range names {
-		rows, err := d.Query(`SELECT * FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`)
+		columnsSQL := "*"
+		if name == "settings" {
+			// Compare every baseline field across adoption plus the v2 ADD COLUMN;
+			// the new field's default is asserted separately.
+			columnsSQL = "id,work_days,restricted_day,restricted_min_days,final_approver_id,sick_cycle_start_year,team_default_percent,updated_by_id,updated_at"
+		}
+		rows, err := d.Query(`SELECT ` + columnsSQL + ` FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`)
 		if err != nil {
 			t.Fatal(err)
 		}

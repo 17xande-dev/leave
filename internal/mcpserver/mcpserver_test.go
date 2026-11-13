@@ -938,8 +938,26 @@ func TestAdjustBalanceTakesFractionalDays(t *testing.T) {
 
 // half_start / half_end flow through preview, apply, edit and record, and the
 // request results say which end is a half day.
+func TestHalfDaysOffRefusesApplyTool(t *testing.T) {
+	f := newFixture(t)
+	f.refused(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "half_start": true}, "Half days are not available. Book whole days.")
+}
+
 func TestHalfDaysThroughTheTools(t *testing.T) {
 	f := newFixture(t)
+	ctx := context.Background()
+	st, err := f.svc.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.HalfDaysEnabled = true
+	admin, err := f.us.ByUsername(ctx, "hr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.SaveSettings(ctx, admin, st); err != nil {
+		t.Fatal(err)
+	}
 	staff, hr := f.as("staff1"), f.as("hr")
 
 	args := map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-13", "half_end": true}

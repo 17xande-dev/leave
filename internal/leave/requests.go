@@ -346,6 +346,9 @@ func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, e
 // special permission for a department limit, and HR's permission to go below
 // zero. Both still report what they waived (Quote.Coverage, Quote.Shortfall).
 type quoteOpts struct {
+	// halvesAllowed preserves flags accepted for an HR draft and lets admins
+	// record or import half days regardless of the applicant setting.
+	halvesAllowed bool
 	mandatory     bool
 	override      bool
 	allowNegative bool
@@ -452,7 +455,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["type"] = maternityMessage(u, !opt.record)
 		return qt, errs
 	}
-	if fe := checkHalves(in, t, start, end, holidays, st.Week, opt.mandatory); len(fe) > 0 {
+	if fe := checkHalves(in, t, start, end, holidays, st, opt); len(fe) > 0 {
 		return qt, fe
 	}
 	if t.Unit == UnitWeekend {

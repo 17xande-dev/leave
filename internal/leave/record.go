@@ -87,7 +87,7 @@ func (s *Service) recordApproved(ctx context.Context, admin users.User, userID i
 	}
 	var out Request
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{record: true, importing: ro.importing})
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{record: true, importing: ro.importing, halvesAllowed: true})
 		if err != nil {
 			return err
 		}

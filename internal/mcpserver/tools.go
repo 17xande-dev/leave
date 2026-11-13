@@ -343,8 +343,8 @@ type RequestIn struct {
 	Start     string `json:"start" jsonschema:"first day, YYYY-MM-DD"`
 	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 // input is the request as the applicant u made it; u only shapes the hint when
@@ -456,8 +456,8 @@ type ApplyIn struct {
 	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
 	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
 	AskHR     bool   `json:"ask_hr,omitempty" jsonschema:"ask HR to allow the balance to go below zero"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 type RequestOut struct {
@@ -493,8 +493,8 @@ type EditIn struct {
 	End       string `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Note      string `json:"note,omitempty" jsonschema:"a short reason; some leave types require one"`
 	Override  bool   `json:"override,omitempty" jsonschema:"ask for special permission when over a department or team coverage limit"`
-	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged"`
-	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days"`
+	HalfStart bool   `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; only for leave counted in working days, on a day that is charged; only when an admin has turned half days on (admins recording leave can always use them)"`
+	HalfEnd   bool   `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request (use half_start) and only for leave counted in working days; only when an admin has turned half days on (admins recording leave can always use them)"`
 }
 
 // edit changes a pending request of the person's own, as the Edit form does.
