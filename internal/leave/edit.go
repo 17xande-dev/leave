@@ -55,6 +55,7 @@ func (s *Service) PreviewEdit(ctx context.Context, u users.User, id int64, in In
 		}
 		if editing {
 			opt.excludeID = id
+			opt.fixedDates = unchangedRanges(in, r)
 		}
 	}
 	qt, err = s.quote(ctx, s.db, u, in, opt)
@@ -108,7 +109,7 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		} else if !ok {
 			return ErrNotAllowed
 		}
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{override: in.Override, excludeID: id})
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{override: in.Override, excludeID: id, fixedDates: unchangedRanges(in, old)})
 		if err != nil {
 			editShortfall(qt, err)
 			return err
@@ -155,4 +156,21 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		return s.emit(ctx, tx, Event{Kind: EventEdited, Request: out, Before: &old, Actor: u})
 	})
 	return out, err
+}
+
+// unchangedRanges compares dates after the same normalisation used by quote.
+func unchangedRanges(in Input, old Request) bool {
+	ranges, err := in.ranges()
+	if err != nil {
+		return false
+	}
+	ranges, err = normaliseRanges(ranges)
+	if err != nil {
+		return false
+	}
+	stored := old.Ranges
+	if len(stored) == 0 {
+		stored = []Range{{old.Start, old.End}}
+	}
+	return rangesString(ranges) == rangesString(stored)
 }

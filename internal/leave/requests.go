@@ -364,6 +364,8 @@ func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, e
 // special permission for a department limit, and HR's permission to go below
 // zero. Both still report what they waived (Quote.Coverage, Quote.Shortfall).
 type quoteOpts struct {
+	// fixedDates exempts existing drafts and unchanged edits from the new span guard.
+	fixedDates bool
 	// halvesAllowed preserves flags accepted for an HR draft and lets admins
 	// record or import half days regardless of the applicant setting.
 	halvesAllowed bool
@@ -416,16 +418,20 @@ func (s *Service) ensureYears(ctx context.Context, in Input) error {
 }
 
 func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, opt quoteOpts) (Quote, error) {
-	ranges, err := in.ranges()
-	if err != nil {
-		return Quote{}, err
+	ranges := []Range{{in.Start, in.End}}
+	if len(in.Ranges) > 0 {
+		var err error
+		ranges, err = in.ranges()
+		if err != nil {
+			return Quote{}, err
+		}
+		ranges, err = normaliseRanges(ranges)
+		if err != nil {
+			return Quote{}, err
+		}
+		in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
+		in.Ranges = ranges
 	}
-	ranges, err = normaliseRanges(ranges)
-	if err != nil {
-		return Quote{}, err
-	}
-	in.Start, in.End = ranges[0].Start, ranges[len(ranges)-1].End
-	in.Ranges = ranges
 	errs := FieldErrors{}
 	var qt Quote
 
@@ -464,7 +470,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
-	case t.Unit == UnitWorkdays && !opt.record && !opt.importing && !opt.adjust && !opt.mandatory && end.Sub(start) >= maxWorkdaySpan*24*time.Hour:
+	case t.Unit == UnitWorkdays && !opt.record && !opt.importing && !opt.adjust && !opt.mandatory && !opt.fixedDates && end.Sub(start) >= maxWorkdaySpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A request can span at most %d days from its first day to its last day.", maxWorkdaySpan)
 	case opt.mandatory:
 	case opt.adjust:
@@ -528,16 +534,31 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 				re, _ := ParseDate(r.End)
 				days := CountDays(rs, re, t.Unit, holidays, st.Week)
 				counted += days
-				if msg := restrictedDayRule(st, t, rs, re, days, holidays); msg != "" && !opt.mandatory && !opt.record {
-					errs["start"] = fmt.Sprintf("%s Stretch: %s – %s.", msg, rs.Format("Mon 2 Jan"), re.Format("Mon 2 Jan"))
-					return qt, errs
-				}
 			}
 			qt.Days = WholeDays(counted) - halfDays(in)
 			qt.NotCharged, qt.NotChargedMore = notCharged(ranges, t.Unit, holidayNames, st.Week)
 			if counted == 0 {
 				errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
 				return qt, errs
+			}
+		}
+		if !opt.mandatory && !opt.record && !opt.adjust {
+			for _, r := range ranges {
+				rs, _ := ParseDate(r.Start)
+				re, _ := ParseDate(r.End)
+				days := CountDays(rs, re, t.Unit, holidays, st.Week)
+				if msg := restrictedDayRule(st, t, rs, re, days, holidays); msg != "" {
+					if len(ranges) > 1 {
+						for d := rs; !d.After(re); d = d.AddDate(0, 0, 1) {
+							if d.Weekday() == *st.RestrictedDay && st.Week.Working(d, holidays) {
+								msg += fmt.Sprintf(" (%s is in a stretch of %d)", d.Format("Mon 2 Jan"), days)
+								break
+							}
+						}
+					}
+					errs["start"] = msg
+					return qt, errs
+				}
 			}
 		}
 	}

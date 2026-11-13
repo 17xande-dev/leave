@@ -307,8 +307,8 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	}
 	for i, rr := range multiRanges {
 		ev, ok := cal.Events[rr.EventID]
-		want := fmt.Sprintf("Part %d of 2. Whole request: Mon 19 Oct and Wed 21 Oct 2026, 1.5 working days.", i+1)
-		if !ok || ev.Start != rr.Start || ev.End != rr.End || !strings.Contains(ev.Body, want) || strings.Contains(ev.Body, "half day") {
+		want := fmt.Sprintf("Annual leave, %s.\nApproved by Big Boss.\nPart %d of 2.", notify.Dates(rr.Start, rr.End), i+1)
+		if !ok || ev.Start != rr.Start || ev.End != rr.End || ev.Body != want {
 			t.Fatalf("multi-range event = %+v, want %q", ev, want)
 		}
 	}

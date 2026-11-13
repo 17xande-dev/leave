@@ -216,6 +216,9 @@ func (s *Service) coverage(ctx context.Context, q querier, week Week, u users.Us
 // groupCoverage is the check against one limit: nil unless over it.
 func (s *Service) groupCoverage(ctx context.Context, q querier, week Week, g group, u users.User, t Type,
 	ranges []Range, holidays map[time.Time]bool, excludeID int64) (*Coverage, error) {
+	if len(ranges) == 0 {
+		return nil, nil
+	}
 	var size int
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM (`+g.members+`)`, g.arg).Scan(&size); err != nil {
 		return nil, err
@@ -315,5 +318,9 @@ func (s *Service) coverageFor(ctx context.Context, q querier, r Request) ([]Cove
 	if err != nil {
 		return nil, err
 	}
-	return s.coverage(ctx, q, st.Week, u, t, r.Ranges, holidays, r.ID)
+	ranges := r.Ranges
+	if len(ranges) == 0 {
+		ranges = []Range{{r.Start, r.End}}
+	}
+	return s.coverage(ctx, q, st.Week, u, t, ranges, holidays, r.ID)
 }

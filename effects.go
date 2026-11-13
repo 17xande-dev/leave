@@ -86,11 +86,6 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 				approved = "Recorded by " + r.DecidedBy + "."
 			}
 		}
-		dates := notify.Dates(r.Start, r.End)
-		body := fmt.Sprintf("%s, %s.\n%s", r.TypeName, dates, approved)
-		if r.Department != "" {
-			body += "\nDepartment: " + r.Department
-		}
 		for i, rr := range ranges {
 			if rr.EventID != "" {
 				continue
@@ -99,10 +94,16 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 			if i > 0 {
 				key += "-" + rr.Start
 			}
-			eventBody := body
+			dates := notify.Dates(r.Start, r.End)
 			if len(ranges) > 1 {
-				eventBody += fmt.Sprintf("\nPart %d of %d. Whole request: %s, %s.",
-					i+1, len(ranges), notify.RangesText(r), r.Days.Label(r.TypeUnit))
+				dates = notify.Dates(rr.Start, rr.End)
+			}
+			eventBody := fmt.Sprintf("%s, %s.\n%s", r.TypeName, dates, approved)
+			if r.Department != "" {
+				eventBody += "\nDepartment: " + r.Department
+			}
+			if len(ranges) > 1 {
+				eventBody += fmt.Sprintf("\nPart %d of %d.", i+1, len(ranges))
 			}
 			id, err := cal.Create(ctx, calendar.Event{
 				Key: key, Subject: r.UserName + " — " + r.TypeName,
