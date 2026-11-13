@@ -29,7 +29,16 @@ func (h *Handler) AdminSetHalves(w http.ResponseWriter, r *http.Request) {
 		}
 		flags[key] = true
 	}
-	_, err := h.leave.SetHalves(r.Context(), currentUser(r), req.ID, flags["half_start"], flags["half_end"])
+	_, err := h.leave.SetHalves(r.Context(), currentUser(r), req.ID, flags["half_start"], flags["half_end"], r.PostForm.Get("seen"))
+	if errors.Is(err, leave.ErrChanged) {
+		// Show the latest stored facts and require the admin to check them again.
+		req, err = h.leave.Get(r.Context(), req.ID)
+		if err != nil {
+			h.serverError(w, r, err)
+			return
+		}
+		err = leave.FieldErrors{"halves": leave.MsgHalvesChanged}
+	}
 	var fe leave.FieldErrors
 	switch {
 	case errors.As(err, &fe):
@@ -39,7 +48,7 @@ func (h *Handler) AdminSetHalves(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		d.HalvesErrors = fe
-		d.Request.HalfStart, d.Request.HalfEnd = flags["half_start"], flags["half_end"]
+		d.HalvesStart, d.HalvesEnd = flags["half_start"], flags["half_end"]
 		h.render(w, r, http.StatusUnprocessableEntity, "request.html", view{Title: requestTitle(req), Data: d})
 	case errors.Is(err, leave.ErrNotAllowed):
 		notPossible(w, r, req.ID)

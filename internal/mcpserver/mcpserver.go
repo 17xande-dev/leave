@@ -98,6 +98,9 @@ func humanError(tool string, err error) error {
 		}
 		return userError(strings.Join(parts, " "))
 	case errors.Is(err, leave.ErrChanged):
+		if tool == "set_half_days" {
+			return userError(leave.MsgHalvesChanged)
+		}
 		return userError("This request was changed after you read it. Read it again (get_request) and check before deciding.")
 	case errors.Is(err, leave.ErrNotAllowed):
 		return userError("That is not possible. The request may already have been decided or withdrawn, " +

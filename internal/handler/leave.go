@@ -576,10 +576,11 @@ type requestData struct {
 	CanCancel           bool
 	CanDecide           bool
 	// CanUnrecord: an admin may remove this recorded leave.
-	CanUnrecord  bool
-	CanSetHalves bool
-	HalvesErrors leave.FieldErrors
-	CanSubmit    bool
+	CanUnrecord            bool
+	CanSetHalves           bool
+	HalvesErrors           leave.FieldErrors
+	HalvesStart, HalvesEnd bool
+	CanSubmit              bool
 	// Coverage is the department and team warnings for a pending request
 	// needing special permission, as they stand now. Next names who it goes to if the viewer
 	// approves it; empty when their approval is the last.
@@ -625,7 +626,8 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		CanDecide:    leave.CanDecide(u, req),
 		CanUnrecord:  u.Admin && req.IsRecorded() && req.Status == leave.StatusApproved && req.UserID != u.ID,
 		CanSetHalves: leave.CanSetHalves(u, req),
-		CanSubmit:    req.UserID == u.ID && req.Status == leave.StatusDraft,
+		HalvesStart:  req.HalfStart, HalvesEnd: req.HalfEnd,
+		CanSubmit: req.UserID == u.ID && req.Status == leave.StatusDraft,
 	}
 	if u.Admin && req.Status == leave.StatusPending {
 		all, err := h.users.Enabled(r.Context())

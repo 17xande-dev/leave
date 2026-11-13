@@ -9,6 +9,7 @@ import (
 
 const MsgHalvesOwn = "Another admin changes half days on your own leave."
 const MsgHalvesUnchanged = "The half days are unchanged."
+const MsgHalvesChanged = "This request changed since you opened it. Check it again."
 
 // CanSetHalves reports the role and request-state guards for the admin form.
 // SetHalves also checks for a pending cancellation inside its transaction.
@@ -25,7 +26,8 @@ func CanSetHalves(admin users.User, r Request) bool {
 
 // SetHalves corrects the charged first/last day without replacing the request
 // or changing its approval state. The audit and notification commit together.
-func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, halfStart, halfEnd bool) (Request, error) {
+// A nonempty seen fingerprint refuses a change to a request edited since it was read.
+func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, halfStart, halfEnd bool, seen ...string) (Request, error) {
 	if !admin.Admin || admin.Disabled {
 		return Request{}, ErrNotAllowed
 	}
@@ -39,9 +41,6 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 	if !CanSetHalves(admin, r) {
 		return Request{}, ErrNotAllowed
 	}
-	if r.HalfStart == halfStart && r.HalfEnd == halfEnd {
-		return Request{}, FieldErrors{"halves": MsgHalvesUnchanged}
-	}
 	u, err := s.users.ByID(ctx, r.UserID)
 	if err != nil {
 		return Request{}, err
@@ -50,6 +49,9 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 		return Request{}, err
 	}
 	var out Request
+	if s.beforeHalvesTx != nil {
+		s.beforeHalvesTx()
+	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		old, err := s.get(ctx, tx, id)
 		if err != nil {
@@ -61,6 +63,9 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 		if !CanSetHalves(admin, old) {
 			return ErrNotAllowed
 		}
+		if len(seen) > 0 && seen[0] != "" && seen[0] != old.Fingerprint() {
+			return ErrChanged
+		}
 		var pending bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM requests WHERE cancels_request_id = ? AND status = 'pending')`, id).Scan(&pending); err != nil {
 			return err
@@ -71,8 +76,10 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 		if old.HalfStart == halfStart && old.HalfEnd == halfEnd {
 			return FieldErrors{"halves": MsgHalvesUnchanged}
 		}
-		qt, err := s.quote(ctx, tx, u, Input{TypeID: old.TypeID, Start: old.Start, End: old.End, Note: old.Note,
-			HalfStart: halfStart, HalfEnd: halfEnd}, quoteOpts{adjust: true, halvesAllowed: true, excludeID: id, cycleStart: old.CycleStart})
+		in := Input{TypeID: old.TypeID, Start: old.Start, End: old.End, Note: old.Note,
+			HalfStart: halfStart, HalfEnd: halfEnd}
+		days := old.Days + halfDays(Input{HalfStart: old.HalfStart, HalfEnd: old.HalfEnd}) - halfDays(in)
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{adjust: true, adjustedDays: days, halvesAllowed: true, excludeID: id, cycleStart: old.CycleStart})
 		if err != nil {
 			return err
 		}

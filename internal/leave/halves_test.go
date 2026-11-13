@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestSetHalvesApprovedBalanceAuditAndClear(t *testing.T) {
@@ -35,6 +36,187 @@ func TestSetHalvesApprovedBalanceAuditAndClear(t *testing.T) {
 			cleared, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, false, false)
 			if err != nil || cleared.Days != r.Days || cleared.HalfStart || cleared.HalfEnd || f.availableDays("staff", "annual") != before {
 				t.Fatalf("clear: %+v, %v", cleared, err)
+			}
+		})
+	}
+}
+
+func TestSetHalvesPreservesStoredCharge(t *testing.T) {
+	for _, change := range []string{"holiday added", "holiday deleted", "working week changed"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t)
+			if change == "holiday deleted" {
+				if err := f.svc.AddHoliday(f.ctx, "2026-10-13", "Office closed"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+			if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "holiday added":
+				if err := f.svc.AddHoliday(f.ctx, "2026-10-13", "Office closed"); err != nil {
+					t.Fatal(err)
+				}
+			case "holiday deleted":
+				if err := f.svc.DeleteHoliday(f.ctx, "2026-10-13"); err != nil {
+					t.Fatal(err)
+				}
+			case "working week changed":
+				f.setSettings(func(st *Settings) { st.Week = WeekOf(time.Monday, time.Wednesday, time.Thursday, time.Friday) })
+			}
+			out, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false)
+			if err != nil || out.Days != r.Days-50 {
+				t.Fatalf("stored=%s, changed=%+v, err=%v", r.Days, out, err)
+			}
+			out, err = f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, false, false)
+			if err != nil || out.Days != r.Days {
+				t.Fatalf("clear: %+v, %v", out, err)
+			}
+		})
+	}
+}
+
+func TestSetHalvesIgnoresNewNoteRequirement(t *testing.T) {
+	f := newFixture(t)
+	r, err := f.svc.Submit(f.ctx, f.people["staff"], Input{TypeID: f.types["annual"].ID, Start: "2026-10-12", End: "2026-10-14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.exec(`UPDATE leave_types SET requires_note=1 WHERE id=?`, r.TypeID)
+	if _, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetHalvesIgnoresOverlappingShutdown(t *testing.T) {
+	for _, status := range []string{StatusDraft, StatusPending, StatusApproved} {
+		t.Run(status, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.mustSubmit("staff", "annual", "2026-12-14", "2026-12-16")
+			if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.svc.CreateShutdown(f.ctx, f.people["hr"], ShutdownInput{Name: "Closure", Parts: []PartInput{{TypeID: r.TypeID, Start: "2026-12-16", End: "2026-12-18"}}}); err != nil {
+				t.Fatal(err)
+			}
+			drafts := f.drafts("staff")
+			if len(drafts) != 1 {
+				t.Fatalf("drafts=%+v", drafts)
+			}
+			f.exec(`UPDATE requests SET status=? WHERE id=?`, status, drafts[0].ID)
+			if _, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSetHalvesIgnoresChangedRestrictedDay(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+	if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	mon := time.Monday
+	f.setSettings(func(st *Settings) { st.RestrictedDay = &mon; st.RestrictedMinDays = 4 })
+	if _, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetHalvesIgnoresChangedCoverage(t *testing.T) {
+	f := newFixture(t)
+	f.dept("Ops", "staff", "hr")
+	f.rule("Ops", 100)
+	f.mustSubmit("hr", "annual", "2026-10-12", "2026-10-14")
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+	if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	f.rule("Ops", 50)
+	if coverage, err := f.svc.CoverageFor(f.ctx, r); err != nil || len(coverage) == 0 {
+		t.Fatalf("setup: changed limit must block an ordinary request: %+v, %v", coverage, err)
+	}
+	if _, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetHalvesClearsAllowNegative(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+	if _, err := f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.AddAdjustment(f.ctx, f.people["hr"], Adjustment{UserID: r.UserID, TypeID: r.TypeID, CycleStart: r.CycleStart, Days: -1275, Reason: "Payroll"}); err != nil {
+		t.Fatal(err)
+	}
+	negative, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false)
+	if err != nil || !negative.AllowNegative || negative.Days != 250 {
+		t.Fatalf("negative: %+v, %v", negative, err)
+	}
+	positive, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, true)
+	if err != nil || positive.AllowNegative || positive.Days != 200 {
+		t.Fatalf("positive: %+v, %v", positive, err)
+	}
+}
+
+func TestSetHalvesTransactionStatusGuard(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+	f.svc.beforeHalvesTx = func() { f.exec(`UPDATE requests SET status='withdrawn' WHERE id=?`, r.ID) }
+	f.events = nil
+	_, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false)
+	out := mustGet(f, r.ID)
+	if !errors.Is(err, ErrNotAllowed) || out.HalfStart || out.Days != r.Days || out.HalvesSetByID != 0 || len(f.events) != 0 {
+		t.Fatalf("changed withdrawn request: %+v, %v", out, err)
+	}
+}
+
+func TestSetHalvesSeen(t *testing.T) {
+	f := newFixture(t)
+	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+	out, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false, r.Fingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.events = nil
+	// Even an attempt matching the current flags must report the stale view.
+	for _, halfEnd := range []bool{false, true} {
+		_, err = f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, halfEnd, r.Fingerprint())
+		if !errors.Is(err, ErrChanged) || !reflect.DeepEqual(out, mustGet(f, r.ID)) || len(f.events) != 0 {
+			t.Fatalf("stale: %v", err)
+		}
+	}
+	f.svc.beforeHalvesTx = func() { f.exec(`UPDATE requests SET note='edited' WHERE id=?`, r.ID) }
+	_, err = f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, false, false, out.Fingerprint())
+	if !errors.Is(err, ErrChanged) {
+		t.Fatalf("transaction seen: %v", err)
+	}
+}
+
+func TestSetHalvesStillValidatesEndpointsAndPositiveCharge(t *testing.T) {
+	for _, change := range []string{"holiday endpoint", "week endpoint", "zero charge"} {
+		t.Run(change, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
+			switch change {
+			case "holiday endpoint":
+				if err := f.svc.AddHoliday(f.ctx, r.Start, "Closed"); err != nil {
+					t.Fatal(err)
+				}
+			case "week endpoint":
+				f.setSettings(func(st *Settings) { st.Week = WeekOf(time.Tuesday, time.Wednesday, time.Thursday, time.Friday) })
+			case "zero charge":
+				f.exec(`UPDATE requests SET days_x100=50 WHERE id=?`, r.ID)
+			}
+			before := mustGet(f, r.ID)
+			f.events = nil
+			_, err := f.svc.SetHalves(f.ctx, f.people["hr"], r.ID, true, false)
+			if err == nil || !reflect.DeepEqual(before, mustGet(f, r.ID)) || len(f.events) != 0 {
+				t.Fatalf("invalid: %v", err)
 			}
 		})
 	}

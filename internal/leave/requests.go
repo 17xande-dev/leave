@@ -369,6 +369,8 @@ type quoteOpts struct {
 	// adjust corrects half days on existing leave, with record's policy
 	// relaxations but without requiring the leave to have ended.
 	adjust bool
+	// adjustedDays is the stored charge plus only the half-day flag delta.
+	adjustedDays Days
 	// cycleStart preserves the cycle already charged by a half-day correction,
 	// even if the sick-cycle anchor has changed since the request was saved.
 	cycleStart string
@@ -448,7 +450,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 	if opt.record && strings.TrimSpace(in.Note) == "" {
 		errs["note"] = "Say why this is being recorded, for whoever reads it later."
-	} else if t.RequiresNote && strings.TrimSpace(in.Note) == "" {
+	} else if !opt.adjust && t.RequiresNote && strings.TrimSpace(in.Note) == "" {
 		errs["note"] = "Please add a short note for " + strings.ToLower(t.Name) + "."
 	}
 	if len(errs) > 0 {
@@ -476,31 +478,42 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		}
 		qt.Days = WholeDays(1)
 	} else {
-		counted := CountDays(start, end, t.Unit, holidays, st.Week)
-		qt.Days = WholeDays(counted) - halfDays(in)
-		qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
-		if counted == 0 {
-			errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
-			return qt, errs
+		var counted int
+		if opt.adjust {
+			// Calendar changes must not reprice leave already booked.
+			qt.Days = opt.adjustedDays
+		} else {
+			counted = CountDays(start, end, t.Unit, holidays, st.Week)
+			qt.Days = WholeDays(counted) - halfDays(in)
+			qt.NotCharged, qt.NotChargedMore = notCharged(start, end, t.Unit, holidayNames, st.Week)
+			if counted == 0 {
+				errs["end"] = "Those dates are all days off or public holidays, so there is nothing to take."
+				return qt, errs
+			}
 		}
 		if msg := restrictedDayRule(st, t, start, end, counted, holidays); msg != "" && !opt.mandatory && !opt.record && !opt.adjust {
 			errs["start"] = msg
 			return qt, errs
 		}
 	}
+	if opt.adjust && qt.Days <= 0 {
+		return qt, FieldErrors{"halves": "The request must charge more than zero days."}
+	}
 
 	// Drafts count here although they reserve no balance: booking annual leave
 	// over days a shutdown already covers would charge the same days twice.
-	var overlap int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND kind = 'leave'
+	if !opt.adjust {
+		var overlap int
+		if err := q.QueryRowContext(ctx, `SELECT count(*) FROM requests WHERE user_id = ? AND kind = 'leave'
 		AND status IN ('draft', 'awaiting_hr', 'pending', 'approved') AND start_date <= ? AND end_date >= ? AND id <> ?`,
-		u.ID, fmtDate(end), fmtDate(start), opt.excludeID).Scan(&overlap); err != nil {
-		return Quote{}, err
-	}
-	if overlap > 0 {
-		errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
-		if opt.record {
-			errs["start"] = "They already have leave booked, waiting for approval or waiting to be submitted on some of these days."
+			u.ID, fmtDate(end), fmtDate(start), opt.excludeID).Scan(&overlap); err != nil {
+			return Quote{}, err
+		}
+		if overlap > 0 {
+			errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
+			if opt.record {
+				errs["start"] = "They already have leave booked, waiting for approval or waiting to be submitted on some of these days."
+			}
 		}
 	}
 

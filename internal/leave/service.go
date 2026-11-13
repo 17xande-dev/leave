@@ -32,6 +32,8 @@ type Service struct {
 	beforeEditTx func()
 	// beforeDecideTx is the same for Decide, between its read and its transaction.
 	beforeDecideTx func()
+	// beforeHalvesTx lets tests change a request after the initial read.
+	beforeHalvesTx func()
 	// Now is replaceable so tests can pin "today".
 	Now func() time.Time
 }

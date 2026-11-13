@@ -75,16 +75,17 @@ func personInfo(u users.User) PersonInfo {
 // --- Recorded leave ---------------------------------------------------------
 
 type SetHalfDaysIn struct {
-	ID        int64 `json:"id" jsonschema:"the leave request id"`
-	HalfStart bool  `json:"half_start" jsonschema:"whether the first or only day is a half day"`
-	HalfEnd   bool  `json:"half_end" jsonschema:"whether the last day is a half day; false for a one-day request"`
+	Seen      string `json:"seen,omitempty" jsonschema:"request fingerprint from get_request; refuses changes if the request changed since it was read"`
+	ID        int64  `json:"id" jsonschema:"the leave request id"`
+	HalfStart bool   `json:"half_start" jsonschema:"whether the first or only day is a half day"`
+	HalfEnd   bool   `json:"half_end" jsonschema:"whether the last day is a half day; false for a one-day request"`
 }
 
 func (d *deps) setHalfDays(ctx context.Context, u users.User, in SetHalfDaysIn) (RequestOut, string, error) {
 	if err := requireAdmin(u); err != nil {
 		return RequestOut{}, "", err
 	}
-	req, err := d.leave.SetHalves(ctx, u, in.ID, in.HalfStart, in.HalfEnd)
+	req, err := d.leave.SetHalves(ctx, u, in.ID, in.HalfStart, in.HalfEnd, in.Seen)
 	if err != nil {
 		return RequestOut{}, "", err
 	}

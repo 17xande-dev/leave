@@ -439,7 +439,7 @@ kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehear
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM requests WHERE status IN ('"'"'pending'"'"','"'"'draft'"'"','"'"'awaiting_hr'"'"') AND (half_start=1 OR half_end=1); PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ssh work-docker02 "docker pull ghcr.io/17xande-dev/leave:$VERSION"
 ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
-kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
 Expect `migrating /data/leave-rehearsal.db: 2 -> 3` before the applied status lines;
@@ -454,13 +454,30 @@ the rehearsal copy. Pass **only `-migrate`** to the image's `leave` entrypoint.
 The `--reuse` commands above inspect the copy through the running container;
 they do not run the new binary.
 
-Require `0001`, `0002` and `0003` applied, unchanged counts, `half_days_enabled=0`, integrity
+Require `0001`, `0002` and `0003` applied, unchanged counts, `half_days_enabled=0`,
+`SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL` returning `0`, integrity
 `ok`, and no foreign-key rows. If any pending/draft/awaiting-HR request has half flags,
 tell the user before deploying. Stop on any discrepancy. Only after the rehearsal is
 accepted, deploy normally, then check `leave -migrate-status`, `/healthz`, the same
 counts and integrity checks on the live database, and the setting/form behavior.
 Remove the in-volume backup and rehearsal copies after verification; retain the
 off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
+
+**Recovery if deployment fails after migration 0003.** Stop writes and back up the
+migrated database first. To return to an image supporting 0002, remove 0003's audit
+columns and version record in one transaction using an existing container with
+access to the volume:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0003.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db "BEGIN IMMEDIATE; ALTER TABLE requests DROP COLUMN halves_set_by_id; ALTER TABLE requests DROP COLUMN halves_set_at; DELETE FROM goose_db_version WHERE version_id=3; COMMIT;"'
+```
+
+This discards the half-day correction audit, retaining the flags and charges.
+Check integrity and foreign keys as above, then roll back to the 0002 image.
+Do not restart the 0003 image during recovery: it would reapply the migration.
+For an image older than 0002, undo 0003 first, then follow the 0002 recovery below.
+Alternatively, restore the pre-deploy backup; that loses changes since the backup.
 
 **Recovery if deployment fails after migration 0002.** The previous binary refuses
 to start with `database migration version 2 is newer than this binary`. Stop writes
