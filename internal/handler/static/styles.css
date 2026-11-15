@@ -1097,6 +1097,11 @@ table.queue .dates {
     white-space: normal;
   }
 
+  /* One stretch per line already; nowrap here widened the team table past the card. */
+  .range-lines > span {
+    white-space: normal;
+  }
+
   table.queue {
     thead {
       display: none;
