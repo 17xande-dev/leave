@@ -50,6 +50,20 @@
     <date-range-input label="Dates" start-name="start" end-name="end" required multiple max-ranges="3"
         months="2" first-day-of-week="1" with-clear locale="en-GB" {{- if .MinDate}} min="{{.MinDate}}"{{end}} marks="#apply-marks"
         {{with rangevalue .Input}}value="{{.}}"{{end}}>
+      {{if gt (len .Input.Ranges) 1}}
+      {{range $i, $r := .Input.Ranges}}
+      <div class="field-row">
+        <div class="field">
+          <label for="start-{{$i}}">First day of stretch {{add $i 1}}</label>
+          <input type="date" id="start-{{$i}}" name="start" value="{{$r.Start}}"{{if $.Data.MinDate}} min="{{$.Data.MinDate}}"{{end}} required>
+        </div>
+        <div class="field">
+          <label for="end-{{$i}}">Last day of stretch {{add $i 1}}</label>
+          <input type="date" id="end-{{$i}}" name="end" value="{{$r.End}}"{{if $.Data.MinDate}} min="{{$.Data.MinDate}}"{{end}} required>
+        </div>
+      </div>
+      {{end}}
+      {{else}}
       <div class="field-row">
         <div class="field">
           <label for="start">First day</label>
@@ -60,6 +74,7 @@
           <input type="date" id="end" name="end" value="{{lastdate .Input}}"{{if .MinDate}} min="{{.MinDate}}"{{end}} required>
         </div>
       </div>
+      {{end}}
     </date-range-input>
     {{/* Data, not script: the CSP never sees it as code. The picker reads it and
          marks days; nothing here disables a day. */}}

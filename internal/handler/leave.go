@@ -342,14 +342,20 @@ func (h *Handler) ApplyForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func inputFrom(r *http.Request) (leave.Input, error) {
-	_ = r.ParseForm()
-	get := r.Form.Get
+	if err := r.ParseForm(); err != nil {
+		return leave.Input{}, err
+	}
+	form := r.PostForm
+	if r.Method == http.MethodGet {
+		form = r.Form
+	}
+	get := form.Get
 	id, _ := strconv.ParseInt(get("type"), 10, 64)
 	in := leave.Input{TypeID: id, Start: strings.TrimSpace(get("start")),
 		End: strings.TrimSpace(get("end")), Note: get("note"),
 		HalfStart: get("half_start") == "1", HalfEnd: get("half_end") == "1",
 		Override: get("override") == "1", Negative: get("negative") == "1"}
-	starts, ends := r.Form["start"], r.Form["end"]
+	starts, ends := form["start"], form["end"]
 	// Preserve the single-pair fallback: an omitted end is a field error on
 	// submit, and the preview treats a start alone as a one-day request.
 	if len(starts) != len(ends) && (len(starts) > 1 || len(ends) > 1) {
@@ -362,6 +368,21 @@ func inputFrom(r *http.Request) (leave.Input, error) {
 		}
 	}
 	return in, nil
+}
+
+// Reject unreadable forms before validation can accept a partial parse.
+func unreadableInput(w http.ResponseWriter, err error) bool {
+	var fe leave.FieldErrors
+	if err == nil || errors.As(err, &fe) {
+		return false
+	}
+	status := http.StatusBadRequest
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
+	http.Error(w, "Those leave dates could not be read.", status)
+	return true
 }
 
 func inputRanges(in leave.Input) []leave.Range {
@@ -404,6 +425,7 @@ const awayShown = 5
 type awayView struct {
 	Name   string
 	Ranges []awayRange
+	Types  []string
 	// Pending is "all" or "some" of the ranges awaiting approval, else "".
 	Pending string
 }
@@ -431,6 +453,9 @@ func groupAway(away []leave.Away, withType bool, exclude int64) []awayView {
 		rg := awayRange{Start: a.Start, End: a.End}
 		if withType {
 			rg.Type = a.LeaveType
+			if a.LeaveType != "" && !slices.Contains(all[i].Types, a.LeaveType) {
+				all[i].Types = append(all[i].Types, a.LeaveType)
+			}
 		}
 		all[i].Ranges = append(all[i].Ranges, rg)
 		if a.Status == "pending" {
@@ -505,6 +530,9 @@ func newQuoteData(qt *leave.Quote, fe leave.FieldErrors, editing bool) quoteData
 func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	in, parseErr := inputFrom(r)
+	if unreadableInput(w, parseErr) {
+		return
+	}
 	if parseErr != nil {
 		h.renderPartial(w, r, "quote", quoteData{Errors: parseErr.(leave.FieldErrors)})
 		return
@@ -538,6 +566,9 @@ func (h *Handler) Quote(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request) {
 	in, err := inputFrom(r)
+	if unreadableInput(w, err) {
+		return
+	}
 	var req leave.Request
 	if err == nil {
 		req, err = h.leave.Submit(r.Context(), currentUser(r), in)
@@ -588,6 +619,9 @@ func (h *Handler) Edit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, err := inputFrom(r)
+	if unreadableInput(w, err) {
+		return
+	}
 	if err == nil {
 		_, err = h.leave.Edit(r.Context(), currentUser(r), req.ID, in)
 	}

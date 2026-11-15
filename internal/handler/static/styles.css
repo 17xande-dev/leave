@@ -1079,6 +1079,11 @@ table.queue .dates {
   white-space: nowrap;
 }
 
+.range-lines > span {
+  display: block;
+  white-space: nowrap;
+}
+
 @media (min-width: 40rem) {
   details.decline > form {
     min-width: 14rem;
@@ -1088,6 +1093,10 @@ table.queue .dates {
 /* On a phone each request is a block, so Approve and Details are on screen
    instead of in a table scrolled sideways. */
 @media (max-width: 40rem) {
+  table.queue td.dates {
+    white-space: normal;
+  }
+
   table.queue {
     thead {
       display: none;

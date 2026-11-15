@@ -520,6 +520,9 @@ func (h *Handler) AdminRecordLeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, err := inputFrom(r)
+	if unreadableInput(w, err) {
+		return
+	}
 	var rec leave.Request
 	if err == nil {
 		rec, err = h.leave.RecordLeave(r.Context(), currentUser(r), id, in)

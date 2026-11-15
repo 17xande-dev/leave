@@ -2,6 +2,8 @@
 package middleware
 
 import (
+	"errors"
+	"mime"
 	"net/http"
 	"strings"
 )
@@ -58,6 +60,21 @@ const MaxFormBytes = 256 << 10
 func MaxBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
+		// nosurf reads PostFormValue before the handler. ParseForm is
+		// idempotent, so its first error would otherwise be lost, allowing
+		// a malformed body to act on the fields that were parsed successfully.
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if mediaType == "application/x-www-form-urlencoded" {
+			if err := r.ParseForm(); err != nil {
+				status := http.StatusBadRequest
+				var tooLarge *http.MaxBytesError
+				if errors.As(err, &tooLarge) {
+					status = http.StatusRequestEntityTooLarge
+				}
+				http.Error(w, "That form could not be read.", status)
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -129,6 +129,20 @@
     <date-range-input label="Dates" start-name="start" end-name="end" required multiple max-ranges="3"
         months="2" first-day-of-week="1" with-clear locale="en-GB" marks="#record-marks"
         {{with rangevalue .Rec}}value="{{.}}"{{end}}>
+      {{if gt (len .Rec.Ranges) 1}}
+      {{range $i, $r := .Rec.Ranges}}
+      <div class="field-row">
+        <div class="field">
+          <label for="rec-start-{{$i}}">First day of stretch {{add $i 1}}</label>
+          <input type="date" id="rec-start-{{$i}}" name="start" value="{{$r.Start}}" required>
+        </div>
+        <div class="field">
+          <label for="rec-end-{{$i}}">Last day of stretch {{add $i 1}}</label>
+          <input type="date" id="rec-end-{{$i}}" name="end" value="{{$r.End}}" required>
+        </div>
+      </div>
+      {{end}}
+      {{else}}
       <div class="field-row">
         <div class="field">
           <label for="rec-start">First day</label>
@@ -139,6 +153,7 @@
           <input type="date" id="rec-end" name="end" value="{{lastdate .Rec}}" required>
         </div>
       </div>
+      {{end}}
     </date-range-input>
     {{/* Data, not script: the CSP never sees it as code. The picker reads it and
          marks days; nothing here disables a day. */}}

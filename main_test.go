@@ -114,10 +114,10 @@ func TestBodyCapReachesCSRFLayer(t *testing.T) {
 	f.Set("password", "anything")
 	f.Set("pad", strings.Repeat("x", 2*middleware.MaxFormBytes))
 	res, _ := b.post("/login", f)
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("over-cap login with a valid token: %d, want 403", res.StatusCode)
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-cap login with a valid token: %d, want 413", res.StatusCode)
 	}
-	// The same post without the padding signs in, so the 403 is the cap.
+	// The same post without the padding signs in, so the 413 is the cap.
 	f.Del("pad")
 	if res, _ := b.post("/login", f); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("normal login: %d, want 303", res.StatusCode)

@@ -174,6 +174,21 @@ func TestGroupAwayBlanksTheTypeUnlessAsked(t *testing.T) {
 	}
 }
 
+func TestQueueAwayListsTypeOnceForMultipleRanges(t *testing.T) {
+	hs := newHarness(t)
+	staff, hr, head := hs.signIn("staff1"), hs.signIn("hr"), hs.signIn("headops")
+	for _, c := range []*http.Client{staff, hr} {
+		res, body := hs.post(c, "/leave", multiForm(hs))
+		if res.StatusCode != http.StatusSeeOther {
+			t.Fatalf("apply: %d %s", res.StatusCode, body)
+		}
+	}
+	_, body := hs.get(head, "/approvals")
+	if !strings.Contains(body, "Also away: Sam Staff, Annual leave (12–13 Oct, 15–16 Oct) (not yet approved)</small>") || strings.Contains(body, ";,") {
+		t.Fatalf("away ranges repeat the type or have broken punctuation: %s", body)
+	}
+}
+
 // Two pending requests of one type are both counted in what is left, so the
 // row cannot say "afterwards" for either.
 func TestQueueSharedBalanceWording(t *testing.T) {

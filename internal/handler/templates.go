@@ -291,13 +291,13 @@ func stretchText(ranges []leave.Range) string {
 		}
 		text := e.Format("Mon 2 Jan")
 		if s.Year() != e.Year() {
-			text = s.Format("Mon 2 Jan 2006") + " - " + e.Format("Mon 2 Jan 2006")
+			text = s.Format("Mon 2 Jan 2006") + " – " + e.Format("Mon 2 Jan 2006")
 		} else if !s.Equal(e) {
 			format := "Mon 2 Jan"
 			if s.Month() == e.Month() {
 				format = "Mon 2"
 			}
-			text = s.Format(format) + " - " + text
+			text = s.Format(format) + " – " + text
 		}
 		parts = append(parts, text)
 	}

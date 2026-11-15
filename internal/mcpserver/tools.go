@@ -410,6 +410,7 @@ type PreviewOut struct {
 	Type             string      `json:"type,omitempty"`
 	Start            string      `json:"start,omitempty"`
 	End              string      `json:"end,omitempty"`
+	Ranges           []DateRange `json:"ranges" jsonschema:"the actual inclusive stretches; start and end are the span bounds"`
 	Days             leave.Days  `json:"days,omitempty"`
 	Unit             string      `json:"unit,omitempty"`
 	AvailableBefore  *leave.Days `json:"available_before,omitempty"`
@@ -459,7 +460,7 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 	if err != nil && !asFieldErrors(err, &fe) {
 		return PreviewOut{}, "", err
 	}
-	out := PreviewOut{OK: err == nil, Problems: []Problem{}}
+	out := PreviewOut{OK: err == nil, Problems: []Problem{}, Ranges: dateRanges(qt.Ranges)}
 	for _, k := range sortedKeys(fe) {
 		out.Problems = append(out.Problems, Problem{Field: k, Message: fe[k]})
 	}

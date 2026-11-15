@@ -32,6 +32,41 @@ import (
 
 const callback = "http://127.0.0.1:45678/callback"
 
+func TestMalformedLeaveFormRejectedBeforeCSRFParse(t *testing.T) {
+	e := newE2E(t)
+	b := e.browser()
+	b.signIn("staff1", "")
+	_, page := b.get("/leave/new")
+	f := fields(page)
+	var typeID int64
+	if err := e.db.QueryRowContext(t.Context(), `SELECT id FROM leave_types WHERE code = 'annual'`).Scan(&typeID); err != nil {
+		t.Fatal(err)
+	}
+	f.Set("type", fmt.Sprint(typeID))
+	f["start"] = []string{"2026-10-12", "2026-10-15"}
+	f["end"] = []string{"2026-10-13", "2026-10-16"}
+	for _, tc := range []struct {
+		suffix string
+		status int
+	}{{"&bad=%ZZ", http.StatusBadRequest}, {"&padding=" + strings.Repeat("x", 256<<10), http.StatusRequestEntityTooLarge}} {
+		req, _ := http.NewRequest(http.MethodPost, b.base+"/leave", strings.NewReader(f.Encode()+tc.suffix))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", b.base)
+		res, err := b.c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != tc.status {
+			t.Fatalf("unreadable form: %d, want %d", res.StatusCode, tc.status)
+		}
+	}
+	var requests int
+	if err := e.db.QueryRowContext(t.Context(), `SELECT count(*) FROM requests`).Scan(&requests); err != nil || requests != 0 {
+		t.Fatalf("unreadable form saved requests: %d (%v)", requests, err)
+	}
+}
+
 // e2e is the whole app: the real mux and middleware stack (CSRF, security
 // headers) over a real database and the fake directory, served by httptest.
 type e2e struct {

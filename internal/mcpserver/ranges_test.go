@@ -17,6 +17,11 @@ func TestRangesThroughMCP(t *testing.T) {
 	if p.Data["ok"] != true || p.Data["days"] != float64(4) || p.Data["start"] != "2026-10-12" || p.Data["end"] != "2026-10-16" {
 		t.Fatalf("preview ranges = %v", p.Data)
 	}
+	b, _ := json.Marshal(p.Data["ranges"])
+	var previewRanges []DateRange
+	if err := json.Unmarshal(b, &previewRanges); err != nil || !slices.Equal(previewRanges, ranges) {
+		t.Fatalf("preview ranges = %s, want %v (%v)", b, ranges, err)
+	}
 	r := f.ok(staff, "apply_for_leave", args)
 	assertRanges := func(r result, want []DateRange) {
 		t.Helper()
