@@ -47,7 +47,7 @@ type Config struct {
 }
 
 const instructions = `This is the staff leave system. Everything you do here is done as the signed-in person, with exactly their permissions.
-Use my_balances to see leave types and what is left, and preview_request before apply_for_leave to see the day count and any rule that would stop the request.
+Use my_balances to see visible balances and other_types you can also apply for, and preview_request before apply_for_leave to see the day count and any rule that would stop the request.
 Never apply for, withdraw, approve or decline leave, and never record or remove recorded leave, adjust a balance, grant or refuse a negative balance, or reassign a request, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
 
 const requestDateContract = "Use start/end for one stretch or ranges: [{start, end}] instead, never both. Several stretches are for workdays types only, max 3. Applicants' working-day leave must fit within 31 days from first to last day, including single stretches. half_start / half_end apply to the first day of the first range and last day of the last range of the whole request (0.5); only on charged working days, when applicant half days are enabled. A one-day request uses half_start only."
@@ -252,7 +252,7 @@ func destructive(title string) *mcp.ToolAnnotations {
 func (d *deps) register(s *mcp.Server) {
 	// Read
 	add(d, s, &mcp.Tool{Name: "my_balances", Annotations: readOnly("My leave balances"),
-		Description: "Your leave balances for the current cycle, one row per leave type, with the type's code and unit."}, d.myBalances)
+		Description: "Your visible leave balances for the current cycle, with each type's code and unit, plus other_types you can also apply for whose balances are kept by HR."}, d.myBalances)
 	add(d, s, &mcp.Tool{Name: "my_requests", Annotations: readOnly("My leave requests"),
 		Description: "Your own leave requests and cancellations, newest first. Optionally only one status."}, d.myRequests)
 	add(d, s, &mcp.Tool{Name: "get_request", Annotations: readOnly("Look at a request"),

@@ -73,7 +73,9 @@
   <div class="checks">
     <label><input type="checkbox" name="requires_note" value="1"{{if .Type.RequiresNote}} checked{{end}}> Requires a note</label>
     <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Offered on the apply form</label>
+    <label><input type="checkbox" name="show_balance" value="1"{{if .Type.ShowBalance}} checked{{end}}> Show the balance to staff</label>
   </div>
+  <p class="hint">Off: the type can still be applied for, but its days left are only shown to admins.</p>
   <div class="actions"><button type="submit">Save</button><a href="/admin/types">Cancel</a></div>
 </form>
 {{end}}

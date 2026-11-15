@@ -44,14 +44,17 @@ type Type struct {
 	BackdateDays int
 	RequiresNote bool
 	Active       bool
-	Sort         int
+	// ShowBalance is whether the person sees this type's balance; admins always do.
+	ShowBalance bool
+	Sort        int
 	// Restricted is the rule for the restricted day; see the Restrict* constants.
 	Restricted string
 	// CoverageRule is the rule for department coverage limits: CoverageLimit
 	// or CoverageCount.
 	CoverageRule string
 
-	inactive bool // seed only: the default's Active is the inverse
+	inactive    bool // seed only: the default's Active is the inverse
+	hideBalance bool // seed only: the default's ShowBalance is the inverse
 }
 
 // wholeDays is a pointer to n whole days, for a seeded allowance.
@@ -75,13 +78,13 @@ var bceaDefaults = []Type{
 	{Code: "sick", Name: "Sick leave", Allowance: wholeDays(30), CycleMonths: 36, Unit: UnitWorkdays, CoverageRule: CoverageCount, Restricted: RestrictAny},
 	{Code: "family", Name: "Family responsibility leave", Allowance: wholeDays(3), CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
 	// Four consecutive months, stored as 120 calendar days.
-	{Code: "maternity", Name: "Maternity leave", Allowance: wholeDays(120), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny},
-	{Code: "parental", Name: "Parental leave", Allowance: wholeDays(10), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny},
+	{Code: "maternity", Name: "Maternity leave", Allowance: wholeDays(120), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny, hideBalance: true},
+	{Code: "parental", Name: "Parental leave", Allowance: wholeDays(10), CycleMonths: 12, Unit: UnitCalendar, CoverageRule: CoverageCount, Restricted: RestrictAny, hideBalance: true},
 	// Not BCEA: a death in the family, granted at the employer's discretion.
 	// Unlimited, so there is no balance to exhaust and recorded leave is never
 	// refused by a limit; an admin may set an allowance later.
-	{Code: "compassionate", Name: "Compassionate leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageCount, Restricted: RestrictAny},
-	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageLimit, Restricted: RestrictMin},
+	{Code: "compassionate", Name: "Compassionate leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageCount, Restricted: RestrictAny, hideBalance: true},
+	{Code: "unpaid", Name: "Unpaid leave", CycleMonths: 12, Unit: UnitWorkdays, RequiresNote: true, CoverageRule: CoverageLimit, Restricted: RestrictMin, hideBalance: true},
 	// Not BCEA: days off the employer grants that do not touch annual leave.
 	// Seeded inactive with no days, because how many is a policy decision;
 	// an admin sets the allowance and switches it on. Never on the
@@ -98,12 +101,12 @@ var bceaDefaults = []Type{
 // ErrNotFound is returned for a missing type or request.
 var ErrNotFound = errors.New("leave: not found")
 
-const typeCols = `id, code, name, allowance_x100, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule`
+const typeCols = `id, code, name, allowance_x100, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule, show_balance`
 
 func scanType(row interface{ Scan(...any) error }) (Type, error) {
 	var t Type
 	var allowance sql.NullInt64
-	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.BackdateDays, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted, &t.CoverageRule)
+	err := row.Scan(&t.ID, &t.Code, &t.Name, &allowance, &t.CycleMonths, &t.Unit, &t.BackdateDays, &t.RequiresNote, &t.Active, &t.Sort, &t.Restricted, &t.CoverageRule, &t.ShowBalance)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Type{}, ErrNotFound
 	}
@@ -121,6 +124,7 @@ func scanType(row interface{ Scan(...any) error }) (Type, error) {
 func (s *Service) SeedTypes(ctx context.Context) error {
 	for i, t := range bceaDefaults {
 		t.Active, t.Sort, t.BackdateDays = !t.inactive, i, DefaultBackdateDays
+		t.ShowBalance = !t.hideBalance
 		_, err := s.SaveType(ctx, t)
 		var fe FieldErrors
 		if errors.As(err, &fe) && fe["code"] != "" {
@@ -217,9 +221,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	}
 	if t.ID == 0 {
 		res, err := s.db.ExecContext(ctx, `INSERT INTO leave_types
-			(code, name, allowance_x100, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
-			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.CoverageRule)
+			(code, name, allowance_x100, cycle_months, unit, backdate_days, requires_note, active, sort, restricted_rule, coverage_rule, show_balance)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`,
+			t.Code, t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted, t.CoverageRule, t.ShowBalance)
 		if err != nil {
 			return 0, err
 		}
@@ -230,9 +234,9 @@ func (s *Service) SaveType(ctx context.Context, t Type) (int64, error) {
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE leave_types SET name = ?, allowance_x100 = ?,
 		cycle_months = ?, unit = ?, backdate_days = ?, requires_note = ?, active = ?, sort = ?, restricted_rule = ?,
-		coverage_rule = ? WHERE id = ?`,
+		coverage_rule = ?, show_balance = ? WHERE id = ?`,
 		t.Name, allowance, t.CycleMonths, t.Unit, t.BackdateDays, t.RequiresNote, t.Active, t.Sort, t.Restricted,
-		t.CoverageRule, t.ID)
+		t.CoverageRule, t.ShowBalance, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return 0, FieldErrors{"code": "Another leave type already uses that code."}

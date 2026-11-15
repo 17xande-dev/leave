@@ -156,7 +156,14 @@ func balanceInfo(b leave.Balance) BalanceInfo {
 }
 
 type BalancesOut struct {
-	Balances []BalanceInfo `json:"balances"`
+	Balances   []BalanceInfo   `json:"balances"`
+	OtherTypes []OtherTypeInfo `json:"other_types" jsonschema:"leave types you can also apply for; their balances are kept by HR"`
+}
+
+type OtherTypeInfo struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+	Unit string `json:"unit"`
 }
 
 type none struct{}
@@ -166,11 +173,15 @@ func (d *deps) myBalances(ctx context.Context, u users.User, _ none) (BalancesOu
 	if err != nil {
 		return BalancesOut{}, "", err
 	}
-	out := BalancesOut{Balances: make([]BalanceInfo, 0, len(bs))}
+	out := BalancesOut{Balances: make([]BalanceInfo, 0, len(bs)), OtherTypes: []OtherTypeInfo{}}
 	for _, b := range bs {
-		out.Balances = append(out.Balances, balanceInfo(b))
+		if b.Type.ShowBalance {
+			out.Balances = append(out.Balances, balanceInfo(b))
+		} else {
+			out.OtherTypes = append(out.OtherTypes, OtherTypeInfo{Code: b.Type.Code, Name: b.Type.Name, Unit: b.Type.Unit})
+		}
 	}
-	return out, fmt.Sprintf("%d leave types.", len(out.Balances)), nil
+	return out, fmt.Sprintf("%d leave types with balances; %d other leave types you can apply for.", len(out.Balances), len(out.OtherTypes)), nil
 }
 
 type MyRequestsIn struct {
@@ -374,7 +385,7 @@ func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool, 
 }
 
 type RequestIn struct {
-	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances (balances or other_types)"`
 	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
 	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`
@@ -414,7 +425,7 @@ type PreviewOut struct {
 	Days             leave.Days  `json:"days,omitempty"`
 	Unit             string      `json:"unit,omitempty"`
 	AvailableBefore  *leave.Days `json:"available_before,omitempty"`
-	AvailableAfter   *leave.Days `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types"`
+	AvailableAfter   *leave.Days `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types or types whose balance is kept by HR"`
 	ShortfallDays    leave.Days  `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
 	NotCharged       []string    `json:"not_charged,omitempty" jsonschema:"days in the range that cost nothing (public holidays by name, non-working weekdays), as the apply form shows them"`
 	CoverageWarnings []string    `json:"coverage_warnings,omitempty" jsonschema:"one for each department or team limit the request is over"`
@@ -468,7 +479,10 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 	if qt.Days > 0 {
 		out.Type, out.Unit, out.Days = qt.Type.Name, qt.Type.Unit, qt.Days
 		out.Start, out.End = qt.Start.Format(time.DateOnly), qt.End.Format(time.DateOnly)
-		out.AvailableBefore, out.AvailableAfter, out.ShortfallDays = qt.Balance.Available(), qt.After, qt.Shortfall
+		out.AvailableBefore, out.ShortfallDays = qt.Balance.Available(), qt.Shortfall
+		if qt.Type.ShowBalance {
+			out.AvailableAfter = qt.After
+		}
 	}
 	for _, l := range qt.NotCharged {
 		out.NotCharged = append(out.NotCharged, l.Text)
@@ -488,7 +502,7 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 }
 
 type ApplyIn struct {
-	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances (balances or other_types)"`
 	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
 	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`
@@ -527,7 +541,7 @@ func (d *deps) apply(ctx context.Context, u users.User, in ApplyIn) (RequestOut,
 
 type EditIn struct {
 	ID        int64       `json:"id" jsonschema:"the pending request's id"`
-	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name, as listed by my_balances (balances or other_types)"`
 	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
 	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
 	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3, first to last day within 31 days for applicants"`

@@ -217,7 +217,7 @@ func (d *deps) personBalances(ctx context.Context, u users.User, in PersonBalanc
 	if err != nil {
 		return PersonBalancesOut{}, "", err
 	}
-	b, _, err := d.myBalances(ctx, who, none{})
+	bs, err := d.leave.Balances(ctx, who.ID)
 	if err != nil {
 		return PersonBalancesOut{}, "", err
 	}
@@ -225,7 +225,10 @@ func (d *deps) personBalances(ctx context.Context, u users.User, in PersonBalanc
 	if err != nil {
 		return PersonBalancesOut{}, "", err
 	}
-	out := PersonBalancesOut{Person: personInfo(who), Balances: b.Balances, Adjustments: adjustmentInfos(as)}
+	out := PersonBalancesOut{Person: personInfo(who), Balances: make([]BalanceInfo, 0, len(bs)), Adjustments: adjustmentInfos(as)}
+	for _, b := range bs {
+		out.Balances = append(out.Balances, balanceInfo(b))
+	}
 	return out, fmt.Sprintf("%s: %d leave types, %d %s.", who.Name, len(out.Balances), len(out.Adjustments),
 		plural(len(out.Adjustments), "adjustment", "adjustments")), nil
 }

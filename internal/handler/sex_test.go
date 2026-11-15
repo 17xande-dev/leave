@@ -129,8 +129,8 @@ func TestApprovingMaternityForSinceMarkedMaleIsRefused(t *testing.T) {
 	}
 }
 
-// The person's own page and the admin's page about them list no maternity
-// balance for a man, and still do for everyone else.
+// The staff balance stays hidden regardless of sex. The admin still sees it
+// for a person who is offered maternity leave.
 func TestMaternityBalanceHiddenFromMaleStaff(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
@@ -146,8 +146,9 @@ func TestMaternityBalanceHiddenFromMaleStaff(t *testing.T) {
 			if !strings.Contains(body, "Annual leave") {
 				t.Errorf("%s, %s page: annual missing", label, where)
 			}
-			if got := strings.Contains(body, name); got != want {
-				t.Errorf("%s, %s page: maternity shown = %v, want %v", label, where, got, want)
+			wantHere := want && where == "admin person"
+			if got := strings.Contains(body, name); got != wantHere {
+				t.Errorf("%s, %s page: maternity shown = %v, want %v", label, where, got, wantHere)
 			}
 		}
 	}

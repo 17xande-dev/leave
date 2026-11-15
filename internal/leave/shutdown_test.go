@@ -161,7 +161,7 @@ func TestDeclinedShutdownRequestCanBeRegenerated(t *testing.T) {
 
 func TestDeleteShutdownWithoutRangeCascade(t *testing.T) {
 	f := newFixture(t)
-	// Model 0005's restrictive foreign key: a cascade would hide missing cleanup.
+	// Model 0006's restrictive foreign key: a cascade would hide missing cleanup.
 	for _, q := range []string{
 		`DROP TABLE request_ranges`,
 		`CREATE TABLE request_ranges (

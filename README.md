@@ -49,6 +49,16 @@ Sunday costs a day. The holidays are computed from the Public Holidays Act,
 including the Sunday-to-Monday rule. Admins add proclaimed days, such as election days,
 by hand. Days count against the cycle the leave starts in.
 
+**Balance visibility.** `leave_types.show_balance` controls whether staff see a type's
+balance on home or through MCP `my_balances`. Compassionate, unpaid, parental and
+maternity are seeded hidden; migration 0005 applies the same defaults to existing
+types. Admins can change **Show the balance to staff** under **Admin → Leave types**.
+Hidden types remain available to apply for, with their names shown in the picker and
+listed in MCP `other_types`. Successful applicant previews omit the afterwards
+figure (MCP `available_after`); a refusal still states the figure needed to explain
+the limit. Admins keep
+all balances, including on person pages, adjustment and recording forms, and MCP tools.
+
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
 Applicants' working-day leave must fit within 31 days from its first to last day,
@@ -444,10 +454,49 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all four migrations pending until startup or `-migrate`. A database newer than
+reports all five migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
-**Rehearse an upgrade before deployment.** These are operator instructions, not an
+**Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;
+run them only on the host rehearsal copy after taking a fresh pre-deploy `.backup`
+and copying it off-host using the backup procedure below. With a checked, pushed
+image selected by `$VERSION`, record the following counts on the copy before migration:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehearsal.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS users FROM users; SELECT count(*) AS requests FROM requests; SELECT count(*) AS request_ranges FROM request_ranges; SELECT count(*) AS balance_adjustments FROM balance_adjustments; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS users FROM users; SELECT count(*) AS requests FROM requests; SELECT count(*) AS request_ranges FROM request_ranges; SELECT count(*) AS balance_adjustments FROM balance_adjustments; SELECT code, active, show_balance FROM leave_types ORDER BY sort; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+```
+
+Expect `4 -> 5`, all four counts unchanged, exactly `compassionate`, `unpaid`,
+`parental` and `maternity` at `show_balance=0`, and every other type at `1`.
+Require integrity `ok` and no foreign-key rows. Repeat the same `-migrate` command:
+expect `5 -> 5` and no changed counts or flags. The column does not exist before
+migration, so inspect it only afterwards. Verify a staff home has no rows for the
+four types, the apply picker still offers them by bare name, and the admin person
+page keeps their balances.
+
+If Phases 5/7 have not yet been deployed, this image carries them too. In the same
+rehearsal run Phase 5's pending read-only check for live workday-unit requests or
+drafts spanning at least 31 days, and review any matches before deployment:
+
+```sql
+SELECT r.id, r.user_id, r.status, r.start_date, r.end_date
+FROM requests r JOIN leave_types t ON t.id = r.type_id
+WHERE r.kind = 'leave' AND r.status IN ('draft', 'pending', 'awaiting_hr', 'approved')
+  AND t.unit = 'workdays'
+  AND julianday(r.end_date) - julianday(r.start_date) + 1 >= 31;
+```
+
+**Rollback after 0005.** For a behavioural rollback, tick **Show the balance to
+staff** on the affected types; no deployment is needed. An image supporting only
+0004 refuses schema 5, so an image rollback requires fixing forward or restoring
+the pre-deploy backup. A restore loses writes since that backup and requires the
+Outlook event cleanup described below. The tested Down migration is not the
+production rollback procedure.
+
+**Rehearsal when also applying 0003/0004.** These are operator instructions, not an
 automatic deployment step. Start with a committed, checked image; build and push it
 without swapping the running app (`VERSION=$(git rev-parse HEAD)` then
 `kamal build push --version "$VERSION"`). Take a fresh `.backup` of the live database
@@ -462,10 +511,10 @@ ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v lea
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
-Expect `migrating /data/leave-rehearsal.db: 2 -> 4` before the applied status lines
-(or `3 -> 4` when 0003 is already applied);
+Expect `migrating /data/leave-rehearsal.db: 2 -> 5` before the applied status lines
+(or `3 -> 5` when 0003 is already applied);
 verify that the resolved path names the rehearsal copy and the versions match the
-intended upgrade. A repeat run reports `4 -> 4`.
+intended upgrade. A repeat run reports `5 -> 5`.
 
 Run the pushed image directly on the host: Kamal's parser rejects the documented
 `app exec --version ... --env ... -- '-migrate'` form before it can run. Pulling
@@ -475,7 +524,7 @@ the rehearsal copy. Pass **only `-migrate`** to the image's `leave` entrypoint.
 The `--reuse` commands above inspect the copy through the running container;
 they do not run the new binary.
 
-Require `0001` through `0004` applied, unchanged counts, `half_days_enabled=0`,
+Require `0001` through `0005` applied, unchanged counts, `half_days_enabled=0`,
 `SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL` returning `0`, integrity
 `ok`, and no foreign-key rows. If any pending/draft/awaiting-HR request has half flags,
 tell the user before deploying. Stop on any discrepancy. Only after the rehearsal is
@@ -484,7 +533,9 @@ counts and integrity checks on the live database, and the setting/form behavior.
 Remove the in-volume backup and rehearsal copies after verification; retain the
 off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
 
-**0004 expands storage; 0005 contracts it later.** Every existing request gets
+**0004 expands storage; 0006 contracts it later.** The contract step, called 0005
+in 0004's own comments, is now 0006; the applied migration is left unchanged.
+Every existing request gets
 one `request_ranges` row with identical dates and calendar event id. New code
 stores calendar ids on ranges. `requests.calendar_event_id` remains frozen,
 except for the compatibility shim that adopts ids written by the old container
@@ -492,9 +543,9 @@ and clears the legacy value. During the swap, `requests_default_range` supplies
 ranges for old inserts, `requests_sync_range` keeps old single-range edits in
 step (preserving the event id), and the foreign key cascades old shutdown
 request deletes. Multi-range requests are left alone by the update trigger.
-Migration 0005 will remove both triggers, the transitional cascade, the shim
+Migration 0006 will remove both triggers, the transitional cascade, the shim
 and the legacy column after the multi-range release has been stable.
-Before its "none remain" guard, 0005 must blank legacy
+Before its "none remain" guard, 0006 must blank legacy
 `requests.calendar_event_id` values that equal their range's id: about 870
 production rows still have these values after 0004. Differing legacy ids must
 remain available for the compatibility shim to adopt.

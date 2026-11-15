@@ -20,6 +20,18 @@ type Balance struct {
 	Pending     Days // awaiting a decision, and reserved so they cannot be spent twice
 }
 
+// VisibleBalances returns a new slice of balances shown to the person.
+// The full list remains available to admins and the apply picker.
+func VisibleBalances(bs []Balance) []Balance {
+	out := make([]Balance, 0, len(bs))
+	for _, b := range bs {
+		if b.Type.ShowBalance {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // Available is what is left to request; nil when the type is unlimited.
 func (b Balance) Available() *Days {
 	if b.Allowance == nil {

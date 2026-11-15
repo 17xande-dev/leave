@@ -83,6 +83,7 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 			}
 		}
 	}
+	d.Balances = leave.VisibleBalances(bs)
 	// YYYY-MM-DD compares as text.
 	day := leave.FormatDate(today)
 	// Upcoming is what is still live: anything waiting for a decision (pending
@@ -160,10 +161,13 @@ type applyData struct {
 	EditID int64
 }
 
-// typeLabel is the select's option text: "Annual leave (11 left)". Unlimited
-// types show just the name; an overdrawn balance reads as 0, since the person
-// cannot request any more either way.
+// typeLabel is the select's option text: "Annual leave (11 left)". Types
+// with unlimited or hidden balances show just the name. An overdrawn balance
+// reads as 0, since the person cannot request any more either way.
 func typeLabel(b leave.Balance) string {
+	if !b.Type.ShowBalance {
+		return b.Type.Name
+	}
 	avail := b.Available()
 	if avail == nil {
 		return b.Type.Name

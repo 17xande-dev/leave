@@ -15,7 +15,7 @@ type CalendarRange struct {
 }
 
 // CalendarRanges adopts an old container's event atomically before returning
-// the ordered ranges. Remove this compatibility shim with migration 0005.
+// the ordered ranges. Remove this compatibility shim with migration 0006.
 func (s *Service) CalendarRanges(ctx context.Context, id int64) ([]CalendarRange, error) {
 	var out []CalendarRange
 	err := s.withTx(ctx, func(tx *sql.Tx) error {

@@ -38,7 +38,12 @@ func rangeMigrationHashes(t *testing.T, d *sql.DB) map[string][32]byte {
 	}
 	out := make(map[string][32]byte)
 	for _, name := range names {
-		r, err := d.Query(`SELECT * FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`)
+		columns := "*"
+		if name == "leave_types" {
+			// The v5 visibility flag is checked separately from preexisting data.
+			columns = "id,code,name,allowance_x100,cycle_months,unit,restricted_rule,backdate_days,requires_note,active,sort,coverage_rule"
+		}
+		r, err := d.Query(`SELECT ` + columns + ` FROM "` + strings.ReplaceAll(name, `"`, `""`) + `" ORDER BY rowid`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +118,7 @@ func TestRequestRangesMigration(t *testing.T) {
 		}
 	}
 	before := rangeMigrationHashes(t, d)
-	if _, err := p.Up(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
 	check := func() {
@@ -140,7 +145,7 @@ func TestRequestRangesMigration(t *testing.T) {
 	if _, err := p.Down(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Up(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
 	check()
@@ -216,7 +221,7 @@ func TestRequestRangesMigration(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN ('requests_sync_range','requests_default_range')`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("Down left transitional triggers: %d %v", n, err)
 	}
-	if _, err := p.Up(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
 	var integrity string

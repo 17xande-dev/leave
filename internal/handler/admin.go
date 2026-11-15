@@ -606,7 +606,7 @@ type typeFormData struct {
 }
 
 func (h *Handler) AdminTypeForm(w http.ResponseWriter, r *http.Request) {
-	d := typeFormData{Type: leave.Type{Active: true, CycleMonths: 12, Unit: leave.UnitWorkdays,
+	d := typeFormData{Type: leave.Type{Active: true, ShowBalance: true, CycleMonths: 12, Unit: leave.UnitWorkdays,
 		Restricted: leave.RestrictMin, CoverageRule: leave.CoverageLimit, BackdateDays: leave.DefaultBackdateDays}}
 	if r.PathValue("id") != "" {
 		id, ok := pathID(r)
@@ -654,7 +654,8 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	}
 	t := leave.Type{ID: id, Code: code, Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
 		RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
-		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
+		ShowBalance: f("show_balance") == "1",
+		Restricted:  f("restricted"), CoverageRule: f("coverage_rule")}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance")), Backdate: strings.TrimSpace(f("backdate_days"))}
 	// Parse the numbers first, then validate everything in one pass, so a bad
 	// number does not hide a missing name until the next submit.
