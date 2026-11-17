@@ -70,27 +70,39 @@ Existing requests are untouched: owners editing one keep its type, HR-allowed dr
 keep theirs, and approval, withdrawal and cancellation still work. Admins can record
 these types for past leave; correcting requests to them arrives with Phase 11c.
 
-**0007 rehearsal and rollback (operator).** Before deploying, use a host `.backup`
-copy, never the live database, and run:
-`ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"`.
+**0007 rehearsal and rollback (operator).** Before deploying, take a backup and
+rehearse on a separate copy, never the live database:
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0007.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0007.db ".backup /data/leave-rehearsal.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT code, active, show_balance, staff_can_apply FROM leave_types ORDER BY sort; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+```
 Expect `6 -> 7`; counts of `users`, `requests`, `request_ranges`,
 `balance_adjustments` and `request_steps` must be unchanged. Check
 `SELECT code, active, show_balance, staff_can_apply FROM leave_types ORDER BY sort`:
 exactly compassionate and unpaid must have `staff_can_apply = 0`.
-Before deploy, list the existing live requests for the user (they stay valid):
-```sql
-SELECT r.id, r.status, t.code
-FROM requests r JOIN leave_types t ON t.id = r.type_id
-WHERE t.code IN ('compassionate','unpaid')
-  AND r.status IN ('pending','awaiting_hr','draft');
+Before deploy, list the existing live requests of restricted types for the user
+(they stay valid):
+```sh
+kamal app exec --reuse 'sqlite3 -bail -readonly /data/leave.db "SELECT r.id, r.status, t.code FROM requests r JOIN leave_types t ON t.id = r.type_id WHERE t.code IN ('"'"'compassionate'"'"','"'"'unpaid'"'"') AND r.status IN ('"'"'pending'"'"','"'"'awaiting_hr'"'"','"'"'draft'"'"');"'
 ```
 Run `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; repeat `-migrate`
 and expect `7 -> 7`. The old container's explicit type projection and UPDATE
 leave the new column alone; its INSERT defaults to 1. During the brief swap it
-still offers both types, harmlessly. Behavioural rollback: tick **Staff can apply
-for it**. Fix forward by default. For an image rollback, take a `.backup`, run
-`internal/db/testdata/undo_0007.sql` through the running container (discards only
-these flags, not requests), then `kamal rollback`.
+still offers and accepts requests for both types. Re-run the live-requests query
+above after deploying to catch requests accepted by the old container during the swap.
+Behavioural rollback: tick **Staff can apply for it**. Fix forward by default.
+For an image rollback, run from the repo root (discards only these flags, not requests):
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0007.db"'
+kamal app exec --reuse "sqlite3 -bail -cmd '.timeout 10000' /data/leave.db \"$(cat internal/db/testdata/undo_0007.sql)\""
+kamal rollback
+```
+Between the undo and `kamal rollback`, the new container fails `leave_types` reads
+for those few seconds. Do not restart it in between: it would reapply 0007.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.

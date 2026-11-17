@@ -75,12 +75,16 @@
     <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Active (not retired)</label>
   </div>
   <div class="checks">
+    <input type="hidden" name="staff_can_apply" value="0">
     <label><input type="checkbox" name="staff_can_apply" value="1"{{if .Type.StaffCanApply}} checked{{end}}> Staff can apply for it</label>
   </div>
+  {{template "err" index .Errors "staff_can_apply"}}
   <p class="hint">Off: only an admin can put leave of this type on someone's record, by recording it or correcting a request.</p>
   <div class="checks">
+    <input type="hidden" name="show_balance" value="0">
     <label><input type="checkbox" name="show_balance" value="1"{{if .Type.ShowBalance}} checked{{end}}> Show the balance to staff</label>
   </div>
+  {{template "err" index .Errors "show_balance"}}
   <p class="hint">Off: days left are only shown to admins. Whether staff can apply is controlled separately.</p>
   <div class="actions"><button type="submit">Save</button><a href="/admin/types">Cancel</a></div>
 </form>

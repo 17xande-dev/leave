@@ -60,9 +60,9 @@ func TestAdminTypeStaffCanApplyToggle(t *testing.T) {
 	}
 	id := hs.typeID("compassionate")
 	for _, allowed := range []bool{true, false} {
-		form := url.Values{"id": {id}, "name": {"Compassionate leave"}, "cycle_months": {"12"}, "unit": {"workdays"}, "restricted": {"any"}, "coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}}
+		form := url.Values{"id": {id}, "name": {"Compassionate leave"}, "cycle_months": {"12"}, "unit": {"workdays"}, "restricted": {"any"}, "coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}, "show_balance": {"0"}, "staff_can_apply": {"0"}}
 		if allowed {
-			form.Set("staff_can_apply", "1")
+			form.Add("staff_can_apply", "1")
 		}
 		if res, body := hs.post(hr, "/admin/types", form); res.StatusCode != http.StatusSeeOther {
 			t.Fatalf("toggle: %d %s", res.StatusCode, body)

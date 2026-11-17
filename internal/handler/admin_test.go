@@ -137,14 +137,14 @@ func TestTypeAndHolidayAdmin(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 	res, _ := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Study leave"},
-		"allowance": {"5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}, "staff_can_apply": {"1"}})
+		"allowance": {"5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}, "staff_can_apply": {"1"}, "show_balance": {"0"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("new type: %d", res.StatusCode)
 	}
 	if _, body := hs.get(hs.signIn("staff1"), "/leave/new"); !strings.Contains(body, "Study leave") {
 		t.Fatal("new type not offered")
 	}
-	res, body := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Dup"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}})
+	res, body := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Dup"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "staff_can_apply": {"1"}, "show_balance": {"0"}})
 	if res.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(body, "already uses that code") {
 		t.Fatalf("duplicate code: %d", res.StatusCode)
 	}
@@ -243,7 +243,7 @@ func TestTypeFormBackdateDays(t *testing.T) {
 
 	form := func(days string) url.Values {
 		return url.Values{"code": {"study"}, "name": {"Study leave"}, "cycle_months": {"12"}, "unit": {"workdays"},
-			"active": {"1"}, "backdate_days": {days}}
+			"active": {"1"}, "backdate_days": {days}, "staff_can_apply": {"1"}, "show_balance": {"1"}}
 	}
 	if res, _ := hs.post(hr, "/admin/types", form("30")); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save at 30: %d", res.StatusCode)
@@ -530,7 +530,7 @@ func TestTypeCodeIsFixed(t *testing.T) {
 	}
 	res, _ := hs.post(hr, "/admin/types", url.Values{"id": {id}, "name": {"Annual leave"}, "code": {"renamed"},
 		"allowance": {"15"}, "cycle_months": {"12"}, "backdate_days": {"92"}, "unit": {"workdays"},
-		"restricted": {"min"}, "coverage_rule": {"limit"}, "active": {"1"}})
+		"restricted": {"min"}, "coverage_rule": {"limit"}, "active": {"1"}, "staff_can_apply": {"1"}, "show_balance": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save: %d", res.StatusCode)
 	}
@@ -548,7 +548,7 @@ func TestPeopleAnnualIgnoresInactiveType(t *testing.T) {
 	hr := hs.signIn("hr")
 	id := hs.typeID("annual")
 	hs.post(hr, "/admin/types", url.Values{"id": {id}, "name": {"Annual leave"}, "allowance": {"15"},
-		"cycle_months": {"12"}, "backdate_days": {"92"}, "unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"limit"}})
+		"cycle_months": {"12"}, "backdate_days": {"92"}, "unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"limit"}, "staff_can_apply": {"1"}, "show_balance": {"1"}})
 	_, body := hs.get(hr, "/admin/users")
 	if strings.Contains(body, `<td class="num">15</td>`) {
 		t.Error("inactive annual type still shown")
@@ -596,7 +596,7 @@ func TestAdjustmentAndAllowanceFormsTakeDecimals(t *testing.T) {
 
 	// The allowance form takes a decimal too, and shows it back as one.
 	res, _ = hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Study leave"},
-		"allowance": {"7.5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}})
+		"allowance": {"7.5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}, "staff_can_apply": {"1"}, "show_balance": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("allowance 7.5: %d", res.StatusCode)
 	}

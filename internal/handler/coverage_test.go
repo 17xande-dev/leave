@@ -224,7 +224,7 @@ func TestTypeFormSavesCoverageRule(t *testing.T) {
 		t.Fatalf("type form lacks the coverage select:\n%s", body)
 	}
 	res, _ := hs.post(hr, "/admin/types", url.Values{"name": {"Study leave"}, "code": {"study"}, "cycle_months": {"12"}, "backdate_days": {"92"},
-		"unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"count"}, "active": {"1"}})
+		"unit": {"workdays"}, "restricted": {"min"}, "coverage_rule": {"count"}, "active": {"1"}, "staff_can_apply": {"1"}, "show_balance": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("save type: %d", res.StatusCode)
 	}

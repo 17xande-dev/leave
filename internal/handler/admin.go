@@ -655,13 +655,21 @@ func (h *Handler) AdminSaveType(w http.ResponseWriter, r *http.Request) {
 	}
 	t := leave.Type{ID: id, Code: code, Name: f("name"), CycleMonths: cycle, Unit: f("unit"),
 		RequiresNote: f("requires_note") == "1", Active: f("active") == "1", Sort: sort,
-		ShowBalance:   f("show_balance") == "1",
-		StaffCanApply: f("staff_can_apply") == "1",
-		Restricted:    f("restricted"), CoverageRule: f("coverage_rule")}
+		Restricted: f("restricted"), CoverageRule: f("coverage_rule")}
+	parseErrs := leave.FieldErrors{}
+	// The hidden unchecked value precedes the checkbox. Missing fields can
+	// come from an old container's form, and must never silently change policy.
+	for field, dst := range map[string]*bool{"show_balance": &t.ShowBalance, "staff_can_apply": &t.StaffCanApply} {
+		values := r.PostForm[field]
+		if len(values) == 0 || (values[len(values)-1] != "0" && values[len(values)-1] != "1") {
+			parseErrs[field] = "Reload the form and try again; this setting is missing or invalid."
+			continue
+		}
+		*dst = values[len(values)-1] == "1"
+	}
 	d := typeFormData{Type: t, Allowance: strings.TrimSpace(f("allowance")), Backdate: strings.TrimSpace(f("backdate_days"))}
 	// Parse the numbers first, then validate everything in one pass, so a bad
 	// number does not hide a missing name until the next submit.
-	parseErrs := leave.FieldErrors{}
 	if n, ok := parseWhole(d.Backdate); ok {
 		t.BackdateDays, d.Type.BackdateDays = n, n
 	} else {

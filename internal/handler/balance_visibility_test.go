@@ -91,9 +91,9 @@ func TestAdminTypeBalanceVisibilityToggle(t *testing.T) {
 	for _, shown := range []bool{true, false} {
 		form := url.Values{"id": {id}, "name": {"Parental leave"}, "allowance": {"10"},
 			"cycle_months": {"12"}, "unit": {"calendar"}, "restricted": {"any"},
-			"coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}, "staff_can_apply": {"1"}}
+			"coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}, "staff_can_apply": {"1"}, "show_balance": {"0"}}
 		if shown {
-			form.Set("show_balance", "1")
+			form.Add("show_balance", "1")
 		}
 		res, body := hs.post(hr, "/admin/types", form)
 		if res.StatusCode != http.StatusSeeOther {
