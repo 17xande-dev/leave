@@ -54,8 +54,8 @@ balance on home or through MCP `my_balances`. Compassionate, unpaid, parental an
 maternity are seeded hidden; migration 0005 applies the same defaults to existing
 types. Admins can change **Show the balance to staff** under **Admin → Leave types**.
 Hidden types remain available to apply for, with their names shown in the picker and
-listed in MCP `other_types`. Successful applicant previews omit the afterwards
-figure (MCP `available_after`); a refusal still states the figure needed to explain
+listed in MCP `other_types`. Successful applicant previews omit the balance figures
+(MCP `available_before` and `available_after`); a refusal still states the figure needed to explain
 the limit. Admins keep
 all balances, including on person pages, adjustment and recording forms, and MCP tools.
 

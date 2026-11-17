@@ -424,7 +424,7 @@ type PreviewOut struct {
 	Ranges           []DateRange `json:"ranges" jsonschema:"the actual inclusive stretches; start and end are the span bounds"`
 	Days             leave.Days  `json:"days,omitempty"`
 	Unit             string      `json:"unit,omitempty"`
-	AvailableBefore  *leave.Days `json:"available_before,omitempty"`
+	AvailableBefore  *leave.Days `json:"available_before,omitempty" jsonschema:"balance before this request; absent for unlimited types or types whose balance is kept by HR"`
 	AvailableAfter   *leave.Days `json:"available_after,omitempty" jsonschema:"balance left if approved; absent for unlimited types or types whose balance is kept by HR"`
 	ShortfallDays    leave.Days  `json:"shortfall_days,omitempty" jsonschema:"days below zero this would take the balance"`
 	NotCharged       []string    `json:"not_charged,omitempty" jsonschema:"days in the range that cost nothing (public holidays by name, non-working weekdays), as the apply form shows them"`
@@ -479,9 +479,9 @@ func (d *deps) previewRequest(ctx context.Context, u users.User, in RequestIn) (
 	if qt.Days > 0 {
 		out.Type, out.Unit, out.Days = qt.Type.Name, qt.Type.Unit, qt.Days
 		out.Start, out.End = qt.Start.Format(time.DateOnly), qt.End.Format(time.DateOnly)
-		out.AvailableBefore, out.ShortfallDays = qt.Balance.Available(), qt.Shortfall
+		out.ShortfallDays = qt.Shortfall
 		if qt.Type.ShowBalance {
-			out.AvailableAfter = qt.After
+			out.AvailableBefore, out.AvailableAfter = qt.Balance.Available(), qt.After
 		}
 	}
 	for _, l := range qt.NotCharged {

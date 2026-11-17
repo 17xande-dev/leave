@@ -72,6 +72,9 @@ func TestBalanceVisibilityToolResults(t *testing.T) {
 		if got := strings.Contains(string(encoded), "available_after"); got != (code == "annual") {
 			t.Errorf("%s available_after presence: %s", code, encoded)
 		}
+		if got := strings.Contains(string(encoded), "available_before"); got != (code == "annual") {
+			t.Errorf("%s available_before presence: %s", code, encoded)
+		}
 	}
 	refusal, _, err := d.previewRequest(ctx, staff, RequestIn{Type: "parental", Start: "2026-10-12", End: "2026-10-22"})
 	if err != nil || refusal.OK || len(refusal.Problems) == 0 || !strings.Contains(refusal.Problems[0].Message, "you have 10 left") {
