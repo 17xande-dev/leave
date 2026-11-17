@@ -8,6 +8,7 @@
   <p class="muted">Choose a type of leave and your dates to see how many days this is.</p>
 {{else}}
   {{with .Errors}}{{range .}}<p class="error">{{.}}</p>{{end}}{{end}}
+  {{with .Was}}<p class="hint">{{.}}</p>{{end}}
   {{with .Quote}}{{if .Days}}
     <p><strong>{{.Days}} {{units .Days .Type.Unit}}{{if gt (len .Ranges) 1}} in {{len .Ranges}} stretches: {{stretch .Ranges}}{{end}}</strong>
     {{if .Type.ShowBalance}}{{with .After}} — {{.}} left in {{with $.Quote.CycleName}}{{.}}{{else}}this cycle{{end}} afterwards{{end}}{{end}}</p>

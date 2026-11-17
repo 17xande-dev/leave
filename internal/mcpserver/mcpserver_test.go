@@ -222,6 +222,7 @@ func TestToolAnnotations(t *testing.T) {
 	// (the request is a draft they may submit), so clients are told to ask first.
 	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true,
 		"set_half_days":         true,
+		"correct_request":       true,
 		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true, "grant_negative": true}
 	changing := map[string]bool{"apply_for_leave": true, "edit_request": true, "submit_draft": true, "request_cancellation": true,
 		"record_leave": true, "adjust_balance": true}
@@ -605,6 +606,7 @@ func TestAdminActionToolsRefuseStaff(t *testing.T) {
 	r := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
 	calls := map[string]map[string]any{
 		"set_half_days":         {"id": id(r), "half_start": true, "half_end": false},
+		"correct_request":       {"id": id(r), "type": "unpaid", "start": "2026-10-12", "reason": "x"},
 		"record_leave":          {"person": "staff2", "type": "annual", "start": "2026-10-01", "note": "x"},
 		"remove_recorded_leave": {"id": id(r)},
 		"person_balances":       {"person": "staff2"},

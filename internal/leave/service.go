@@ -85,6 +85,11 @@ const (
 	// is now and Before as it was; the approver is told.
 	EventEdited        EventKind = "edited"
 	EventHalvesChanged EventKind = "halves_changed"
+	// EventCorrected: an admin changed the type, dates, half days or note of
+	// someone else's not-yet-approved request. Request is as it is now, Before
+	// as it was, Note the admin's reason; the person and, while it is
+	// pending, the approver are told.
+	EventCorrected EventKind = "corrected"
 )
 
 type Event struct {

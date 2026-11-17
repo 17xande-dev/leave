@@ -1,0 +1,16 @@
+{{define "subject"}}{{if .Owner}}Your leave request was changed{{else}}Leave request changed for {{.Request.UserName}}{{end}}: {{.Dates}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{.Actor}} changed {{if .Owner}}your leave request{{else}}the leave request from {{.Request.UserName}}{{end}}{{if not .Owner}}, which was waiting for you{{end}}.
+
+Was: {{.Was}}
+Now: {{.Now}}
+{{if .NoteChanged}}{{with .Request.Note}}
+The note now reads: {{.}}
+{{else}}
+The note was removed.
+{{end}}{{end}}
+Reason: {{.Note}}
+{{if .Owner}}
+If this is not what you expected, talk to {{.Actor}}.{{else}}
+Please decide it as changed.{{end}}{{end}}

@@ -103,6 +103,9 @@ func humanError(tool string, err error) error {
 		if tool == "set_half_days" {
 			return userError(leave.MsgHalvesChanged)
 		}
+		if tool == "correct_request" {
+			return userError("This request changed since you read it. Read it again (get_request) and check before correcting.")
+		}
 		return userError("This request was changed after you read it. Read it again (get_request) and check before deciding.")
 	case errors.Is(err, leave.ErrNotAllowed):
 		return userError("That is not possible. The request may already have been decided or withdrawn, " +
@@ -136,6 +139,8 @@ func fieldLabel(field string) string {
 		return "Days: "
 	case "reason":
 		return "Reason: "
+	case "half_start", "half_end":
+		return "Half day: "
 	}
 	return ""
 }

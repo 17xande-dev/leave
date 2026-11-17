@@ -240,6 +240,37 @@ type RequestDetail struct {
 	CanRequestCancel    bool         `json:"can_request_cancellation"`
 	CanDecide           bool         `json:"can_decide"`
 	CanSubmit           bool         `json:"can_submit"`
+	CanCorrect          bool         `json:"can_correct" jsonschema:"correct_request would be accepted for this request (administrators)"`
+	// Corrections is every admin correction of the request, oldest first.
+	Corrections []CorrectionInfo `json:"corrections,omitempty"`
+}
+
+// CorrectionInfo is one admin correction: who, when, why, and the request
+// before and after in a sentence each.
+type CorrectionInfo struct {
+	By     string `json:"by"`
+	At     string `json:"at"`
+	Reason string `json:"reason"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+func correctionText(r leave.Request) string {
+	s := fmt.Sprintf("%s, %s to %s (%s %s)", r.TypeName, r.Start, r.End, r.Days, r.Days.Plural("day", "days"))
+	if len(r.Ranges) > 1 {
+		parts := make([]string, len(r.Ranges))
+		for i, rg := range r.Ranges {
+			parts[i] = rg.Start + " to " + rg.End
+		}
+		s = fmt.Sprintf("%s, %s (%s %s)", r.TypeName, strings.Join(parts, " and "), r.Days, r.Days.Plural("day", "days"))
+	}
+	if h := r.HalfNote(); h != "" {
+		s += ", " + h
+	}
+	if r.Note != "" {
+		s += ", note: " + r.Note
+	}
+	return s
 }
 
 // getRequest mirrors the request page's requestData, field for field.
@@ -258,6 +289,21 @@ func (d *deps) getRequest(ctx context.Context, u users.User, in IDIn) (RequestDe
 	}
 	if out.CanEdit, err = d.leave.CanEdit(ctx, u, req); err != nil {
 		return out, "", err
+	}
+	if out.CanCorrect = leave.CanCorrect(u, req); out.CanCorrect {
+		blocked, err := d.leave.CorrectBlocked(ctx, req)
+		if err != nil {
+			return out, "", err
+		}
+		out.CanCorrect = blocked == ""
+	}
+	cs, err := d.leave.Corrections(ctx, req.ID)
+	if err != nil {
+		return out, "", err
+	}
+	for _, c := range cs {
+		out.Corrections = append(out.Corrections, CorrectionInfo{By: c.AdminName, At: c.At, Reason: c.Reason,
+			Before: correctionText(c.Before), After: correctionText(c.After)})
 	}
 	if out.Steps, err = d.steps(ctx, req.ID); err != nil {
 		return out, "", err

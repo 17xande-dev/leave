@@ -34,6 +34,20 @@
 </form>
 {{end}}
 
+{{if .CanCorrect}}
+{{if .CorrectBlocked}}<p class="hint">{{.CorrectBlocked}}</p>
+{{else}}<p class="actions"><a class="button quiet" href="/admin/requests/{{.Request.ID}}/correct{{if .From}}?from={{.From}}{{end}}">Correct this request</a> <small>(admin: change the type, dates, half days or note; {{.Request.UserName}} is told)</small></p>{{end}}
+{{end}}
+
+{{with .Corrections}}
+<div class="panel">
+  <h2>Corrections</h2>
+  <ul>
+  {{range .}}<li>Changed by {{.AdminName}} on {{date (slice .At 0 10)}}: {{.Before.TypeName}}, {{template "requestdates" .Before}} ({{.Before.Days}} {{units .Before.Days .Before.TypeUnit}}{{with .Before.HalfNote}}, {{.}}{{end}}) &rarr; {{.After.TypeName}}, {{template "requestdates" .After}} ({{.After.Days}} {{units .After.Days .After.TypeUnit}}{{with .After.HalfNote}}, {{.}}{{end}}){{if ne .Before.Note .After.Note}}. Note: {{with .After.Note}}{{.}}{{else}}removed{{end}}{{end}}. Reason: {{.Reason}}</li>{{end}}
+  </ul>
+</div>
+{{end}}
+
 {{if .Request.IsShutdown}}
 <p class="notice">Part of <strong>{{.Request.ShutdownName}}</strong>, a company shutdown. The dates and type are fixed, and the days are mandatory: they are taken even if your balance goes below zero.</p>
 {{end}}

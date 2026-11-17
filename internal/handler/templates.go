@@ -221,6 +221,8 @@ var notices = map[string]string{
 	"saved":                   "Saved.",
 	"reassigned":              "Request reassigned.",
 	"halves-saved":            "Half days saved.",
+	"correct-own":             leave.MsgCorrectOwn,
+	"changed":                 "This request changed after you opened it. Check it again before correcting it.",
 	"recorded":                "Leave recorded. It is approved, and they have been emailed.",
 	"recorded-negative":       "Leave recorded, and it takes their balance below zero. They have been emailed.",
 	"unrecorded":              "Recorded leave removed. It no longer counts against their balance.",

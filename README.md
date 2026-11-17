@@ -85,7 +85,8 @@ The service refuses them even for admins applying for themselves:
 another type with a note saying why, and HR can change it.” (using the type's name).
 Existing requests are untouched: owners editing one keep its type, HR-allowed drafts
 keep theirs, and approval, withdrawal and cancellation still work. Admins can record
-these types for past leave; correcting requests to them arrives with Phase 11c.
+these types for past leave, and correct a request that is not yet approved into one
+(see **Correcting a request (admins)** below).
 
 **0007 rehearsal and rollback (operator).** Before deploying, take a backup and
 rehearse on a separate copy, never the live database:
@@ -120,6 +121,42 @@ kamal rollback
 ```
 Between the undo and `kamal rollback`, the new container fails `leave_types` reads
 for those few seconds. Do not restart it in between: it would reapply 0007.
+
+**Correcting a request (admins).** Staff cannot apply for compassionate or unpaid leave,
+so they apply as another type with a note, and an admin fixes it. On a request page,
+**Correct this request** (or MCP `correct_request`) lets an admin change the **type,
+dates (up to 3 stretches), half days and note** of someone else's request. It works
+while the request is **pending, waiting for HR, or an HR-allowed draft**; not once it is
+approved, declined, withdrawn or cancelled, not for recorded leave or a company
+shutdown's days, not while a cancellation of it is pending, and not for a pending
+request that someone has already begun to approve through special permission ("Someone
+has started approving this"). An admin never corrects their own request: another admin
+does. Any type offered to the person is allowed, including the admin-only ones (maternity
+is still refused to someone recorded as male); the request's own type is kept even if
+it has since been retired.
+
+A **reason is required**. It is kept, with the request as it was and as it is now, in
+`request_corrections` (every correction is kept, oldest first) and shown to everyone who
+can see the request in a **Corrections** panel. The person is emailed what changed and
+why, and so is the approver while it is pending (the admins' queue gets it when the
+request sits there). The request keeps its id, status, approver, special-permission flag
+and place in the queue; the days are recounted, and its fingerprint changes, so an
+approver (or admin) holding the old page is told it changed instead of deciding on it.
+A correction never checks coverage limits, the balance (a shortfall sets the
+"below zero" flag instead), the backdating limit or the 31-day span, and the dates may be
+past or future; overlap with the person's other leave is still refused.
+
+**0008 rehearsal and rollback (operator).** `0008_request_corrections.sql` only adds the
+`request_corrections` table. Back up and rehearse on a copy as for 0007, then check:
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT count(*) FROM request_corrections; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+```
+Expect `7 -> 8`, the five counts unchanged, `request_corrections` empty, a clean
+integrity and foreign-key check, and `8 -> 8` on the second `-migrate`. The previous
+container never reads the table, so it is harmless during the swap. Fix forward by
+default. For an image rollback, `internal/db/testdata/undo_0008.sql` drops the table
+(**discarding only the correction history**, never a request) and removes the version
+row; take a `.backup` first and run it as for `undo_0007.sql`, then `kamal rollback`.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
@@ -373,6 +410,7 @@ anything unless the person has asked.
 | `grant_negative` | Administrators only (destructive: it cannot be recalled): allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
 | `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
 | `reassign_request` | Administrators only: move a pending request (including your own) to an enabled administrator other than the applicant, or with none to the leave administrators; the new approver is emailed |
+| `correct_request` | Administrators only: change the type, dates, half days and note of someone else's request that is not yet approved (pending, waiting for HR, an HR-allowed draft), a reason required; works on admin-only types, refused for your own request; the person (and the approver while pending) is emailed. `get_request` shows `can_correct` and the `corrections` history |
 
 The administrators' tools identify a person by sign-in username (as `all_requests` does),
 email address or exact full name, and refuse a name that matches two people rather than
@@ -534,7 +572,7 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all seven migrations pending until startup or `-migrate`. A database newer than
+reports all eight migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;

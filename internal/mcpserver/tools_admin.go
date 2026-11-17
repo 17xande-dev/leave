@@ -93,6 +93,53 @@ func (d *deps) setHalfDays(ctx context.Context, u users.User, in SetHalfDaysIn) 
 	return RequestOut{Request: requestInfo(req), Message: msg}, msg, nil
 }
 
+type CorrectRequestIn struct {
+	ID        int64       `json:"id" jsonschema:"the request's id; it must be someone else's, not yet approved"`
+	Type      string      `json:"type" jsonschema:"the leave type's code or name for the corrected request; any type offered to the person, including ones staff cannot apply for"`
+	Start     string      `json:"start,omitempty" jsonschema:"first day, YYYY-MM-DD; use this or ranges"`
+	End       string      `json:"end,omitempty" jsonschema:"last day, YYYY-MM-DD; default the same as start"`
+	Ranges    []DateRange `json:"ranges,omitempty" jsonschema:"inclusive stretches instead of start/end; workdays types only, max 3"`
+	Note      string      `json:"note,omitempty" jsonschema:"the request's note as it should read afterwards; some leave types require one"`
+	HalfStart bool        `json:"half_start,omitempty" jsonschema:"the first day (or the only day) is a half day, charged 0.5; admins can always use half days"`
+	HalfEnd   bool        `json:"half_end,omitempty" jsonschema:"the last day is a half day, charged 0.5; not for a one-day request"`
+	Reason    string      `json:"reason" jsonschema:"why you are changing it; required, kept in the request's history and sent to the person"`
+	Seen      string      `json:"seen,omitempty" jsonschema:"request fingerprint from get_request; refuses the change if the request changed since it was read"`
+}
+
+func (d *deps) correctRequest(ctx context.Context, u users.User, in CorrectRequestIn) (RequestOut, string, error) {
+	if err := requireAdmin(u); err != nil {
+		return RequestOut{}, "", err
+	}
+	req, err := d.load(ctx, u, in.ID)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	owner, err := d.users.ByID(ctx, req.UserID)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	t, err := d.resolveTypeIn(ctx, in.Type, false, owner)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	li, err := requestDates(in.Start, in.End, in.Ranges)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	li.TypeID, li.Note = t.ID, in.Note
+	li.HalfStart, li.HalfEnd = in.HalfStart, in.HalfEnd
+	out, err := d.leave.Correct(ctx, u, in.ID, li, in.Reason, in.Seen)
+	if err != nil {
+		return RequestOut{}, "", err
+	}
+	msg := "Request corrected. " + out.UserName + " has been emailed"
+	if out.Status == leave.StatusPending {
+		msg += ", and so has whoever approves it"
+	}
+	msg += "."
+	return RequestOut{Request: requestInfo(out), Message: msg}, msg, nil
+}
+
 type RecordLeaveIn struct {
 	Person    string      `json:"person" jsonschema:"who took the leave: the person's sign-in username, email address or exact full name"`
 	Type      string      `json:"type" jsonschema:"the leave type's code or name; a retired type is allowed"`
@@ -398,6 +445,11 @@ func (d *deps) reassign(ctx context.Context, u users.User, in ReassignIn) (Reque
 func (d *deps) registerAdminActions(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "set_half_days", Annotations: destructive("Change half days (administrators)"),
 		Description: "Administrators only: set or clear half days on another person's live working-day leave, including approved leave. Works even when applicant half days are off. Refuses shutdown leave and leave with a pending cancellation. The days and balance are recomputed, the change is audited, and the person (and approver when pending) is emailed. Only when the person has told you to."}, d.setHalfDays)
+	add(d, s, &mcp.Tool{Name: "correct_request", Annotations: destructive("Correct a request (administrators)"),
+		Description: "Administrators only: change the type, dates, half days and note of another person's request that has not been approved yet (pending, waiting for HR, or an HR-allowed draft) to fix an incorrect submission, for example annual leave that should be compassionate or unpaid. " +
+			"State the whole request as it should read (type, start/end or ranges, half days, note), not only what changes. It works on types staff cannot apply for, ignores coverage limits and the balance (a shortfall is allowed), keeps the approver and the request's place in the queue, and the days are recounted. " +
+			"A reason is required; it is kept in the request's history and the person (and the approver while it is pending) is emailed. Refused for your own request (another administrator corrects it), for approved, declined, recorded or shutdown leave, " +
+			"and for a request someone has started approving. Pass seen (the fingerprint from get_request) to refuse the change if the request changed since you read it. Only when the person has told you to."}, d.correctRequest)
 	add(d, s, &mcp.Tool{Name: "person_balances", Annotations: readOnly("A person's balances (administrators)"),
 		Description: "Administrators only: one person's balances for the current cycle, with the cycle start dates, and every balance adjustment made for them."}, d.personBalances)
 	add(d, s, &mcp.Tool{Name: "permission_queue", Annotations: readOnly("Requests waiting for HR (administrators)"),

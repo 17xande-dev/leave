@@ -159,6 +159,13 @@ type applyData struct {
 	Marks pickerMarks
 	// EditID is the request being edited; 0 for a new one.
 	EditID int64
+	// The admin's correction form (see admin_correct.go) reuses this page:
+	// CorrectID is the request being corrected (0 otherwise), Owner whose it
+	// is, Status where it stands, Seen the fingerprint the admin read and
+	// Reason what they have typed so far.
+	CorrectID     int64
+	Owner, Status string
+	Seen, Reason  string
 }
 
 // typeLabel is the select's option text: "Annual leave (11 left)". Types
@@ -415,6 +422,8 @@ type quoteData struct {
 	// construction: this hint is the same for an approver and a colleague.
 	Away     []awayView
 	AwayMore int
+	// Was is the admin correction form's "Was 4 days, now 3 days" line.
+	Was string
 }
 
 // awayShown caps the names in the "Also away then" hint.
@@ -679,8 +688,14 @@ type requestData struct {
 	CanCancel           bool
 	CanDecide           bool
 	// CanUnrecord: an admin may remove this recorded leave.
-	CanUnrecord            bool
-	CanSetHalves           bool
+	CanUnrecord  bool
+	CanSetHalves bool
+	// CanCorrect: an admin may open the correction form; Corrections is its
+	// history, shown to everyone who can view the request.
+	// CorrectBlocked says why it cannot be corrected just now, if it cannot.
+	CanCorrect             bool
+	CorrectBlocked         string
+	Corrections            []leave.Correction
 	HalvesErrors           leave.FieldErrors
 	HalvesStart, HalvesEnd bool
 	CanSubmit              bool
@@ -733,6 +748,17 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		CanSetHalves: leave.CanSetHalves(u, req),
 		HalvesStart:  req.HalfStart, HalvesEnd: req.HalfEnd,
 		CanSubmit: req.UserID == u.ID && req.Status == leave.StatusDraft,
+	}
+	if d.CanCorrect = leave.CanCorrect(u, req); d.CanCorrect {
+		blocked, err := h.leave.CorrectBlocked(r.Context(), req)
+		if err != nil {
+			return d, err
+		}
+		d.CorrectBlocked = blocked
+	}
+	var cerr error
+	if d.Corrections, cerr = h.leave.Corrections(r.Context(), req.ID); cerr != nil {
+		return d, cerr
 	}
 	d.CanReassign = u.Admin && !u.Disabled && req.Status == leave.StatusPending
 	if d.CanReassign {
@@ -834,7 +860,12 @@ func (h *Handler) RequestPage(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "request.html", view{Title: requestTitle(req), Data: d})
+	v := view{Title: requestTitle(req), Data: d}
+	if r.URL.Query().Get("notice") == "corrected" {
+		// The name is the stored one, not query text: notices stay a fixed set.
+		v.Notice = "Request corrected. " + req.UserName + " has been told."
+	}
+	h.render(w, r, http.StatusOK, "request.html", v)
 }
 
 func requestTitle(r leave.Request) string {
@@ -1022,6 +1053,8 @@ type queueRow struct {
 	// may see it; AwayMore counts the people past the cap.
 	Away     []awayView
 	AwayMore int
+	// Was is the admin correction form's "Was 4 days, now 3 days" line.
+	Was string
 }
 
 // queueAfter is the balance line: Below is how far under zero, else 0.

@@ -31,7 +31,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited", "halves")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited", "halves", "corrected")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -145,6 +145,27 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			if e.Before != nil {
 				d.Was = daysOf(e.Before.Days, e.Before.TypeUnit)
 			}
+		}); err != nil {
+			return err
+		}
+	case leave.EventCorrected:
+		// The person always hears; the approver (or every admin but the
+		// person, when it sits in the admins' queue) only while it is pending.
+		to := []recipient{{r.UserName, r.UserEmail}}
+		if r.Status == leave.StatusPending {
+			who, err := approvers(ctx, tx, r)
+			if err != nil {
+				return err
+			}
+			to = append(to, who...)
+		}
+		linkText := "View the leave"
+		if r.Status == leave.StatusPending {
+			linkText = "View the request"
+		}
+		if err := n.send(ctx, tx, "corrected", to, r, false, linkText, "", special(e), changes(e), func(d *msgData) {
+			d.Actor = e.Actor.Name
+			d.Note = e.Note
 		}); err != nil {
 			return err
 		}

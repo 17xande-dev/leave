@@ -113,7 +113,7 @@ func contractRows(t *testing.T, d *sql.DB, q string) [][]any {
 func contractHashes(t *testing.T, d *sql.DB, omitLegacy bool) map[string][32]byte {
 	t.Helper()
 	out := map[string][32]byte{}
-	for _, row := range contractRows(t, d, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'goose_db_version' ORDER BY name`) {
+	for _, row := range contractRows(t, d, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('goose_db_version','request_corrections') ORDER BY name`) {
 		name := row[0].(string)
 		var cols []string
 		for _, col := range contractRows(t, d, `SELECT name FROM pragma_table_info('`+name+`') ORDER BY name`) {
@@ -249,7 +249,7 @@ func TestContract0006Guards(t *testing.T) {
 func contractSchema(t *testing.T, d *sql.DB) map[string][][]any {
 	t.Helper()
 	out := map[string][][]any{}
-	for _, r := range contractRows(t, d, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'goose_db_version' ORDER BY name`) {
+	for _, r := range contractRows(t, d, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('goose_db_version','request_corrections') ORDER BY name`) {
 		name := r[0].(string)
 		out[name+" columns"] = contractRows(t, d, `SELECT name,type,"notnull",dflt_value,pk FROM pragma_table_info('`+name+`') ORDER BY name`)
 		out[name+" fk"] = contractRows(t, d, `SELECT "table","from","to",on_update,on_delete,match FROM pragma_foreign_key_list('`+name+`') ORDER BY "from"`)
@@ -424,7 +424,7 @@ func TestContract0006MigrateCommand(t *testing.T) {
 	cmd.Env = append(os.Environ(), "DB_PATH="+path)
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
-	if err != nil || !strings.Contains(string(out), "migrating "+path+": 5 -> 7\n") ||
+	if err != nil || !strings.Contains(string(out), "migrating "+path+": 5 -> 8\n") ||
 		!strings.Contains(string(out), "0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n") {
 		t.Fatalf("v5 rehearsal: %v\n%s", err, out)
 	}

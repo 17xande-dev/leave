@@ -400,6 +400,14 @@ type quoteOpts struct {
 	// cycleStart preserves the cycle already charged by a half-day correction,
 	// even if the sick-cycle anchor has changed since the request was saved.
 	cycleStart string
+	// correct is an admin changing someone else's not-yet-approved request
+	// (Service.Correct). It has record's relaxations -- any start date, no
+	// span guard, no coverage, any balance, no restricted-day rule, half
+	// days allowed, admin-only types allowed -- but not record's "must be
+	// over" rule, because the leave is usually still to come. A retired type
+	// is accepted only when it is keepTypeID (the request's own). Overlap and
+	// the maternity rule still apply, and days are recounted.
+	correct bool
 }
 
 func (s *Service) ensureYears(ctx context.Context, in Input) error {
@@ -451,12 +459,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	}
 	t, err := scanType(q.QueryRowContext(ctx, `SELECT `+typeCols+` FROM leave_types WHERE id = ?`, in.TypeID))
 	switch {
-	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory && !opt.record && !opt.adjust):
+	case errors.Is(err, ErrNotFound) || (err == nil && !t.Active && !opt.mandatory && !opt.record && !opt.adjust && !(opt.correct && t.ID == opt.keepTypeID)):
 		errs["type"] = "Choose a type of leave."
 	case err != nil:
 		return Quote{}, err
 	}
-	if err == nil && errs["type"] == "" && !t.StaffCanApply && t.ID != opt.keepTypeID && !opt.mandatory && !opt.record && !opt.adjust {
+	if err == nil && errs["type"] == "" && !t.StaffCanApply && t.ID != opt.keepTypeID && !opt.mandatory && !opt.record && !opt.adjust && !opt.correct {
 		errs["type"] = MsgAdminOnlyType(t)
 	}
 	qt.Type = t
@@ -483,10 +491,12 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["end"] = "The last day cannot be before the first day."
 	case end.Sub(start) > maxSpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A single request can cover at most %d days. Check the year.", maxSpan)
-	case t.Unit == UnitWorkdays && !opt.record && !opt.importing && !opt.adjust && !opt.mandatory && !opt.fixedDates && end.Sub(start) >= maxWorkdaySpan*24*time.Hour:
+	case t.Unit == UnitWorkdays && !opt.record && !opt.importing && !opt.adjust && !opt.correct && !opt.mandatory && !opt.fixedDates && end.Sub(start) >= maxWorkdaySpan*24*time.Hour:
 		errs["end"] = fmt.Sprintf("A request can span at most %d days from its first day to its last day.", maxWorkdaySpan)
 	case opt.mandatory:
 	case opt.adjust:
+	case opt.correct:
+		// Any dates: the admin is fixing what was submitted, past or future.
 	case opt.record:
 		// Only what has happened: future days must go through an application,
 		// or recording would bypass approval and coverage. The last day counts,
@@ -524,7 +534,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 	// The real guard behind the pickers that hide maternity from a man: every
 	// path (apply, edit, record, import, preview) comes through here.
 	if maternityRefused(t, u) {
-		errs["type"] = maternityMessage(u, !opt.record)
+		errs["type"] = maternityMessage(u, !opt.record && !opt.correct)
 		return qt, errs
 	}
 	if fe := checkHalves(in, t, start, end, holidays, st, opt); len(fe) > 0 {
@@ -555,7 +565,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 				return qt, errs
 			}
 		}
-		if !opt.mandatory && !opt.record && !opt.adjust {
+		if !opt.mandatory && !opt.record && !opt.adjust && !opt.correct {
 			for _, r := range ranges {
 				rs, _ := ParseDate(r.Start)
 				re, _ := ParseDate(r.End)
@@ -595,13 +605,13 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		}
 		if overlap > 0 {
 			errs["start"] = "You already have leave booked, waiting for approval or waiting for you to submit on some of these days."
-			if opt.record {
+			if opt.record || opt.correct {
 				errs["start"] = "They already have leave booked, waiting for approval or waiting to be submitted on some of these days."
 			}
 		}
 	}
 
-	if !opt.mandatory && !opt.record && !opt.adjust {
+	if !opt.mandatory && !opt.record && !opt.adjust && !opt.correct {
 		if qt.Coverage, err = s.coverage(ctx, q, st.Week, u, t, ranges, holidays, opt.excludeID); err != nil {
 			return Quote{}, err
 		}
@@ -630,7 +640,7 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		if after < 0 {
 			qt.Shortfall = -after
 		}
-		if after < 0 && !opt.mandatory && !opt.record && !opt.adjust && !opt.allowNegative {
+		if after < 0 && !opt.mandatory && !opt.record && !opt.adjust && !opt.correct && !opt.allowNegative {
 			errs["end"] = fmt.Sprintf("This is %s %s, but you have %s left for this cycle.",
 				qt.Days, qt.Days.Plural("day", "days"), *avail)
 		}
