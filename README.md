@@ -609,18 +609,29 @@ can fail after a Graph deletion; the transaction retains the range id, and retry
 treats Graph's 404 as success. All date writers and shutdown deletion already own
 their ranges.
 
+**If the deploy fails after 0006 applied.** The new container migrates at boot,
+before its health check. If it never becomes healthy, Kamal keeps the old 0005
+container serving a v6 database, and the 25-second figure above no longer holds:
+every Outlook create/delete fails before any Graph call and retries for about a
+day (12 attempts) before landing in "failed". The old container cannot restart
+(its boot guard refuses v6). No data is lost; events are only late. Check with
+`leave -migrate-status`, then fix forward quickly or run the undo below, and
+retry any failed calendar jobs from the outbox admin page.
+
 **Recovery after 0006.** Fix forward by default. For an image rollback, first
 preserve a fresh `.backup`, then apply the tested lossless Down script in one
 transaction through the running container:
 
 ```sh
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0006.db"'
-kamal app exec --reuse "sqlite3 -bail /data/leave.db \"$(cat internal/db/testdata/undo_0006.sql)\""
+kamal app exec --reuse "sqlite3 -bail -cmd '.timeout 10000' /data/leave.db \"$(cat internal/db/testdata/undo_0006.sql)\""
 kamal app exec --reuse 'sqlite3 -bail -readonly /data/leave.db "PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 kamal rollback <version>
 ```
 
-Require integrity `ok` and no foreign-key rows before rollback. Down preserves
+If the undo reports "database is locked" it changed nothing: retry it. Rehearse
+the undo on `/data/leave-rehearsal.db` first (undo, then `-migrate` again
+expecting `5 -> 6`). Require integrity `ok` and no foreign-key rows before rollback. Down preserves
 multi-range requests and event ids, restores both triggers and CASCADE, and appends
 an empty legacy column (so the old shim has nothing to adopt). The running 0006
 binary is safe meanwhile: it still writes its ranges and tolerates the restored
