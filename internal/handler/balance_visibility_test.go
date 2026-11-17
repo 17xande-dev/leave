@@ -27,10 +27,15 @@ func TestStaffBalanceVisibility(t *testing.T) {
 		if strings.Contains(home, name) {
 			t.Errorf("home exposes hidden balance %s", name)
 		}
-		if !strings.Contains(picker, ">"+name+"</option>") || strings.Contains(picker, ">"+name+" (") {
-			t.Errorf("apply picker must offer %s by its bare name", name)
+		applicable := name == "Maternity leave" || name == "Parental leave"
+		if strings.Contains(picker, ">"+name+"</option>") != applicable || strings.Contains(picker, ">"+name+" (") {
+			t.Errorf("apply picker eligibility/bare label wrong for %s", name)
 		}
-		if !strings.Contains(admin, "<td>"+name+" <small>not shown to them</small></td>") {
+		mark := ""
+		if !applicable {
+			mark = " <small>admin only</small>"
+		}
+		if !strings.Contains(admin, "<td>"+name+" <small>not shown to them</small>"+mark+"</td>") {
 			t.Errorf("admin lacks marked balance %s", name)
 		}
 	}
@@ -86,7 +91,7 @@ func TestAdminTypeBalanceVisibilityToggle(t *testing.T) {
 	for _, shown := range []bool{true, false} {
 		form := url.Values{"id": {id}, "name": {"Parental leave"}, "allowance": {"10"},
 			"cycle_months": {"12"}, "unit": {"calendar"}, "restricted": {"any"},
-			"coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}}
+			"coverage_rule": {"count"}, "backdate_days": {"92"}, "active": {"1"}, "staff_can_apply": {"1"}}
 		if shown {
 			form.Set("show_balance", "1")
 		}

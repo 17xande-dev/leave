@@ -396,6 +396,18 @@ func TestPreviewOffersWhatTheButtonsOffer(t *testing.T) {
 // An unlimited type has no balance afterwards to report.
 func TestApprovalQueueBalanceAfterAbsentWhenUnlimited(t *testing.T) {
 	f := newFixture(t)
+	types, err := f.svc.Types(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ty := range types {
+		if ty.Code == "unpaid" {
+			ty.StaffCanApply = true
+			if _, err := f.svc.SaveType(t.Context(), ty); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	staff, head := f.as("staff1"), f.as("headops")
 	f.ok(staff, "apply_for_leave", map[string]any{"type": "unpaid", "start": "2026-11-02", "end": "2026-11-03", "note": "n"})
 	items := f.ok(head, "approval_queue", nil).Data["queue"].([]any)

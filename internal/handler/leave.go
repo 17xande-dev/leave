@@ -261,6 +261,9 @@ func (h *Handler) applyData(r *http.Request, in leave.Input, errs leave.FieldErr
 	types := make([]leave.Type, 0, len(bs))
 	d := applyData{HalfDaysEnabled: st.HalfDaysEnabled, Input: in, Errors: errs, Preview: quoteData{Incomplete: true}, Mins: map[int64]string{}, Labels: map[int64]string{}}
 	for _, b := range bs {
+		if !b.Type.StaffCanApply && (edit == nil || b.Type.ID != edit.TypeID) {
+			continue
+		}
 		if !b.Type.OfferedTo(currentUser(r)) {
 			continue
 		}

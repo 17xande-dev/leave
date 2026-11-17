@@ -53,11 +53,44 @@ by hand. Days count against the cycle the leave starts in.
 balance on home or through MCP `my_balances`. Compassionate, unpaid, parental and
 maternity are seeded hidden; migration 0005 applies the same defaults to existing
 types. Admins can change **Show the balance to staff** under **Admin → Leave types**.
-Hidden types remain available to apply for, with their names shown in the picker and
+Balance-hidden types that staff may apply for have their names shown in the picker and
 listed in MCP `other_types`. Successful applicant previews omit the balance figures
 (MCP `available_before` and `available_after`); a refusal still states the figure needed to explain
 the limit. Admins keep
 all balances, including on person pages, adjustment and recording forms, and MCP tools.
+
+**Admin-only leave types.** `leave_types.staff_can_apply` independently controls
+self-service applications. Migration 0007 and fresh seeds turn it off for compassionate
+and unpaid leave; admins can change **Staff can apply for it** under **Admin → Leave
+types**. These types disappear from the apply picker and MCP applicant suggestions.
+The service refuses them even for admins applying for themselves:
+“Compassionate leave is arranged with HR, so it cannot be applied for here. Apply for
+another type with a note saying why, and HR can change it.” (using the type's name).
+Existing requests are untouched: owners editing one keep its type, HR-allowed drafts
+keep theirs, and approval, withdrawal and cancellation still work. Admins can record
+these types for past leave; correcting requests to them arrives with Phase 11c.
+
+**0007 rehearsal and rollback (operator).** Before deploying, use a host `.backup`
+copy, never the live database, and run:
+`ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"`.
+Expect `6 -> 7`; counts of `users`, `requests`, `request_ranges`,
+`balance_adjustments` and `request_steps` must be unchanged. Check
+`SELECT code, active, show_balance, staff_can_apply FROM leave_types ORDER BY sort`:
+exactly compassionate and unpaid must have `staff_can_apply = 0`.
+Before deploy, list the existing live requests for the user (they stay valid):
+```sql
+SELECT r.id, r.status, t.code
+FROM requests r JOIN leave_types t ON t.id = r.type_id
+WHERE t.code IN ('compassionate','unpaid')
+  AND r.status IN ('pending','awaiting_hr','draft');
+```
+Run `PRAGMA integrity_check` and `PRAGMA foreign_key_check`; repeat `-migrate`
+and expect `7 -> 7`. The old container's explicit type projection and UPDATE
+leave the new column alone; its INSERT defaults to 1. During the brief swap it
+still offers both types, harmlessly. Behavioural rollback: tick **Staff can apply
+for it**. Fix forward by default. For an image rollback, take a `.backup`, run
+`internal/db/testdata/undo_0007.sql` through the running container (discards only
+these flags, not requests), then `kamal rollback`.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
@@ -472,7 +505,7 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all six migrations pending until startup or `-migrate`. A database newer than
+reports all seven migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;

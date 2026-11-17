@@ -15,6 +15,7 @@ func (f *fixture) after(r Request) After {
 // Available() says now, and equals what the quote promised before submitting.
 func TestAfterApproval(t *testing.T) {
 	f := newFixture(t)
+	f.enableStaffType("unpaid")
 
 	// Annual: 15 days, 3 requested. The quote said 12; so does the queue, and
 	// the days are not taken off twice.

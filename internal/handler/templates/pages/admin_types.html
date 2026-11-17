@@ -10,7 +10,7 @@
   <tbody>
   {{range .Data}}
     <tr>
-      <td><a href="/admin/types/{{.ID}}">{{.Name}}</a> <small>{{.Code}}</small>{{if not .ShowBalance}} <span class="badge">balance hidden from staff</span>{{end}}</td>
+      <td><a href="/admin/types/{{.ID}}">{{.Name}}</a> <small>{{.Code}}</small>{{if not .ShowBalance}} <span class="badge">balance hidden from staff</span>{{end}}{{if not .StaffCanApply}} <span class="badge">admin only</span>{{end}}</td>
       <td class="num">{{with .Allowance}}{{.}}{{else}}No limit{{end}}</td>
       <td>{{.CycleMonths}} months</td>
       <td>{{if eq .Unit "calendar"}}Calendar days{{else if eq .Unit "weekend"}}Weekends{{else}}Working days{{end}}</td>

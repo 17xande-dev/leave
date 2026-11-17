@@ -54,6 +54,7 @@ func (s *Service) PreviewEdit(ctx context.Context, u users.User, id int64, in In
 			return Quote{}, false, err
 		}
 		if editing {
+			opt.keepTypeID = r.TypeID
 			opt.excludeID = id
 			opt.fixedDates = unchangedRanges(in, r)
 		}
@@ -109,7 +110,7 @@ func (s *Service) Edit(ctx context.Context, u users.User, id int64, in Input) (R
 		} else if !ok {
 			return ErrNotAllowed
 		}
-		qt, err := s.quote(ctx, tx, u, in, quoteOpts{override: in.Override, excludeID: id, fixedDates: unchangedRanges(in, old)})
+		qt, err := s.quote(ctx, tx, u, in, quoteOpts{keepTypeID: old.TypeID, override: in.Override, excludeID: id, fixedDates: unchangedRanges(in, old)})
 		if err != nil {
 			editShortfall(qt, err)
 			return err

@@ -371,6 +371,9 @@ func (s *Service) Preview(ctx context.Context, u users.User, in Input) (Quote, e
 // special permission for a department limit, and HR's permission to go below
 // zero. Both still report what they waived (Quote.Coverage, Quote.Shortfall).
 type quoteOpts struct {
+	// keepTypeID is the type a request already has, which an owner edit or
+	// draft submission may keep even when staff can no longer apply for it.
+	keepTypeID int64
 	// fixedDates exempts existing drafts and unchanged edits from the new span guard.
 	fixedDates bool
 	// halvesAllowed preserves flags accepted for an HR draft and lets admins
@@ -452,6 +455,9 @@ func (s *Service) quote(ctx context.Context, q querier, u users.User, in Input, 
 		errs["type"] = "Choose a type of leave."
 	case err != nil:
 		return Quote{}, err
+	}
+	if err == nil && errs["type"] == "" && !t.StaffCanApply && t.ID != opt.keepTypeID && !opt.mandatory && !opt.record && !opt.adjust {
+		errs["type"] = MsgAdminOnlyType(t)
 	}
 	qt.Type = t
 

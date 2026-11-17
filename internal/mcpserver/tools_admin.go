@@ -405,7 +405,7 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 
 	add(d, s, &mcp.Tool{Name: "record_leave", Annotations: additive("Record leave a person took (administrators)"),
 		Description: "Administrators only: write down leave a person has already started or taken, stored as approved. The person is emailed and it goes on the shared calendar. " +
-			"A note saying why is required. Leave whose last day is still to come is refused (future days go through an application); a retired type is allowed; the balance may go below zero (reported as below_zero). " +
+			"A note saying why is required. Leave whose last day is still to come is refused (future days go through an application); any type, including ones staff cannot apply for or a retired type, is allowed; the balance may go below zero (reported as below_zero). " +
 			"You cannot record your own leave; another administrator does that. Only when the person has told you to. " +
 			"Use start/end for one stretch or ranges: [{start, end}] instead, never both. Several stretches are for workdays types only, max 3; recording is exempt from the applicants' 31-day limit. " +
 			"half_start / half_end apply to the first day of the first range and last day of the last range of the whole request (0.5); admins recording leave can always use half days."}, d.recordLeave)

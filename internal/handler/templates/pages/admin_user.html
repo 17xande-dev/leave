@@ -62,7 +62,7 @@
   <tbody>
   {{range .Balances}}
     <tr>
-      <td>{{.Type.Name}}{{if not .Type.ShowBalance}} <small>not shown to them</small>{{end}}</td>
+      <td>{{.Type.Name}}{{if not .Type.ShowBalance}} <small>not shown to them</small>{{end}}{{if not .Type.StaffCanApply}} <small>admin only</small>{{end}}</td>
       <td><small>{{date .CycleStart}} – {{date .CycleEnd}}</small></td>
       <td class="num">{{with .Allowance}}{{.}}{{else}}—{{end}}</td>
       <td class="num">{{.Adjustments}}</td>

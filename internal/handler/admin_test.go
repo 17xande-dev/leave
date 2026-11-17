@@ -137,7 +137,7 @@ func TestTypeAndHolidayAdmin(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
 	res, _ := hs.post(hr, "/admin/types", url.Values{"code": {"study"}, "name": {"Study leave"},
-		"allowance": {"5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}})
+		"allowance": {"5"}, "backdate_days": {"92"}, "cycle_months": {"12"}, "unit": {"workdays"}, "active": {"1"}, "staff_can_apply": {"1"}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("new type: %d", res.StatusCode)
 	}

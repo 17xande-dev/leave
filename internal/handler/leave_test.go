@@ -252,6 +252,9 @@ func TestApplyPageCarriesBackdateMin(t *testing.T) {
 	_, body := hs.get(c, "/leave/new")
 	n := 0
 	for _, ty := range ts {
+		if !ty.StaffCanApply {
+			continue
+		}
 		want := map[string]string{"annual": "2026-09-25", "sick": "2026-07-05"}[ty.Code]
 		if want == "" {
 			want = "2026-07-05" // the other seeded types
@@ -562,6 +565,15 @@ func TestQuoteListsUnchargedDays(t *testing.T) {
 
 func TestApplyTypeLabelsShowWhatIsLeft(t *testing.T) {
 	hs := newHarness(t)
+	// The unlimited label remains useful when HR enables self-service.
+	unpaid, err := hs.svc.Type(t.Context(), mustAtoi(t, hs.typeID("unpaid")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unpaid.StaffCanApply = true
+	if _, err := hs.svc.SaveType(t.Context(), unpaid); err != nil {
+		t.Fatal(err)
+	}
 	c := hs.signIn("staff1")
 	ctx := context.Background()
 	annual, err := hs.svc.Type(ctx, mustAtoi(t, hs.typeID("annual")))

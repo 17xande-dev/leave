@@ -53,7 +53,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -65,7 +65,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -76,7 +76,7 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (7, 1)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (8, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -287,7 +287,7 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
 			t.Fatal(err)
 		}
-		if version != 6 || applied != 1 || rows != 7 {
+		if version != 7 || applied != 1 || rows != 8 {
 			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
 		}
 		d.Close()
@@ -313,7 +313,7 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 || version != 6 || applied != 6 {
+	if count != 7 || version != 7 || applied != 7 {
 		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
 	}
 }
@@ -382,7 +382,7 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }

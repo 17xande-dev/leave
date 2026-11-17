@@ -99,6 +99,7 @@ func TestRangeSpanLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
+			f.enableStaffType("unpaid")
 			in := Input{TypeID: f.types[tc.code].ID, Start: tc.start, End: tc.end, Ranges: tc.ranges, Note: "log"}
 			var err error
 			switch tc.path {

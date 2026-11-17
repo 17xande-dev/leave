@@ -100,6 +100,7 @@ func TestMultiRangeSpanPolicies(t *testing.T) {
 	for _, path := range []string{"preview", "submit", "edit", "record", "import"} {
 		t.Run(path, func(t *testing.T) {
 			f := newFixture(t)
+			f.enableStaffType("unpaid")
 			in := Input{TypeID: f.types["unpaid"].ID, Ranges: []Range{{"2026-11-02", "2026-11-03"}, {"2026-12-03", "2026-12-03"}}, Note: "leave"}
 			var err error
 			switch path {

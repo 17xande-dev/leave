@@ -72,10 +72,16 @@
   </div>
   <div class="checks">
     <label><input type="checkbox" name="requires_note" value="1"{{if .Type.RequiresNote}} checked{{end}}> Requires a note</label>
-    <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Offered on the apply form</label>
+    <label><input type="checkbox" name="active" value="1"{{if .Type.Active}} checked{{end}}> Active (not retired)</label>
+  </div>
+  <div class="checks">
+    <label><input type="checkbox" name="staff_can_apply" value="1"{{if .Type.StaffCanApply}} checked{{end}}> Staff can apply for it</label>
+  </div>
+  <p class="hint">Off: only an admin can put leave of this type on someone's record, by recording it or correcting a request.</p>
+  <div class="checks">
     <label><input type="checkbox" name="show_balance" value="1"{{if .Type.ShowBalance}} checked{{end}}> Show the balance to staff</label>
   </div>
-  <p class="hint">Off: the type can still be applied for, but its days left are only shown to admins.</p>
+  <p class="hint">Off: days left are only shown to admins. Whether staff can apply is controlled separately.</p>
   <div class="actions"><button type="submit">Save</button><a href="/admin/types">Cancel</a></div>
 </form>
 {{end}}

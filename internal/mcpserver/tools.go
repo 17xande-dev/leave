@@ -177,7 +177,7 @@ func (d *deps) myBalances(ctx context.Context, u users.User, _ none) (BalancesOu
 	for _, b := range bs {
 		if b.Type.ShowBalance {
 			out.Balances = append(out.Balances, balanceInfo(b))
-		} else {
+		} else if b.Type.StaffCanApply {
 			out.OtherTypes = append(out.OtherTypes, OtherTypeInfo{Code: b.Type.Code, Name: b.Type.Name, Unit: b.Type.Unit})
 		}
 	}
@@ -363,6 +363,12 @@ func (d *deps) resolveType(ctx context.Context, name string, target users.User) 
 // resolveTypeIn is resolveType, optionally over retired types too (recording
 // leave from before a type was retired).
 func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool, target users.User) (leave.Type, error) {
+	return d.resolveTypeHint(ctx, name, activeOnly, target, false)
+}
+
+// staffOnly filters suggestions, never exact matches: the service supplies the
+// useful HR refusal for a recognised admin-only type.
+func (d *deps) resolveTypeHint(ctx context.Context, name string, activeOnly bool, target users.User, staffOnly bool) (leave.Type, error) {
 	ts, err := d.leave.Types(ctx, activeOnly)
 	if err != nil {
 		return leave.Type{}, err
@@ -377,7 +383,7 @@ func (d *deps) resolveTypeIn(ctx context.Context, name string, activeOnly bool, 
 	}
 	opts := make([]string, 0, len(ts))
 	for _, t := range ts {
-		if t.OfferedTo(target) {
+		if t.OfferedTo(target) && (!staffOnly || t.StaffCanApply) {
 			opts = append(opts, fmt.Sprintf("%s (%s)", t.Code, t.Name))
 		}
 	}
@@ -397,7 +403,7 @@ type RequestIn struct {
 // input is the request as the applicant u made it; u only shapes the hint when
 // the type is not recognised.
 func (d *deps) input(ctx context.Context, u users.User, in RequestIn) (leave.Input, error) {
-	t, err := d.resolveType(ctx, in.Type, u)
+	t, err := d.resolveTypeHint(ctx, in.Type, true, u, true)
 	if err != nil {
 		return leave.Input{}, err
 	}

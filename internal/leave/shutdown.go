@@ -396,7 +396,7 @@ func (s *Service) SubmitDraftOverride(ctx context.Context, u users.User, id int6
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		opt := quoteOpts{fixedDates: true, mandatory: true, excludeID: id, halvesAllowed: true}
 		if !d.IsShutdown() {
-			opt = quoteOpts{fixedDates: true, allowNegative: d.AllowNegative, override: override, excludeID: id, halvesAllowed: true}
+			opt = quoteOpts{keepTypeID: d.TypeID, fixedDates: true, allowNegative: d.AllowNegative, override: override, excludeID: id, halvesAllowed: true}
 		}
 		qt, err := s.quote(ctx, tx, u, in, opt)
 		if err != nil {

@@ -165,6 +165,7 @@ func TestEditOverlapAndBalanceDoNotCountItself(t *testing.T) {
 	}
 
 	// A neighbour's request (a different one of their own) still blocks.
+	f.enableStaffType("unpaid")
 	other := f.mustSubmit("staff", "unpaid", "2026-11-09", "2026-11-09")
 	_ = other
 	if _, err := f.edit("staff", r.ID, "annual", "2026-10-30", "2026-11-09", "n"); !fieldErr(err, "start") {
@@ -223,6 +224,7 @@ func TestEditEscalatedClearsWithoutOverride(t *testing.T) {
 
 func TestEditTypeBackdateAndNote(t *testing.T) {
 	f := newFixture(t)
+	f.enableStaffType("unpaid")
 	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-13")
 	before := f.available("staff", "annual")
 
@@ -339,6 +341,7 @@ func TestDecideSeenRefusesAChangedRequest(t *testing.T) {
 	if _, err := f.svc.DecideSeen(f.ctx, head, r.ID, true, "", mustGet(f, r.ID).Fingerprint()); err != nil {
 		t.Fatal(err)
 	}
+	f.enableStaffType("unpaid")
 	r2 := f.mustSubmit("staff", "unpaid", "2026-11-09", "2026-11-09")
 	if _, err := f.svc.DecideSeen(f.ctx, head, r2.ID, true, "", ""); err != nil {
 		t.Fatalf("no fingerprint: %v", err)

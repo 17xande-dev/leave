@@ -50,6 +50,14 @@ func (hs *harness) status(path string) string {
 
 func TestQueueBalanceAfter(t *testing.T) {
 	hs := newHarness(t)
+	unlimited, err := hs.svc.Type(t.Context(), mustAtoi(t, hs.typeID("unpaid")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlimited.StaffCanApply = true
+	if _, err := hs.svc.SaveType(t.Context(), unlimited); err != nil {
+		t.Fatal(err)
+	}
 	staff, head := hs.signIn("staff1"), hs.signIn("headops")
 	three := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
 	next := hs.apply(staff, "annual", "2027-01-04", "2027-01-05")
