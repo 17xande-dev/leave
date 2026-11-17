@@ -2,7 +2,6 @@ package leave
 
 import (
 	"context"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -62,8 +61,6 @@ func (f PayrollFigures) ToDate() *Days {
 	}
 	return n
 }
-
-var payrollOpening = regexp.MustCompile(`D = (-?[0-9]+(?:\.[0-9]{1,2})?)\.`)
 
 // Payroll uses grouped reads, not a query per person. No transaction: the
 // DSN's _txlock=immediate would take a write lock for this read-only export.
@@ -213,9 +210,12 @@ func (s *Service) payrollOpenings(ctx context.Context, rep *PayrollReport) error
 		if !ok {
 			continue
 		}
-		m := payrollOpening.FindStringSubmatch(reason)
-		if m != nil {
-			if d, err := ParseDays(m[1]); err == nil {
+		// Strip the sentence delimiter, then let the shared decimal parser
+		// accept (and validate) signs, leading dots and trailing decimal dots.
+		_, figure, found := strings.Cut(reason, "D = ")
+		figure, terminated := strings.CutSuffix(figure, ".")
+		if found && terminated {
+			if d, err := ParseDays(figure); err == nil {
 				p.Opening = &d
 				continue
 			}

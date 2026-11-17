@@ -2,7 +2,7 @@
 {{template "adminnav"}}
 <div class="page-head">
   <h1>People</h1>
-  <form method="get" action="/admin/payroll.xlsx">
+  <form method="get" action="/admin/payroll.xlsx" class="payroll-export">
     <label for="include_disabled"><input type="checkbox" id="include_disabled" name="include_disabled" value="1"> Include disabled accounts</label>
     <button type="submit" class="quiet">Download payroll export (Excel)</button>
   </form>

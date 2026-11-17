@@ -29,6 +29,7 @@ func TestPayrollParity(t *testing.T) {
 	}{
 		{"annual", "2026-01-01", "approved", "leave", "2026-10-06", "2026-10-06", 50},
 		{"annual", "2026-01-01", "approved", "leave", "2026-10-04", "2026-10-12", 300},
+		{"annual", "2026-01-01", "approved", "leave", "2026-10-05", "2026-10-05", 111},
 		{"annual", "2026-01-01", "pending", "leave", "2026-11-02", "2026-11-02", 100},
 		{"annual", "2026-01-01", "pending", "cancellation", "2026-10-06", "2026-10-06", 50},
 		{"annual", "2026-01-01", "awaiting_hr", "leave", "2026-11-03", "2026-11-03", 100},
@@ -92,7 +93,7 @@ func TestPayrollParity(t *testing.T) {
 			}
 			compared++
 			if p.User.Username == "staff" && pt.Type.Code == "annual" {
-				if fig.ApprovedFuture != 50 || *fig.ToDate() != 2183 || *fig.Available() != 2033 {
+				if fig.ApprovedFuture != 50 || *fig.ToDate() != 2072 || *fig.Available() != 1922 {
 					t.Errorf("future/to date: %+v, %v", fig, fig.ToDate())
 				}
 			}
@@ -124,7 +125,8 @@ func TestPayrollParity(t *testing.T) {
 func TestPayrollPeopleAndHiddenTypes(t *testing.T) {
 	f := newFixture(t)
 	if _, err := f.db.Exec(`UPDATE users SET sex='m' WHERE username='staff';
-		UPDATE users SET name='Same' WHERE username IN ('head','hr');
+		UPDATE users SET name='Same', username='z-head' WHERE username='head';
+		UPDATE users SET name='sAME', username='a-hr' WHERE username='hr';
 		UPDATE users SET disabled=1 WHERE username='orphan'`); err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +149,44 @@ func TestPayrollPeopleAndHiddenTypes(t *testing.T) {
 			}
 		}
 	}
-	if rep.People[1].User.Username != "head" || rep.People[2].User.Username != "hr" {
+	if rep.People[1].User.Username != "a-hr" || rep.People[2].User.Username != "z-head" {
 		t.Errorf("order: %+v", rep.People)
 	}
 	rep, err = f.svc.Payroll(f.ctx, true)
 	if err != nil || len(rep.People) != 5 || !rep.IncludeDisabled {
 		t.Fatalf("disabled: %d %v", len(rep.People), err)
+	}
+}
+
+func TestPayrollOpeningDecimalForms(t *testing.T) {
+	for _, figure := range []string{"+12", ".5", "-.5", "2.", "+12.34", " 12 ", "1.234", "1e2", "1.2.3", "", "+"} {
+		t.Run(figure, func(t *testing.T) {
+			f := newFixture(t)
+			payrollAdjustment(t, f, "staff", "annual", "2026-01-01", 1,
+				"Opening balance from payroll: D = "+figure+".", "2026-10-01")
+			rep, err := f.svc.Payroll(f.ctx, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, parseErr := ParseDays(figure)
+			found := false
+			for _, p := range rep.People {
+				if p.User.Username != "staff" {
+					continue
+				}
+				found = true
+				if parseErr == nil {
+					if p.Opening == nil || *p.Opening != want || rep.UnparsedOpenings != 0 {
+						t.Errorf("opening=%v want %s, unparsed=%d", p.Opening, want, rep.UnparsedOpenings)
+					}
+				} else if p.Opening != nil || rep.UnparsedOpenings != 1 {
+					t.Errorf("invalid opening=%v unparsed=%d", p.Opening, rep.UnparsedOpenings)
+				}
+			}
+			if !found {
+				t.Fatal("staff missing")
+			}
+		})
 	}
 }
 

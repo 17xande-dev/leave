@@ -958,6 +958,13 @@ table {
   }
 }
 
+.payroll-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
 .filters {
   margin-block-end: var(--gap-md);
 }

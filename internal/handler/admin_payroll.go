@@ -7,15 +7,23 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"unicode/utf16"
 
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/xuri/excelize/v2"
 )
 
 func (h *Handler) AdminPayrollExport(w http.ResponseWriter, r *http.Request) {
+	values := r.URL.Query()["include_disabled"]
 	v := r.URL.Query().Get("include_disabled")
-	if v != "" && v != "1" {
+	if len(values) > 1 || (v != "" && v != "1") {
 		http.Error(w, "Choose whether to include disabled accounts.", http.StatusBadRequest)
+		return
+	}
+	// GET routes also accept HEAD. A metadata probe must not build or audit an export.
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+		w.Header().Set("Cache-Control", "no-store")
 		return
 	}
 	rep, err := h.leave.Payroll(r.Context(), v == "1")
@@ -49,6 +57,11 @@ var payrollAllHeaders = []string{"Name", "Username", "Department", "Status", "Le
 // A typed string cell is never evaluated by Excel, unlike CSV. No visible
 // apostrophe is added; excelize's public Style has no quotePrefix.
 func setText(f *excelize.File, sheet, cell, s string) error {
+	// Excelize silently truncates overlong strings; fail the buffered export
+	// instead of presenting a lossy payroll file as successful.
+	if len(utf16.Encode([]rune(s))) > excelize.TotalCellChars {
+		return excelize.ErrCellCharsLength
+	}
 	return f.SetCellStr(sheet, cell, s)
 }
 
@@ -108,6 +121,7 @@ func (w *payrollCells) dataSheet(sheet string, headers []string, rows int, width
 		w.check(w.f.SetColWidth(sheet, col, col, widths[i]))
 	}
 	last := payrollCell(len(headers), rows)
+	w.check(w.f.SetSheetDimension(sheet, "A1:"+last))
 	w.check(w.f.SetCellStyle(sheet, "A1", payrollCell(len(headers), 1), w.header))
 	w.check(w.f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"}))
 	w.check(w.f.AutoFilter(sheet, "A1:"+last, nil))
@@ -134,7 +148,8 @@ func payrollWorkbook(rep leave.PayrollReport, generatedAt time.Time, byName stri
 	}
 	w.header, err = f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	w.check(err)
-	w.check(f.SetDocProps(&excelize.DocProperties{Title: "Leave balances for payroll", Creator: "Leave", Created: generatedAt.Format(time.RFC3339)}))
+	w.check(f.SetDocProps(&excelize.DocProperties{Title: "Leave balances for payroll", Creator: "Leave",
+		Created: generatedAt.Format(time.RFC3339), Modified: generatedAt.Format(time.RFC3339)}))
 	annualRow, allRow := 2, 2
 	for _, p := range rep.People {
 		u := p.User
@@ -211,7 +226,7 @@ func payrollWorkbook(rep leave.PayrollReport, generatedAt time.Time, byName stri
 		{"Available", "What the person can still book: entitlement less approved and pending leave, including leave booked for later."},
 		{"Balance to date", "Entitlement less approved leave that has already started. Ignores pending and future leave; a request starting on or before the as-at date counts whole."},
 		{"Payroll opening balance", "Payroll's October 2026 figure the app's balances were set to. Blank where no correction was needed."},
-		{"Change since opening", "Available less payroll opening balance: what the app has deducted or added since."},
+		{"Change since opening", "Available less payroll opening balance: what the app has deducted or added since. Opening and Change since opening go blank when the annual cycle rolls over on 1 Jan 2027."},
 		{"Day counts", "The app counts each person's work week (with their long weekend) less South African public holidays, so its day counts can differ from payroll's."},
 	} {
 		w.text("About", 1, row, pair[0])
@@ -220,6 +235,7 @@ func payrollWorkbook(rep leave.PayrollReport, generatedAt time.Time, byName stri
 	}
 	w.check(f.SetColWidth("About", "A", "A", 28))
 	w.check(f.SetColWidth("About", "B", "B", 100))
+	w.check(f.SetSheetDimension("About", "A1:"+payrollCell(2, row-1)))
 	if w.err != nil {
 		return nil, w.err
 	}

@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -156,8 +158,29 @@ func TestPayrollWorkbook(t *testing.T) {
 		t.Fatal("no unlimited rows")
 	}
 	props, err := f.GetDocProps()
-	if err != nil || props.Creator != "Leave" || props.Title != "Leave balances for payroll" {
+	if err != nil || props.Creator != "Leave" || props.Title != "Leave balances for payroll" ||
+		props.Modified != props.Created || !strings.HasPrefix(props.Modified, "2026-10-05T") {
 		t.Errorf("props=%+v %v", props, err)
+	}
+	for _, sheet := range f.GetSheetList() {
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cols := 2
+		if sheet == "Annual leave" {
+			cols = 15
+		} else if sheet == "All types" {
+			cols = 13
+		}
+		want := "A1:" + payrollCell(cols, len(rows))
+		if got, err := f.GetSheetDimension(sheet); err != nil || got != want {
+			t.Errorf("%s dimension=%q, %v; want %s", sheet, got, err, want)
+		}
+	}
+	about, _ := f.GetRows("About")
+	if !strings.Contains(fmt.Sprint(about), "go blank when the annual cycle rolls over on 1 Jan 2027") {
+		t.Error("missing opening rollover explanation")
 	}
 }
 
@@ -229,6 +252,8 @@ func TestPayrollAccessAndFailure(t *testing.T) {
 	}{
 		{"", "/admin/payroll.xlsx", 303}, {"staff1", "/admin/payroll.xlsx", 403},
 		{"hr", "/admin/payroll.xlsx?include_disabled=yes", 400},
+		{"hr", "/admin/payroll.xlsx?include_disabled=1&include_disabled=yes", 400},
+		{"hr", "/admin/payroll.xlsx?include_disabled=1&include_disabled=1", 400},
 	} {
 		c := hs.client()
 		if tc.who != "" {
@@ -287,6 +312,125 @@ func TestPayrollAccessAndFailure(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != 500 || strings.Contains(res.Header.Get("Content-Type"), "spreadsheet") || res.Header.Get("Content-Disposition") != "" {
 		t.Errorf("failure=%d %v", res.StatusCode, res.Header)
+	}
+}
+
+func TestPayrollColumnMapping(t *testing.T) {
+	hs := newHarness(t)
+	ctx := context.Background()
+	staff, _ := hs.us.ByUsername(ctx, "staff1")
+	hr, _ := hs.us.ByUsername(ctx, "hr")
+	types, err := hs.svc.Types(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var annual leave.Type
+	for _, ty := range types {
+		if ty.Code == leave.AnnualCode {
+			annual = ty
+		}
+	}
+	if err := hs.svc.AddAdjustment(ctx, hr, leave.Adjustment{UserID: staff.ID, TypeID: annual.ID,
+		CycleStart: "2026-01-01", Days: 111, Reason: "Opening balance from payroll: D = 7.77."}); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		start, status string
+		days          int
+	}{
+		{"2026-10-04", "approved", 222},
+		// Exactly on the as-at date counts as started, not future.
+		{"2026-10-05", "approved", 55},
+		{"2026-10-06", "approved", 333},
+		{"2026-10-07", "pending", 444},
+	} {
+		if _, err := hs.db.Exec(`INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
+			VALUES (?,?,'leave',?,?,?,'2026-01-01',?,'2026-10-01')`,
+			staff.ID, annual.ID, r.start, r.start, r.days, r.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := hs.signIn("hr")
+	res, err := c.Get(hs.srv.URL + "/admin/payroll.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil || res.StatusCode != 200 {
+		t.Fatalf("export: %d %v", res.StatusCode, err)
+	}
+	f := readPayroll(t, body)
+	for _, tc := range []struct {
+		sheet string
+		first int
+		want  []string
+	}{
+		{"Annual leave", 6, []string{"15.00", "1.11", "16.11", "6.10", "3.33", "4.44", "5.57", "13.34", "7.77", "-2.20"}},
+		{"All types", 9, []string{"15.00", "1.11", "6.10", "4.44", "5.57"}},
+	} {
+		rows, err := f.GetRows(tc.sheet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for i, row := range rows[1:] {
+			if row[1] != "staff1" || (tc.sheet == "All types" && row[4] != annual.Name) {
+				continue
+			}
+			found++
+			var got []string
+			for j := range tc.want {
+				got = append(got, payrollValue(t, f, tc.sheet, payrollCell(tc.first+j, i+2), true))
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%s full numeric row=%v want %v", tc.sheet, got, tc.want)
+			}
+		}
+		if found != 1 {
+			t.Fatalf("%s matched %d rows", tc.sheet, found)
+		}
+	}
+}
+
+func TestPayrollWorkbookFailureAndHead(t *testing.T) {
+	hs := newHarness(t)
+	c := hs.signIn("hr")
+	// The report reads successfully, but an oversized name fails the text writer
+	// after sheet creation. Serialization alone would silently truncate it.
+	if _, err := hs.db.Exec(`UPDATE users SET name=? WHERE username='staff1'`, strings.Repeat("x", 32768)); err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	res, err := c.Get(hs.srv.URL + "/admin/payroll.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil || res.StatusCode != 500 || strings.Contains(res.Header.Get("Content-Type"), "spreadsheet") ||
+		res.Header.Get("Content-Disposition") != "" || bytes.HasPrefix(body, []byte("PK")) {
+		t.Fatalf("workbook failure: %d %v (%d body bytes) %v", res.StatusCode, res.Header, len(body), err)
+	}
+	// HEAD must not even query/build the report, much less record an export.
+	if _, err := hs.db.Exec(`DROP TABLE balance_adjustments`); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodHead, hs.srv.URL+"/admin/payroll.xlsx", nil)
+	res, err = c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err = io.ReadAll(res.Body)
+	res.Body.Close()
+	if err != nil || res.StatusCode != 200 || len(body) != 0 {
+		t.Errorf("HEAD: %d body=%q err=%v", res.StatusCode, body, err)
+	}
+	if strings.Contains(logs.String(), "payroll export") {
+		t.Error("failed export or HEAD wrote an export audit line")
 	}
 }
 
