@@ -103,12 +103,13 @@
   {{template "csrf" $.CSRF}}
   <h2>Reassign <small>(admin)</small></h2>
   <p>Currently with {{with .Request.ApproverName}}{{.}}{{else}}the leave administrators{{end}}</p>
+  {{if not .CanReassignQueue}}<p class="hint">No other enabled administrator exists. Make someone else an administrator before using the leave administrators queue.</p>{{end}}
   <div class="field-row">
     <div class="field">
       <label for="approver">Approver</label>
       <select id="approver" name="approver" required>
         <option value="" selected disabled>Choose…</option>
-        <option value="0">Leave administrators</option>
+        {{if .CanReassignQueue}}<option value="0">Leave administrators</option>{{end}}
         {{range .Candidates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
       </select>
     </div>

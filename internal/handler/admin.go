@@ -208,6 +208,8 @@ func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
 			notice = "reassign-dormant"
 		case leave.MsgReassignNotAdmin:
 			notice = "reassign-not-admin"
+		case leave.MsgReassignNoOtherAdmin:
+			notice = "reassign-no-other-admin"
 		}
 		http.Redirect(w, r, requestURL(r, id, notice), http.StatusSeeOther)
 		return
@@ -412,6 +414,14 @@ func (h *Handler) AdminSetApprover(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if _, err := h.users.ByID(r.Context(), id); err != nil {
+		if errors.Is(err, users.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.serverError(w, r, err)
 		return
 	}
 	approver, err := strconv.ParseInt(r.PostFormValue("approver"), 10, 64)

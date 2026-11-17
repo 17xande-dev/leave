@@ -584,10 +584,27 @@ func (s *Service) Reassign(ctx context.Context, admin users.User, id, approverID
 	}
 	var out Request
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		if r, err := s.get(ctx, tx, id); err != nil {
+		r, err := s.get(ctx, tx, id)
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
+			return ErrNotAllowed
+		}
+		if err != nil {
 			return err
-		} else if approverID != 0 && r.UserID == approverID {
+		}
+		if approverID != 0 && r.UserID == approverID {
 			return FieldErrors{"approver": MsgReassignOwner}
+		}
+		if approverID == 0 {
+			// The owner cannot decide their own request, even in the queue.
+			var otherAdmin bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+				SELECT 1 FROM users WHERE is_admin = 1 AND disabled = 0 AND id <> ?
+			)`, r.UserID).Scan(&otherAdmin); err != nil {
+				return err
+			}
+			if !otherAdmin {
+				return FieldErrors{"approver": MsgReassignNoOtherAdmin}
+			}
 		}
 		if approverID != 0 {
 			if err := approverTarget(ctx, tx, approverID, MsgReassignNotAdmin); err != nil {

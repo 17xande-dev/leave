@@ -20,7 +20,7 @@
   {{template "csrf" $.CSRF}}
   <h2>Approver override</h2>
   <p class="hint">Applies to new requests. Pending requests keep their approver; reassign those from the request page.</p>
-  {{with .LegacyOverride}}<p>Current override: {{.}} -- not an administrator; kept until changed.</p>{{end}}
+  {{with .LegacyOverride}}<p>Current override: {{.}} — not an enabled administrator; kept until changed.</p>{{end}}
   <div class="field">
     <label for="approver">Approver</label>
     <select id="approver" name="approver" required>

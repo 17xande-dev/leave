@@ -74,13 +74,40 @@ func TestReassignFormTargets(t *testing.T) {
 			t.Fatalf("approver=%d want=%d", rs[0].ApproverID, want)
 		}
 	}
-	// No other admin remains: the group queue is still a useful choice.
+	// Even when the current approver is eligible, reassignment must be explicit.
+	_, body := hs.get(hr, own)
+	s := approverSelect(t, body)
+	if !strings.Contains(s, `<option value="`+itoa(hs.staffID("headkids"))+`">Kagiso Kids</option>`) ||
+		strings.Count(s, "selected") != 1 ||
+		!strings.Contains(s, `<option value="" selected disabled>Choose…</option>`) {
+		t.Fatalf("current administrator was preselected: %s", s)
+	}
+	// With another admin the group queue is still a useful choice.
+	res, _ := hs.post(hr, action, url.Values{"approver": {"0"}})
+	if res.StatusCode != 303 || !strings.HasSuffix(res.Header.Get("Location"), "?notice=reassigned") {
+		t.Fatalf("queue with second admin: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	// No other admin remains: the owner cannot decide their own queue entry.
 	if _, err := hs.db.Exec(`UPDATE users SET is_admin = 0 WHERE username = 'headkids'`); err != nil {
 		t.Fatal(err)
 	}
-	_, body := hs.get(hr, own)
-	if s := approverSelect(t, body); !strings.Contains(s, "Leave administrators") {
-		t.Fatal(s)
+	_, body = hs.get(hr, own)
+	if s := approverSelect(t, body); strings.Contains(s, `<option value="0">`) ||
+		!strings.Contains(body, "No other enabled administrator exists. Make someone else an administrator") {
+		t.Fatal(body)
+	}
+	res, _ = hs.post(hr, action, url.Values{"approver": {"0"}})
+	if res.StatusCode != 303 || !strings.HasSuffix(res.Header.Get("Location"), "?notice=reassign-no-other-admin") {
+		t.Fatalf("queue with only owner: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	_, body = hs.get(hr, res.Header.Get("Location"))
+	if !strings.Contains(body, leave.MsgReassignNoOtherAdmin) {
+		t.Fatal(body)
+	}
+	// The lone administrator can still decide someone else's queued request.
+	_, body = hs.get(hr, other)
+	if !strings.Contains(approverSelect(t, body), `<option value="0">Leave administrators</option>`) {
+		t.Fatal(body)
 	}
 }
 
@@ -108,7 +135,7 @@ func TestOverrideFormTargets(t *testing.T) {
 	}
 	_, body = hs.get(hr, path)
 	s = approverSelect(t, body)
-	if !strings.Contains(body, "Current override: Sam Staff -- not an administrator; kept until changed.") ||
+	if !strings.Contains(body, "Current override: Sam Staff — not an enabled administrator; kept until changed.") ||
 		!strings.Contains(s, `<option value="" selected disabled>Choose…</option>`) || strings.Contains(s, "Sam Staff") {
 		t.Fatal(body)
 	}
@@ -123,8 +150,24 @@ func TestOverrideFormTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body = hs.get(hr, path)
-	if s := approverSelect(t, body); strings.Contains(s, "Thandi Teacher") || !strings.Contains(body, "kept until changed.") {
+	if s := approverSelect(t, body); strings.Contains(s, "Thandi Teacher") ||
+		!strings.Contains(body, "Current override: Thandi Teacher — not an enabled administrator; kept until changed.") {
 		t.Fatal(body)
+	}
+}
+
+func TestMissingReassignmentSubjects(t *testing.T) {
+	hs := newHarness(t)
+	hr := hs.signIn("hr")
+	res, _ := hs.post(hr, "/admin/requests/9999/reassign", url.Values{"approver": {"0"}})
+	if res.StatusCode != http.StatusSeeOther || !strings.HasSuffix(res.Header.Get("Location"), "?notice=not-possible") {
+		t.Fatalf("missing request: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	for _, target := range []string{"0", itoa(hs.staffID("hr"))} {
+		res, _ := hs.post(hr, "/admin/users/9999/approver", url.Values{"approver": {target}})
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("missing person, approver %s: %d", target, res.StatusCode)
+		}
 	}
 }
 

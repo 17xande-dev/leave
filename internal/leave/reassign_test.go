@@ -115,6 +115,53 @@ func TestReassignRereadsTargetInTransaction(t *testing.T) {
 	}
 }
 
+func TestReassignQueueRequiresAnotherAdmin(t *testing.T) {
+	for _, state := range []string{"single", "second enabled", "second disabled", "disabled before transaction"} {
+		t.Run(state, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.mustSubmit("hr", "annual", "2026-10-12", "2026-10-12")
+			if state != "single" {
+				if _, err := f.db.Exec(`UPDATE users SET is_admin = 1, disabled = ? WHERE username = 'pastor'`, state == "second disabled"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if state == "disabled before transaction" {
+				f.svc.beforeReassignTx = func() {
+					if _, err := f.db.Exec(`UPDATE users SET disabled = 1 WHERE username = 'pastor'`); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			f.events = nil
+			_, err := f.svc.Reassign(f.ctx, f.people["hr"], r.ID, 0)
+			want := r.ApproverID
+			if state == "second enabled" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = 0
+			} else {
+				var fe FieldErrors
+				if !errors.As(err, &fe) || fe["approver"] != MsgReassignNoOtherAdmin || len(f.events) != 0 {
+					t.Fatalf("queue refusal: %v, events %v", err, f.events)
+				}
+			}
+			got, err := f.svc.Get(f.ctx, r.ID)
+			if err != nil || got.ApproverID != want {
+				t.Fatalf("approver=%d want=%d error=%v", got.ApproverID, want, err)
+			}
+		})
+	}
+}
+
+func TestReassignMissingRequest(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.svc.Reassign(f.ctx, f.people["hr"], 9999, 0)
+	if !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("missing request: %v", err)
+	}
+}
+
 func TestOverrideTargets(t *testing.T) {
 	for _, tc := range []struct {
 		name, subject, target, message string

@@ -14,14 +14,15 @@ const MsgRecordFuture = "Only leave that has already happened can be recorded; f
 // MsgReassignOwner and the like are the admin refusals the pages and the
 // assistant both name; the service returns them as FieldErrors.
 const (
-	MsgReassignOwner    = "That is the person whose request it is. Nobody approves their own leave."
-	MsgReassignNotAdmin = "Choose an administrator: requests can only be handed to someone in the leave administrators group."
-	MsgOverrideNotAdmin = "Choose an administrator: only someone in the leave administrators group can be set as an approver."
-	MsgReassignDormant  = "Choose someone who can currently sign in."
-	MsgUnrecordOwn      = "Another admin removes leave recorded for you."
-	MsgUnrecordGone     = "That recorded leave was already removed."
-	MsgRecordOwn        = "Another admin records your own leave."
-	MsgAdjustOwn        = "Another admin adjusts your own balance."
+	MsgReassignOwner        = "That is the person whose request it is. Nobody approves their own leave."
+	MsgReassignNotAdmin     = "Choose an administrator: requests can only be handed to someone in the leave administrators group."
+	MsgOverrideNotAdmin     = "Choose an administrator: only someone in the leave administrators group can be set as an approver."
+	MsgReassignDormant      = "Choose someone who can currently sign in."
+	MsgReassignNoOtherAdmin = "No other enabled administrator exists. Make someone else an administrator before moving this request to the leave administrators queue."
+	MsgUnrecordOwn          = "Another admin removes leave recorded for you."
+	MsgUnrecordGone         = "That recorded leave was already removed."
+	MsgRecordOwn            = "Another admin records your own leave."
+	MsgAdjustOwn            = "Another admin adjusts your own balance."
 )
 
 // RecordLeave lets an admin write down leave a person has already taken (it
