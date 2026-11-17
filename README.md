@@ -236,6 +236,24 @@ person's annual leave available, approver overrides, balance adjustments, long w
 their teams), Leave types, Public holidays,
 Shutdowns, Coverage limits, Teams, Permissions, Settings and Outbox.
 
+### Payroll export
+
+On **Admin → People**, **Download payroll export (Excel)** downloads an admin-only
+`.xlsx` report as at **today** in the configured timezone. Enabled accounts are
+included by default; tick **Include disabled accounts** for leavers too.
+**Annual leave** contains each person's allocation, adjustments, approved and
+pending leave, and the October 2026 payroll opening figure where recorded.
+**All types** includes balances hidden from staff and inactive types with current
+activity; **About** explains the columns and each type's current cycle.
+
+**Available** is what the person can still book: entitlement less approved and
+pending leave, including future bookings. **Balance to date** ignores pending
+and future approved leave; a request that has started counts whole. Payroll can
+choose the column matching its payslip convention. Opening balances are blank
+where the import needed no correction; change since opening is Available less
+that opening figure. The app counts each person's work week and long weekend
+less South African public holidays, so its day counts can differ from payroll's.
+
 **Email and calendar** go through an outbox. Each is a database row written in the
 same transaction as the change that causes it. A background worker then sends it,
 retrying for about a day. Graph being down never blocks an approval, and nothing
@@ -756,7 +774,7 @@ need a bypass rule.
 | Sign-in | LDAP bind against the DC, per request, with no connection pool, so one user's bind can never leak into another's request. People are keyed on `objectGUID`, which survives OU moves and renames. |
 | Database | SQLite: one instance, one file. Switch to Postgres if a second instance or an outside reader is ever needed. |
 | Styling | One plain CSS file. No Web Awesome, because a component framework and a CDN or vendoring step bought nothing here. |
-| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
+| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. `xuri/excelize/v2` v2.11.1 writes payroll `.xlsx` workbooks: chosen by the user over hand-written OOXML, published 2026-11-02 and at least two weeks old on 2026-11-17. We only write workbooks, never open uploaded ones (where its CVE history lies). It brings `richardlehane/mscfb`, `richardlehane/msoleps`, `tiendc/go-deepcopy`, `xuri/efp`, `xuri/nfp` and `golang.org/x/net` (raised to v0.62.0); its graph also includes `x/image` and the already-present `x/crypto` and `x/text`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
 
 ### Decisions still open
 

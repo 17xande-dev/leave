@@ -1,6 +1,12 @@
 {{define "content"}}
 {{template "adminnav"}}
-<h1>People</h1>
+<div class="page-head">
+  <h1>People</h1>
+  <form method="get" action="/admin/payroll.xlsx">
+    <label for="include_disabled"><input type="checkbox" id="include_disabled" name="include_disabled" value="1"> Include disabled accounts</label>
+    <button type="submit" class="quiet">Download payroll export (Excel)</button>
+  </form>
+</div>
 <p class="muted">Everyone comes from the directory, which refreshes hourly. Approvers follow each person's manager in AD unless overridden here.</p>
 <form method="get" action="/admin/users" class="field-row" role="search">
   <div class="field">

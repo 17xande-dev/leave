@@ -21,6 +21,7 @@ func (h *Handler) adminRoutes() []route {
 		a("GET /admin", h.AdminHome),
 		a("GET /admin/requests", h.AdminRequests),
 		a("GET /admin/requests.csv", h.AdminRequestsCSV),
+		a("GET /admin/payroll.xlsx", h.AdminPayrollExport),
 		a("POST /admin/requests/{id}/reassign", h.AdminReassign),
 		a("POST /admin/requests/{id}/halves", h.AdminSetHalves),
 		a("GET /admin/users", h.AdminUsers),
