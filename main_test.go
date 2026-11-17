@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,42 @@ import (
 	"github.com/17xande-dev/leave/internal/config"
 	"github.com/17xande-dev/leave/internal/middleware"
 )
+
+func TestTokenUnreadableBodyReturnsOAuthError(t *testing.T) {
+	e := newE2E(t)
+	for _, tc := range []struct{ name, body string }{
+		{"malformed", "grant_type=refresh_token&bad=%ZZ"},
+		{"token cap", "padding=" + strings.Repeat("x", 64<<10)},
+		{"outer cap", "padding=" + strings.Repeat("x", 2*middleware.MaxFormBytes)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := http.Post(e.base+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", res.StatusCode)
+			}
+			if got := res.Header.Get("Content-Type"); got != "application/json" {
+				t.Errorf("Content-Type = %q", got)
+			}
+			if got := res.Header.Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q", got)
+			}
+			var body struct {
+				Error       string `json:"error"`
+				Description string `json:"error_description"`
+			}
+			if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Error != "invalid_request" || body.Description == "" {
+				t.Errorf("OAuth error = %+v", body)
+			}
+		})
+	}
+}
 
 // The handler tests run without the CSRF layer, so this pins that the real
 // stack refuses a form post that carries no token -- a sign-in form included,
@@ -105,7 +142,7 @@ func TestCSRFRefusesTokenlessBulkApprove(t *testing.T) {
 // that, so the body cap must sit in front of the CSRF layer to mean anything.
 // Through the whole app: an over-cap body carrying a valid token must not sign
 // anyone in.
-func TestBodyCapReachesCSRFLayer(t *testing.T) {
+func TestOversizeLoginWithValidCSRFTokenIsRejected(t *testing.T) {
 	e := newE2E(t)
 	b := e.browser()
 	_, page := b.get("/login")

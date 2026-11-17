@@ -64,7 +64,10 @@ func MaxBody(next http.Handler) http.Handler {
 		// idempotent, so its first error would otherwise be lost, allowing
 		// a malformed body to act on the fields that were parsed successfully.
 		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if mediaType == "application/x-www-form-urlencoded" {
+		// The CSRF-exempt token endpoint parses its own body with a tighter
+		// cap and must answer parse failures using OAuth's JSON error format.
+		token := r.Method == http.MethodPost && r.URL.Path == "/oauth/token"
+		if mediaType == "application/x-www-form-urlencoded" && !token {
 			if err := r.ParseForm(); err != nil {
 				status := http.StatusBadRequest
 				var tooLarge *http.MaxBytesError

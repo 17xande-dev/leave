@@ -255,20 +255,40 @@ var MsgDaysFormat = func() string {
 
 func unitLabel(n leave.Days, unit string) string { return n.Noun(unit) }
 
-func shortRange(start, end string) string {
+// context is the other displayed dates: separate stretches can each be within
+// one year while the list as a whole still needs years to disambiguate them.
+func shortRange(start, end string, context ...string) string {
 	s, err1 := time.Parse(time.DateOnly, start)
 	e, err2 := time.Parse(time.DateOnly, end)
 	switch {
 	case err1 != nil || err2 != nil:
 		return start + " to " + end
+	case differentYears(append(context, start, end)...):
+		if s.Equal(e) {
+			return s.Format("2 Jan 2006")
+		}
+		return s.Format("2 Jan 2006") + " – " + e.Format("2 Jan 2006")
 	case s.Equal(e):
 		return s.Format("2 Jan")
-	case s.Year() != e.Year():
-		return s.Format("2 Jan 2006") + " – " + e.Format("2 Jan 2006")
 	case s.Month() != e.Month():
 		return s.Format("2 Jan") + " – " + e.Format("2 Jan")
 	}
 	return s.Format("2") + "–" + e.Format("2 Jan")
+}
+
+func differentYears(dates ...string) bool {
+	year := 0
+	for _, date := range dates {
+		t, err := time.Parse(time.DateOnly, date)
+		if err != nil {
+			continue
+		}
+		if year != 0 && year != t.Year() {
+			return true
+		}
+		year = t.Year()
+	}
+	return false
 }
 
 func rangeValue(ranges []leave.Range) string {
@@ -283,6 +303,11 @@ func rangeValue(ranges []leave.Range) string {
 
 func stretchText(ranges []leave.Range) string {
 	parts := make([]string, 0, len(ranges))
+	dates := make([]string, 0, 2*len(ranges))
+	for _, rg := range ranges {
+		dates = append(dates, rg.Start, rg.End)
+	}
+	years := differentYears(dates...)
 	for _, rg := range ranges {
 		s, e1 := leave.ParseDate(rg.Start)
 		e, e2 := leave.ParseDate(rg.End)
@@ -290,7 +315,9 @@ func stretchText(ranges []leave.Range) string {
 			continue
 		}
 		text := e.Format("Mon 2 Jan")
-		if s.Year() != e.Year() {
+		if years && s.Equal(e) {
+			text = e.Format("Mon 2 Jan 2006")
+		} else if years {
 			text = s.Format("Mon 2 Jan 2006") + " – " + e.Format("Mon 2 Jan 2006")
 		} else if !s.Equal(e) {
 			format := "Mon 2 Jan"

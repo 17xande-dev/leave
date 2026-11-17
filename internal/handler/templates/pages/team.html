@@ -41,11 +41,11 @@
 <table>
   <thead><tr><th>Who</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Status</th></tr></thead>
   <tbody>
-  {{range .}}
+  {{range .}}{{$request := .}}
     <tr>
       <td>{{.UserName}}</td>
       <td><a href="/leave/{{.ID}}?from=team">{{.TypeName}}</a></td>
-      <td class="range-lines">{{if gt (len .Ranges) 1}}{{range .Ranges}}<span>{{shortrange .Start .End}}</span>{{end}}{{else}}{{template "requestdates" .}}{{end}}</td>
+      <td class="range-lines">{{if gt (len .Ranges) 1}}{{range .Ranges}}<span>{{shortrange .Start .End $request.Start $request.End}}</span>{{end}}{{else}}{{template "requestdates" .}}{{end}}</td>
       <td class="num">{{.Days}}{{with .HalfNote}}<br><small>{{.}}</small>{{end}}</td>
       <td>{{template "status" .Status}}</td>
     </tr>
