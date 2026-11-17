@@ -20,10 +20,12 @@
   {{template "csrf" $.CSRF}}
   <h2>Approver override</h2>
   <p class="hint">Applies to new requests. Pending requests keep their approver; reassign those from the request page.</p>
+  {{with .LegacyOverride}}<p>Current override: {{.}} -- not an administrator; kept until changed.</p>{{end}}
   <div class="field">
     <label for="approver">Approver</label>
-    <select id="approver" name="approver">
-      <option value="0">Follow the directory</option>
+    <select id="approver" name="approver" required>
+      {{if .LegacyOverride}}<option value="" selected disabled>Choose…</option>{{end}}
+      <option value="0"{{if eq .OverrideID 0}} selected{{end}}>Directory default</option>
       {{range .Candidates}}<option value="{{.ID}}"{{if eq .ID $.Data.OverrideID}} selected{{end}}>{{.Name}}</option>{{end}}
     </select>
   </div>

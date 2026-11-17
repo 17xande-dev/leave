@@ -378,7 +378,8 @@ func TestEscalationStopsAtTheRequester(t *testing.T) {
 	if err := f.svc.SetOverride(f.ctx, f.people["staff"].ID, f.people["hr"].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.svc.SetOverride(f.ctx, f.people["head"].ID, f.people["staff"].ID); err != nil {
+	// A grandfathered non-admin override still participates in escalation.
+	if _, err := f.db.Exec(`INSERT INTO approver_overrides (user_id, approver_id) VALUES (?, ?)`, f.people["head"].ID, f.people["staff"].ID); err != nil {
 		t.Fatal(err)
 	}
 	f.mustSubmit("orphan", "annual", "2026-10-12", "2026-10-12")

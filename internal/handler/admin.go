@@ -206,6 +206,8 @@ func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
 			notice = "reassign-owner"
 		case leave.MsgReassignDormant:
 			notice = "reassign-dormant"
+		case leave.MsgReassignNotAdmin:
+			notice = "reassign-not-admin"
 		}
 		http.Redirect(w, r, requestURL(r, id, notice), http.StatusSeeOther)
 		return
@@ -297,16 +299,17 @@ func matchesUser(u users.User, q string) bool {
 }
 
 type adminUserData struct {
-	User        users.User
-	Manager     string
-	Approver    string
-	OverrideID  int64
-	Candidates  []users.User
-	Balances    []leave.Balance
-	Adjustments []leave.Adjustment
-	Requests    []leave.Request
-	Errors      leave.FieldErrors
-	Adj         leave.Adjustment
+	User           users.User
+	Manager        string
+	Approver       string
+	OverrideID     int64
+	LegacyOverride string
+	Candidates     []users.User
+	Balances       []leave.Balance
+	Adjustments    []leave.Adjustment
+	Requests       []leave.Request
+	Errors         leave.FieldErrors
+	Adj            leave.Adjustment
 	// AdjDays is the days field as typed, so a figure that did not parse comes back as typed.
 	AdjDays string
 	// Types and Rec are the "Record leave" form: every type (a retired one may
@@ -340,13 +343,26 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 	if d.OverrideID, err = h.leave.Override(ctx, u.ID); err != nil {
 		return d, err
 	}
-	all, err := h.users.Enabled(ctx)
+	all, err := h.users.Admins(ctx)
 	if err != nil {
 		return d, err
 	}
 	for _, c := range all {
 		if c.ID != u.ID {
 			d.Candidates = append(d.Candidates, c)
+		}
+	}
+	if d.OverrideID != 0 {
+		valid := false
+		for _, c := range d.Candidates {
+			valid = valid || c.ID == d.OverrideID
+		}
+		if !valid {
+			c, err := h.users.ByID(ctx, d.OverrideID)
+			if err != nil {
+				return d, err
+			}
+			d.LegacyOverride = c.Name
 		}
 	}
 	if d.Balances, err = h.leave.Balances(ctx, u.ID); err != nil {

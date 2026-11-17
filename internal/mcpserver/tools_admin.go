@@ -421,7 +421,7 @@ func (d *deps) registerAdminActions(s *mcp.Server) {
 		Description: "Administrators only: refuse a request waiting for HR. It ends as declined, the person is emailed your note, and it cannot be undone. A note saying why is required. " +
 			"You cannot refuse your own request. Only when the person has told you to."}, d.refuseNegative)
 	add(d, s, &mcp.Tool{Name: "reassign_request", Annotations: destructive("Reassign a request (administrators)"),
-		Description: "Administrators only: move a pending request to another approver (or, with a blank approver, to the leave administrators). The new approver is emailed. Only for requests still pending. Only when the person has told you to."}, d.reassign)
+		Description: "Administrators only: move a pending request. The new approver must be an administrator other than the person whose request it is; blank hands it to the leave administrators. You may reassign your own request to another administrator. The new approver is emailed. Only for requests still pending. Only when the person has told you to."}, d.reassign)
 }
 
 // signedDays is a days figure with its sign always shown: "+1.5", "-2".

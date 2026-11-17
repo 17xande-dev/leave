@@ -74,12 +74,37 @@ func (s *Service) SetOverride(ctx context.Context, userID, approverID int64) err
 		_, err := s.db.ExecContext(ctx, `DELETE FROM approver_overrides WHERE user_id = ?`, userID)
 		return err
 	}
-	if approverID == userID {
-		return FieldErrors{"approver": "Nobody can approve their own leave."}
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		if approverID == userID {
+			return FieldErrors{"approver": "Nobody can approve their own leave."}
+		}
+		if err := approverTarget(ctx, tx, approverID, MsgOverrideNotAdmin); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO approver_overrides (user_id, approver_id) VALUES (?, ?)
+			ON CONFLICT(user_id) DO UPDATE SET approver_id = excluded.approver_id`, userID, approverID)
+		return err
+	})
+}
+
+// Read under the write lock: a directory sync may have demoted or disabled
+// someone since the administrator opened the form.
+func approverTarget(ctx context.Context, tx *sql.Tx, id int64, notAdmin string) error {
+	var admin, disabled bool
+	err := tx.QueryRowContext(ctx, `SELECT is_admin, disabled FROM users WHERE id = ?`, id).Scan(&admin, &disabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FieldErrors{"approver": MsgReassignDormant}
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO approver_overrides (user_id, approver_id) VALUES (?, ?)
-		ON CONFLICT(user_id) DO UPDATE SET approver_id = excluded.approver_id`, userID, approverID)
-	return err
+	if err != nil {
+		return err
+	}
+	if disabled {
+		return FieldErrors{"approver": MsgReassignDormant}
+	}
+	if !admin {
+		return FieldErrors{"approver": notAdmin}
+	}
+	return nil
 }
 
 // Override returns the override approver for userID, or 0.
@@ -551,21 +576,23 @@ func (s *Service) RefuseNegative(ctx context.Context, admin users.User, id int64
 
 // Reassign moves a pending request to another approver (0: the admins' queue).
 func (s *Service) Reassign(ctx context.Context, admin users.User, id, approverID int64) (Request, error) {
-	if !admin.Admin {
+	if !admin.Admin || admin.Disabled {
 		return Request{}, ErrNotAllowed
 	}
-	if approverID != 0 {
-		a, err := s.users.ByID(ctx, approverID)
-		if err != nil || a.Disabled {
-			return Request{}, FieldErrors{"approver": MsgReassignDormant}
-		}
+	if s.beforeReassignTx != nil {
+		s.beforeReassignTx()
 	}
 	var out Request
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		if r, err := s.get(ctx, tx, id); err != nil {
 			return err
-		} else if approverID != 0 && r.UserID == approverID && r.Status == StatusPending {
+		} else if approverID != 0 && r.UserID == approverID {
 			return FieldErrors{"approver": MsgReassignOwner}
+		}
+		if approverID != 0 {
+			if err := approverTarget(ctx, tx, approverID, MsgReassignNotAdmin); err != nil {
+				return err
+			}
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE requests SET approver_id = ?
 			WHERE id = ? AND status = 'pending' AND user_id <> ?`, nullID(approverID), id, approverID)

@@ -240,7 +240,8 @@ var notices = map[string]string{
 	"app-revoked":        "App disconnected. It can no longer act for you.",
 	"unrecord-own":       "Another admin removes leave recorded for you.",
 	"unrecord-gone":      "That recorded leave was already removed.",
-	"reassign-owner":     "That is the person whose request it is. Choose someone else.",
+	"reassign-owner":     leave.MsgReassignOwner,
+	"reassign-not-admin": leave.MsgReassignNotAdmin,
 	"reassign-dormant":   "Choose someone who can currently sign in.",
 	"not-possible":       "That is no longer possible. The request may already have been decided or withdrawn.",
 }

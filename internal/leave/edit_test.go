@@ -111,7 +111,7 @@ func TestEditKeepsApproverAndPlace(t *testing.T) {
 	f := newFixture(t)
 	r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
 	// The manager changes after the request was sent: the request stays put.
-	if err := f.svc.SetOverride(f.ctx, f.people["staff"].ID, f.people["pastor"].ID); err != nil {
+	if err := f.svc.SetOverride(f.ctx, f.people["staff"].ID, f.people["hr"].ID); err != nil {
 		t.Fatal(err)
 	}
 	f.events = nil

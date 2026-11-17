@@ -795,6 +795,7 @@ func TestNobodyGrantsOrRefusesTheirOwnPermission(t *testing.T) {
 
 func TestReassignRequest(t *testing.T) {
 	f := newFixture(t)
+	f.makeAdmin("headkids")
 	hr := f.as("hr")
 	r := f.ok(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
 	for _, who := range []string{"headkids", "headkids@example.test", "Kagiso Kids"} {
@@ -816,13 +817,17 @@ func TestReassignRequest(t *testing.T) {
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "ghost"}, "No one matches")
 	f.refused(hr, "reassign_request", map[string]any{"id": 99999, "approver": "headkids"}, "No such request")
 	// Not to the requester themselves: the service refuses.
-	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff1"}, "Approver: Not the person whose request it is.")
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff1"}, "Approver: "+leave.MsgReassignOwner)
+	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "staff2"}, "Approver: "+leave.MsgReassignNotAdmin)
+	own := f.ok(hr, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12"})
+	f.refused(hr, "reassign_request", map[string]any{"id": id(own), "approver": "hr"}, "Approver: "+leave.MsgReassignOwner)
+	f.ok(hr, "reassign_request", map[string]any{"id": id(own), "approver": "headkids"})
 	// Only pending requests move.
 	f.ok(hr, "decide_request", map[string]any{"id": id(r), "decision": "decline", "note": "no"})
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r), "approver": "headkids"}, "That is not possible")
 	// Nor to someone who cannot sign in.
 	r2 := f.ok(f.as("staff1"), "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-19"})
-	if _, err := f.db.Exec(`UPDATE users SET disabled = 1 WHERE username = 'staff2'`); err != nil {
+	if _, err := f.db.Exec(`UPDATE users SET disabled = 1, is_admin = 1 WHERE username = 'staff2'`); err != nil {
 		t.Fatal(err)
 	}
 	f.refused(hr, "reassign_request", map[string]any{"id": id(r2), "approver": "staff2"}, "Approver: Choose someone who can currently sign in")

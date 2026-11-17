@@ -98,16 +98,18 @@
 </form>
 {{end}}
 
-{{with .Candidates}}
+{{if .CanReassign}}
 <form method="post" action="/admin/requests/{{$.Data.Request.ID}}/reassign{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Reassign <small>(admin)</small></h2>
+  <p>Currently with {{with .Request.ApproverName}}{{.}}{{else}}the leave administrators{{end}}</p>
   <div class="field-row">
     <div class="field">
       <label for="approver">Approver</label>
-      <select id="approver" name="approver">
-        <option value="0"{{if eq $.Data.Request.ApproverID 0}} selected{{end}}>Leave administrators</option>
-        {{range .}}<option value="{{.ID}}"{{if eq .ID $.Data.Request.ApproverID}} selected{{end}}>{{.Name}}</option>{{end}}
+      <select id="approver" name="approver" required>
+        <option value="" selected disabled>Choose…</option>
+        <option value="0">Leave administrators</option>
+        {{range .Candidates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
       </select>
     </div>
     <div class="field"><button type="submit" class="quiet">Reassign</button></div>

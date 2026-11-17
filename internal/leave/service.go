@@ -34,6 +34,8 @@ type Service struct {
 	beforeDecideTx func()
 	// beforeHalvesTx lets tests change a request after the initial read.
 	beforeHalvesTx func()
+	// beforeReassignTx lets tests land a directory sync before the write lock.
+	beforeReassignTx func()
 	// Now is replaceable so tests can pin "today".
 	Now func() time.Time
 }

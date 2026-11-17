@@ -694,9 +694,10 @@ type requestData struct {
 	// Shortfall is how far below zero a request awaiting HR would go.
 	Shortfall leave.Days
 	// Candidates is who an admin may reassign a pending request to.
-	Candidates []users.User
-	Errors     leave.FieldErrors
-	Note       string
+	Candidates  []users.User
+	CanReassign bool
+	Errors      leave.FieldErrors
+	Note        string
 }
 
 func (h *Handler) loadRequest(w http.ResponseWriter, r *http.Request) (leave.Request, bool) {
@@ -732,8 +733,9 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		HalvesStart:  req.HalfStart, HalvesEnd: req.HalfEnd,
 		CanSubmit: req.UserID == u.ID && req.Status == leave.StatusDraft,
 	}
-	if u.Admin && req.Status == leave.StatusPending {
-		all, err := h.users.Enabled(r.Context())
+	d.CanReassign = u.Admin && !u.Disabled && req.Status == leave.StatusPending
+	if d.CanReassign {
+		all, err := h.users.Admins(r.Context())
 		if err != nil {
 			return d, err
 		}

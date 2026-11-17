@@ -22,7 +22,24 @@ Microsoft 365 calendar.
    manager while no final approver is set (or theirs is disabled).
 
 A disabled account or yourself is always skipped. The approver is frozen on the
-request, so a directory change afterwards cannot strand it. An admin can reassign it.
+request, so a directory change afterwards cannot strand it. An admin can reassign a pending request, including their own, to another administrator (never to the person whose request it is) or to the leave administrators. An approver override on a person's page can likewise only name an administrator other than that person. Overrides set before this rule keep working until changed.
+
+### Before deploying the reassignment rule
+
+Run this read-only precheck on the host copy before deploying. Show the first list
+to the operator; existing overrides keep working until changed. Expect the second
+query to be empty. Pending requests already with non-admin managers are untouched;
+past reassignments are not recorded and cannot be listed.
+
+```sql
+SELECT o.user_id, s.username AS subject, o.approver_id, a.username AS approver, a.is_admin, a.disabled,
+       (o.approver_id = o.user_id) AS self
+FROM approver_overrides o JOIN users s ON s.id = o.user_id JOIN users a ON a.id = o.approver_id
+WHERE a.is_admin = 0 OR a.disabled = 1 OR o.approver_id = o.user_id ORDER BY s.username;
+SELECT id, user_id, status FROM requests WHERE approver_id = user_id AND status IN ('pending', 'awaiting_hr', 'draft');
+SELECT r.id, r.user_id, r.approver_id FROM requests r JOIN users a ON a.id = r.approver_id
+WHERE r.status = 'pending' AND a.disabled = 1;
+```
 
 **Balances.** The BCEA defaults are seeded on first start and editable afterwards:
 
@@ -355,7 +372,7 @@ anything unless the person has asked.
 | `adjust_balance` | Administrators only: add or remove days (fractions allowed, like 1.5) on one type's balance for a cycle (default the current one), with a required reason. Nobody is emailed |
 | `grant_negative` | Administrators only (destructive: it cannot be recalled): allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
 | `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
-| `reassign_request` | Administrators only: move a pending request to another approver, or with none to the leave administrators; the new approver is emailed |
+| `reassign_request` | Administrators only: move a pending request (including your own) to an enabled administrator other than the applicant, or with none to the leave administrators; the new approver is emailed |
 
 The administrators' tools identify a person by sign-in username (as `all_requests` does),
 email address or exact full name, and refuse a name that matches two people rather than

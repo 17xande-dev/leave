@@ -76,6 +76,9 @@ func TestOverrideRoutesNewRequests(t *testing.T) {
 	hr := hs.signIn("hr")
 	staff, _ := hs.us.ByUsername(t.Context(), "staff1")
 	pastor, _ := hs.us.ByUsername(t.Context(), "pastor")
+	if _, err := hs.db.Exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, pastor.ID); err != nil {
+		t.Fatal(err)
+	}
 	res, _ := hs.post(hr, "/admin/users/"+itoa(staff.ID)+"/approver", url.Values{"approver": {itoa(pastor.ID)}})
 	if res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("set override: %d", res.StatusCode)
@@ -98,6 +101,9 @@ func TestReassign(t *testing.T) {
 		t.Fatal("admin sees no reassign form")
 	}
 	pastor, _ := hs.us.ByUsername(t.Context(), "pastor")
+	if _, err := hs.db.Exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, pastor.ID); err != nil {
+		t.Fatal(err)
+	}
 	res, _ := hs.post(hr, "/admin/requests"+strings.TrimPrefix(path, "/leave")+"/reassign", url.Values{"approver": {itoa(pastor.ID)}})
 	if !strings.Contains(res.Header.Get("Location"), "reassigned") {
 		t.Fatalf("reassign: %d %s", res.StatusCode, res.Header.Get("Location"))
@@ -110,7 +116,7 @@ func TestReassign(t *testing.T) {
 	if !strings.HasSuffix(res.Header.Get("Location"), "?notice=reassign-owner") {
 		t.Fatalf("reassign to the owner: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
-	if _, body := hs.get(hr, res.Header.Get("Location")); !strings.Contains(body, "Choose someone else") {
+	if _, body := hs.get(hr, res.Header.Get("Location")); !strings.Contains(body, "Nobody approves their own leave.") {
 		t.Fatal("the notice is not shown")
 	}
 }

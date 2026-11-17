@@ -151,10 +151,10 @@ func TestApproverChain(t *testing.T) {
 	}
 
 	// An override wins over the directory...
-	if err := f.svc.SetOverride(f.ctx, f.people["staff"].ID, f.people["pastor"].ID); err != nil {
+	if err := f.svc.SetOverride(f.ctx, f.people["staff"].ID, f.people["hr"].ID); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := f.svc.ResolveApprover(f.ctx, f.people["staff"]); got != f.people["pastor"].ID {
+	if got, _ := f.svc.ResolveApprover(f.ctx, f.people["staff"]); got != f.people["hr"].ID {
 		t.Errorf("override ignored: %d", got)
 	}
 	// ...and a self-override is refused.
@@ -271,8 +271,10 @@ func TestDecidePermissions(t *testing.T) {
 		t.Errorf("admin deciding the admins' queue: %v", err)
 	}
 	// An admin cannot approve their own leave even from that queue.
-	f.svc.SetOverride(f.ctx, f.people["hr"].ID, f.people["pastor"].ID)
 	f.db.Exec(`UPDATE users SET is_admin = 1 WHERE username = 'pastor'`)
+	if err := f.svc.SetOverride(f.ctx, f.people["hr"].ID, f.people["pastor"].ID); err != nil {
+		t.Fatal(err)
+	}
 	pastor, _ := f.us.ByUsername(f.ctx, "pastor")
 	p2, _ := f.svc.Submit(f.ctx, pastor, Input{TypeID: f.types["annual"].ID, Start: "2026-10-20", End: "2026-10-20"})
 	if _, err := f.svc.Decide(f.ctx, pastor, p2.ID, true, ""); !errors.Is(err, ErrNotAllowed) {
