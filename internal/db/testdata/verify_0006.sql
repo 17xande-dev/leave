@@ -1,0 +1,14 @@
+SELECT 'version', max(version_id), '6' FROM goose_db_version WHERE is_applied = 1;
+SELECT 'legacy_column', count(*), '0' FROM pragma_table_info('requests') WHERE name = 'calendar_event_id';
+SELECT 'transition_triggers', count(*), '0' FROM sqlite_master WHERE type = 'trigger' AND name IN ('requests_default_range','requests_sync_range');
+SELECT 'range_fk', on_delete, 'NO ACTION' FROM pragma_foreign_key_list('request_ranges');
+SELECT 'range_index', count(*), '1' FROM sqlite_master WHERE type = 'index' AND name = 'idx_request_ranges_dates';
+SELECT 'requests_without_range', count(*), '0' FROM requests r WHERE NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id);
+SELECT 'orphan_ranges', count(*), '0' FROM request_ranges rr WHERE NOT EXISTS (SELECT 1 FROM requests r WHERE r.id = rr.request_id);
+SELECT 'span_mismatches', count(*), '0' FROM requests r WHERE r.start_date <> (SELECT min(start_date) FROM request_ranges rr WHERE rr.request_id = r.id) OR r.end_date <> (SELECT max(end_date) FROM request_ranges rr WHERE rr.request_id = r.id);
+SELECT 'touching_ranges', count(*), '0' FROM request_ranges a JOIN request_ranges b ON b.request_id = a.request_id AND b.start_date > a.start_date AND b.start_date <= date(a.end_date, '+1 day');
+SELECT 'requests', count(*), 'compare precheck requests' FROM requests;
+SELECT 'request_ranges', count(*), 'compare precheck request_ranges' FROM request_ranges;
+SELECT 'range_event_ids', count(*), 'compare precheck ids plus adoptions' FROM request_ranges WHERE calendar_event_id <> '';
+PRAGMA integrity_check;
+PRAGMA foreign_key_check;

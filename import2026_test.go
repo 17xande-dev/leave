@@ -487,7 +487,7 @@ func TestImport2026UnrecordSkipsWhatItCannotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, note, status,
+	if _, err := seedRequest(d, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, note, status,
 		approver_id, decided_by_id, decided_at, decision_note, recorded_by_id, created_at)
 		SELECT user_id, type_id, kind, '2026-02-02', '2026-02-02', days_x100, cycle_start, 'dup', status,
 		approver_id, decided_by_id, decided_at, 'Imported from the 2026 leave log (row 2). dup', recorded_by_id, created_at

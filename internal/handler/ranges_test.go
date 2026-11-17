@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -16,6 +17,22 @@ import (
 	"github.com/17xande-dev/leave/internal/leave"
 )
 
+func assertContractRanges(t *testing.T, d *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`SELECT count(*) FROM requests r WHERE NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id=r.id)`,
+		`SELECT count(*) FROM request_ranges rr WHERE NOT EXISTS (SELECT 1 FROM requests r WHERE r.id=rr.request_id)`,
+		`SELECT count(*) FROM requests r WHERE r.start_date<>(SELECT min(start_date) FROM request_ranges rr WHERE rr.request_id=r.id) OR r.end_date<>(SELECT max(end_date) FROM request_ranges rr WHERE rr.request_id=r.id)`,
+		`SELECT count(*) FROM request_ranges a JOIN request_ranges b ON b.request_id=a.request_id AND b.start_date>a.start_date AND b.start_date<=date(a.end_date,'+1 day')`,
+		`SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN ('requests_default_range','requests_sync_range')`,
+	} {
+		var n int
+		if err := d.QueryRow(q).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("range invariant %s: %d %v", q, n, err)
+		}
+	}
+}
+
 func multiForm(hs *harness) url.Values {
 	return url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12", "2026-10-15"}, "end": {"2026-10-13", "2026-10-16"}, "note": {"Two stretches"}}
 }
@@ -24,6 +41,7 @@ func multiForm(hs *harness) url.Values {
 // view; a handler that uses FormValue would silently fill the gap.
 func TestMultiRangeApplyEditViewsAndCSV(t *testing.T) {
 	hs := newHarness(t)
+	defer assertContractRanges(t, hs.db)
 	staff, head, hr := hs.signIn("staff1"), hs.signIn("headops"), hs.signIn("hr")
 	v := multiForm(hs)
 	_, body := hs.get(staff, "/leave/quote?"+v.Encode())
@@ -98,6 +116,7 @@ func TestMultiRangeApplyEditViewsAndCSV(t *testing.T) {
 
 func TestMultiRangeRecordAndMismatchedPairs(t *testing.T) {
 	hs := newHarness(t)
+	defer assertContractRanges(t, hs.db)
 	staff, hr := hs.signIn("staff1"), hs.signIn("hr")
 	u, _ := hs.us.ByUsername(t.Context(), "staff1")
 	record := fmt.Sprintf("/admin/users/%d/leave", u.ID)

@@ -1,0 +1,13 @@
+SELECT 'users', count(*) FROM users;
+SELECT 'requests', count(*) FROM requests;
+SELECT 'request_ranges', count(*) FROM request_ranges;
+SELECT 'balance_adjustments', count(*) FROM balance_adjustments;
+SELECT 'to_blank', count(*) FROM requests r WHERE r.calendar_event_id <> '' AND EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id AND rr.calendar_event_id = r.calendar_event_id);
+SELECT 'to_adopt', count(*) FROM requests r WHERE r.calendar_event_id <> '' AND (SELECT rr.calendar_event_id FROM request_ranges rr WHERE rr.request_id = r.id ORDER BY rr.start_date LIMIT 1) = '';
+SELECT 'distinct', count(*) FROM requests r WHERE r.calendar_event_id <> '' AND (SELECT rr.calendar_event_id FROM request_ranges rr WHERE rr.request_id = r.id ORDER BY rr.start_date LIMIT 1) <> '' AND NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id AND rr.calendar_event_id = r.calendar_event_id);
+SELECT 'requests_without_range', count(*) FROM requests r WHERE NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id);
+SELECT 'orphan_ranges', count(*) FROM request_ranges rr WHERE NOT EXISTS (SELECT 1 FROM requests r WHERE r.id = rr.request_id);
+SELECT 'span_mismatches', count(*) FROM requests r WHERE r.start_date <> (SELECT min(start_date) FROM request_ranges rr WHERE rr.request_id = r.id) OR r.end_date <> (SELECT max(end_date) FROM request_ranges rr WHERE rr.request_id = r.id);
+SELECT 'touching_ranges', count(*) FROM request_ranges a JOIN request_ranges b ON b.request_id = a.request_id AND b.start_date > a.start_date AND b.start_date <= date(a.end_date, '+1 day');
+SELECT 'legacy_event_ids', count(*) FROM requests r WHERE r.calendar_event_id <> '' AND (SELECT rr.calendar_event_id FROM request_ranges rr WHERE rr.request_id = r.id ORDER BY rr.start_date LIMIT 1) <> '' AND NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id AND rr.calendar_event_id = r.calendar_event_id);
+SELECT r.id, r.status, r.calendar_event_id, (SELECT group_concat(rr.calendar_event_id, ' ') FROM request_ranges rr WHERE rr.request_id = r.id) FROM requests r WHERE r.calendar_event_id <> '' AND (SELECT rr.calendar_event_id FROM request_ranges rr WHERE rr.request_id = r.id ORDER BY rr.start_date LIMIT 1) <> '' AND NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id = r.id AND rr.calendar_event_id = r.calendar_event_id);

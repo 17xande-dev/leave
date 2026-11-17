@@ -36,7 +36,7 @@ func rangeCalendarFixture(t *testing.T) (context.Context, *sql.DB, *leave.Servic
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := d.Exec(`INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
+	res, err := seedRequest(d, `INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
 		VALUES(?,(SELECT id FROM leave_types WHERE code='annual'),'leave','2026-11-02','2026-11-06',300,'2026-01-01','approved','')`, u.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -137,56 +137,6 @@ func TestCalendarRangesResumePartialJobs(t *testing.T) {
 		if r.EventID != "" {
 			t.Fatalf("event survived delete: %+v", ranges)
 		}
-	}
-}
-
-func TestCalendarLegacyIDShim(t *testing.T) {
-	for _, current := range []string{"", "legacy", "new-event"} {
-		t.Run("current="+current, func(t *testing.T) {
-			ctx, d, svc, id, payload := rangeCalendarFixture(t)
-			if _, err := d.Exec(`UPDATE requests SET calendar_event_id='legacy' WHERE id=?`, id); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := d.Exec(`UPDATE request_ranges SET calendar_event_id=? WHERE request_id=?`, current, id); err != nil {
-				t.Fatal(err)
-			}
-			cal := &rangeCalendar{}
-			create, remove := calendarHandlers(cal, svc)
-			for range 2 {
-				if err := create(ctx, payload); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if len(cal.created) != 0 {
-				t.Fatalf("created duplicate event: %+v", cal.created)
-			}
-			var legacy, event string
-			if err := d.QueryRow(`SELECT r.calendar_event_id,rr.calendar_event_id FROM requests r JOIN request_ranges rr ON rr.request_id=r.id WHERE r.id=?`, id).Scan(&legacy, &event); err != nil {
-				t.Fatal(err)
-			}
-			if current == "new-event" {
-				if legacy != "legacy" || event != current {
-					t.Fatalf("distinct event lost: legacy=%q range=%q", legacy, event)
-				}
-			} else if legacy != "" || event != "legacy" {
-				t.Fatalf("legacy adoption: legacy=%q range=%q", legacy, event)
-			}
-			for range 2 {
-				if err := remove(ctx, payload); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want := []string{"legacy"}
-			if current == "new-event" {
-				want = append(want, current)
-			}
-			if !reflect.DeepEqual(cal.deleted, want) {
-				t.Fatalf("deleted=%v want %v", cal.deleted, want)
-			}
-			if err := d.QueryRow(`SELECT calendar_event_id FROM requests WHERE id=?`, id).Scan(&legacy); err != nil || legacy != "" {
-				t.Fatalf("legacy survived deletion: %q, %v", legacy, err)
-			}
-		})
 	}
 }
 
@@ -324,7 +274,7 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 		t.Fatalf("cancellation event rows = %+v, %v", cancelRanges, err)
 	}
 	for _, rr := range cancelRanges {
-		if rr.EventID != "" || rr.LegacyEventID != "" {
+		if rr.EventID != "" {
 			t.Fatalf("cancellation copied event ids: %+v", cancelRanges)
 		}
 	}

@@ -472,10 +472,11 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all five migrations pending until startup or `-migrate`. A database newer than
+reports all six migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;
+historical, for an image whose latest migration is 0005 (not the current image).
 run them only on the host rehearsal copy after taking a fresh pre-deploy `.backup`
 and copying it off-host using the backup procedure below. With a checked, pushed
 image selected by `$VERSION`, record the following counts on the copy before migration:
@@ -515,7 +516,9 @@ Outlook event cleanup described below. The tested Down migration is not the
 production rollback procedure.
 
 **Rehearsal when also applying 0003/0004.** These are operator instructions, not an
-automatic deployment step. Start with a committed, checked image; build and push it
+automatic deployment step. This historical routine targets an image ending at 0005;
+for the current image also follow the 0006 precheck and comparison below.
+Start with a committed, checked image; build and push it
 without swapping the running app (`VERSION=$(git rev-parse HEAD)` then
 `kamal build push --version "$VERSION"`). Take a fresh `.backup` of the live database
 using the running container and copy it off the host using the backup procedure below.
@@ -551,41 +554,86 @@ counts and integrity checks on the live database, and the setting/form behavior.
 Remove the in-volume backup and rehearsal copies after verification; retain the
 off-host backup. Never point the rehearsal's `DB_PATH` at `/data/leave.db`.
 
-**0004 expands storage; 0006 contracts it later.** The contract step, called 0005
-in 0004's own comments, is now 0006; the applied migration is left unchanged.
-Every existing request gets
-one `request_ranges` row with identical dates and calendar event id. New code
-stores calendar ids on ranges. `requests.calendar_event_id` remains frozen,
-except for the compatibility shim that adopts ids written by the old container
-and clears the legacy value. During the swap, `requests_default_range` supplies
-ranges for old inserts, `requests_sync_range` keeps old single-range edits in
-step (preserving the event id), and the foreign key cascades old shutdown
-request deletes. Multi-range requests are left alone by the update trigger.
-Migration 0006 will remove both triggers, the transitional cascade, the shim
-and the legacy column after the multi-range release has been stable.
-Before its "none remain" guard, 0006 must blank legacy
-`requests.calendar_event_id` values that equal their range's id: about 870
-production rows still have these values after 0004. Differing legacy ids must
-remain available for the compatibility shim to adopt.
+**0004 expanded storage; 0006 contracts it.** The contract step, called 0005
+in 0004's comments, is 0006; applied migrations are unchanged. 0004 copied each
+request's dates and calendar id into one range and supplied transitional insert/edit
+triggers and a cascading foreign key for pre-range binaries. 0006 adopts remaining
+legacy ids into empty first ranges, blanks matching ids, guards the data, and removes
+both triggers, the cascade, the legacy column and its application shim.
+`requests.start_date`/`end_date` stay as the indexed span for ordering and policy,
+written with the ranges by `insertRanges`. `days_x100` stays authoritative: HR's
+recorded charge and quote-time work weeks, holidays and half flags cannot be
+recomputed from range dates in SQL.
 
-Before migrating the host copy, also record the number of non-empty legacy
-calendar ids. After migrating it, run these exact checks through the existing
-container (these commands inspect only the rehearsal copy):
+**Rehearse 0006 (contract) from schema 0005.** Operator instructions only; never
+point this rehearsal's `DB_PATH` at `/data/leave.db`. Build and push the checked
+image, take a fresh off-host backup using the procedure below, then make two
+identical in-volume copies (the comparison base must remain untouched):
 
 ```sh
-# Before migration: retain this count for comparison with range_event_ids below.
-kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS legacy_event_ids FROM requests WHERE calendar_event_id <> '\'''\'';"'
-# After migration: counts match; every mismatch count is zero.
-kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS requests FROM requests; SELECT count(*) AS ranges FROM request_ranges; SELECT count(*) AS range_event_ids FROM request_ranges WHERE calendar_event_id <> '\'''\''; SELECT count(*) AS missing_or_extra_ranges FROM requests r WHERE (SELECT count(*) FROM request_ranges rr WHERE rr.request_id=r.id) <> 1; SELECT count(*) AS date_mismatches FROM requests r JOIN request_ranges rr ON rr.request_id=r.id WHERE rr.start_date<>r.start_date OR rr.end_date<>r.end_date; SELECT count(*) AS event_mismatches FROM requests r JOIN request_ranges rr ON rr.request_id=r.id WHERE rr.calendar_event_id<>r.calendar_event_id; SELECT count(*) AS misplaced_event_ids FROM requests r WHERE r.calendar_event_id<>'\'''\'' AND (SELECT count(*) FROM request_ranges rr WHERE rr.request_id=r.id AND rr.calendar_event_id=r.calendar_event_id)<>1; SELECT name FROM sqlite_master WHERE type='\''trigger'\'' AND name IN ('\''requests_default_range'\'','\''requests_sync_range'\'') ORDER BY name; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+VERSION=$(git rev-parse HEAD)
+kamal build push --version "$VERSION"
+# Take and copy the fresh off-host backup before continuing.
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0006.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0006.db ".backup /data/leave-rehearsal.db"'
+ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/precheck_0006.sql
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/verify_0006.sql
+ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/compare_0006.sql
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 
-Require equal request/range counts, unchanged non-empty event-id count, both
-trigger names, integrity `ok`, and no foreign-key rows. Repeat `-migrate` on the
-copy and all checks: the second run must change nothing. After deployment,
-check counts/integrity again on live data; the legacy-id equality check is a
-rehearsal check before workers run, since workers subsequently clear adopted
-legacy ids. The migration tests also exercise old inserts, edits, deletes,
-single-range Down/Up, and refusal of Down with multiple ranges.
+The stdin-over-ssh form above is **untested on the host**; the SQL files are tested
+locally. Fallback: paste their statements into
+`kamal app exec --reuse 'sqlite3 -bail -readonly /data/leave-rehearsal.db "..."'`.
+`kamal app exec --version ... --env` does not work; use the ssh migration form.
+Record the precheck counts (recent production: 179 users, 878 requests/ranges,
+173 adjustments). All five guard counts and `distinct` must be zero. If
+`distinct > 0`, tell the user: it is a duplicate Outlook event from the 0004 swap.
+Resolve by deleting that distinct event in Outlook and blanking
+`requests.calendar_event_id` for that request on live, then repeat the copies and
+rehearsal. Do not blindly blank a distinct id.
+
+Expect `5 -> 6`, no legacy column or transitional triggers, FK `NO ACTION`,
+the date index, zero invariant violations, integrity `ok` and no foreign-key rows.
+Requests and ranges counts must match precheck; non-empty range ids include
+adoptions. Every compare result must be zero. Repeat migration expects `6 -> 6`.
+Stop on any non-zero exit or discrepancy and tell the user before deploying.
+
+**During the deploy swap.** Confirm the running image is range-aware (0005).
+The old container can run for seconds after migration, worst case about 25 seconds
+with `stop_timeout: 20`. Its `SELECT calendar_event_id FROM requests WHERE id=?`
+fails before any Graph call: calendar jobs retry after a minute, with no duplicate
+or orphan event. Its legacy-clearing `UPDATE requests SET calendar_event_id='' ...`
+can fail after a Graph deletion; the transaction retains the range id, and retry
+treats Graph's 404 as success. All date writers and shutdown deletion already own
+their ranges.
+
+**Recovery after 0006.** Fix forward by default. For an image rollback, first
+preserve a fresh `.backup`, then apply the tested lossless Down script in one
+transaction through the running container:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0006.db"'
+kamal app exec --reuse "sqlite3 -bail /data/leave.db \"$(cat internal/db/testdata/undo_0006.sql)\""
+kamal app exec --reuse 'sqlite3 -bail -readonly /data/leave.db "PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+kamal rollback <version>
+```
+
+Require integrity `ok` and no foreign-key rows before rollback. Down preserves
+multi-range requests and event ids, restores both triggers and CASCADE, and appends
+an empty legacy column (so the old shim has nothing to adopt). The running 0006
+binary is safe meanwhile: it still writes its ranges and tolerates the restored
+triggers. Do not restart it between undo and rollback or it reapplies 0006.
+Restoring the pre-deploy backup is the last resort: it loses writes and needs the
+Outlook cleanup documented for 0004 below.
+
+After deploy, check `kamal app exec --reuse 'leave -migrate-status'` (0006 applied),
+`/healthz`, and run `verify_0006.sql` read-only on live by replacing only the sqlite
+path in the verify command above with `/data/leave.db`. Check the outbox admin page
+for failed calendar jobs after the one-minute swap retry. Remove both in-volume
+copies (`/data/leave-pre-0006.db`, `/data/leave-rehearsal.db`) after verification;
+retain the off-host backup.
 
 **Rollback after 0004 means restoring the pre-deploy backup**, losing writes
 since that backup, or fixing forward. A previous image refuses schema version

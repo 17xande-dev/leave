@@ -44,7 +44,7 @@ func TestPayrollParity(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		res, err := f.db.Exec(`INSERT INTO requests (user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at,cancels_request_id)
+		res, err := seedRequest(f.db, `INSERT INTO requests (user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at,cancels_request_id)
 			VALUES (?,?,?,?,?,?,?,?,?,?)`, f.people["staff"].ID, f.types[r.code].ID, r.kind, r.start, r.end, r.days, r.cycle, r.status, "2026-10-01", cancels)
 		if err != nil {
 			t.Fatal(err)

@@ -127,7 +127,7 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
-	var ranges string
+	var ranges sql.NullString
 	err := row.Scan(&r.ID, &r.UserID, &r.TypeID, &r.Kind, &r.CancelsID, &r.Start, &r.End, &r.Days, &r.HalfStart, &r.HalfEnd, &r.CycleStart,
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &ranges,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
@@ -137,7 +137,12 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 		return Request{}, ErrNotFound
 	}
 	if err == nil {
-		for _, pair := range strings.Fields(ranges) {
+		// Every writer re-reads before commit: forgetting insertRanges must
+		// fail in that transaction now that no default trigger supplies a row.
+		if !ranges.Valid {
+			return Request{}, fmt.Errorf("request %d has no stored ranges", r.ID)
+		}
+		for _, pair := range strings.Fields(ranges.String) {
 			start, end, ok := strings.Cut(pair, "/")
 			if !ok {
 				return Request{}, fmt.Errorf("invalid stored request range %q", pair)

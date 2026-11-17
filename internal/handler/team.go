@@ -175,7 +175,7 @@ func (h *Handler) buildGrid(r *http.Request, month, cur, today time.Time) (teamG
 			status = "pending"
 		}
 		if status != "" {
-			for _, rg := range requestRanges(rq) {
+			for _, rg := range rq.Ranges {
 				byUser[u.ID] = append(byUser[u.ID], span{rg.Start, rg.End, status})
 			}
 		}

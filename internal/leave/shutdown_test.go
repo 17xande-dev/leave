@@ -161,21 +161,9 @@ func TestDeclinedShutdownRequestCanBeRegenerated(t *testing.T) {
 
 func TestDeleteShutdownWithoutRangeCascade(t *testing.T) {
 	f := newFixture(t)
-	// Model 0006's restrictive foreign key: a cascade would hide missing cleanup.
-	for _, q := range []string{
-		`DROP TABLE request_ranges`,
-		`CREATE TABLE request_ranges (
-			request_id INTEGER NOT NULL REFERENCES requests(id),
-			start_date TEXT NOT NULL,
-			end_date TEXT NOT NULL,
-			calendar_event_id TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (request_id, start_date),
-			CHECK (end_date >= start_date)
-		) STRICT`,
-	} {
-		if _, err := f.db.Exec(q); err != nil {
-			t.Fatal(err)
-		}
+	var onDelete string
+	if err := f.db.QueryRow(`SELECT on_delete FROM pragma_foreign_key_list('request_ranges')`).Scan(&onDelete); err != nil || onDelete != "NO ACTION" {
+		t.Fatalf("range FK: %q %v", onDelete, err)
 	}
 	id := f.december(false)
 	var before int

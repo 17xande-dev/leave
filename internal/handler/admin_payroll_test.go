@@ -344,7 +344,7 @@ func TestPayrollColumnMapping(t *testing.T) {
 		{"2026-10-06", "approved", 333},
 		{"2026-10-07", "pending", 444},
 	} {
-		if _, err := hs.db.Exec(`INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
+		if _, err := seedRequest(hs.db, `INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
 			VALUES (?,?,'leave',?,?,?,'2026-01-01',?,'2026-10-01')`,
 			staff.ID, annual.ID, r.start, r.start, r.days, r.status); err != nil {
 			t.Fatal(err)
@@ -478,7 +478,7 @@ func TestPayrollSize(t *testing.T) {
 			t.Fatal(err)
 		}
 		for j := 0; j < 3; j++ {
-			_, err := hs.db.Exec(`INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
+			_, err := seedRequest(hs.db, `INSERT INTO requests(user_id,type_id,kind,start_date,end_date,days_x100,cycle_start,status,created_at)
 				VALUES (?,?,'leave',?,?,50,'2026-01-01','approved','2026-10-01')`, u.ID, annual, fmt.Sprintf("2026-09-%02d", j+1), fmt.Sprintf("2026-09-%02d", j+1))
 			if err != nil {
 				t.Fatal(err)

@@ -35,7 +35,7 @@ func (f *fixture) rule(department string, percent int) {
 func (f *fixture) insertAway(who, code, start, end, status string) {
 	f.t.Helper()
 	ty := f.types[code]
-	_, err := f.db.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start,
+	_, err := seedRequest(f.db, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start,
 		status, created_at) VALUES (?, ?, 'leave', ?, ?, 100, '2026-01-01', ?, '2026-10-01T00:00:00Z')`,
 		f.people[who].ID, ty.ID, start, end, status)
 	if err != nil {

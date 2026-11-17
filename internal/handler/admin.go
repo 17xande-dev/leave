@@ -160,7 +160,7 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at", "recorded_by"})
 	for _, q := range rs {
 		cw.Write([]string{strconv.FormatInt(q.ID, 10), csvText(q.UserName), csvText(q.Department),
-			csvText(q.TypeName), q.Kind, q.Start, q.End, rangeValue(requestRanges(q)), q.Days.String(), q.HalfNote(), q.Status,
+			csvText(q.TypeName), q.Kind, q.Start, q.End, rangeValue(q.Ranges), q.Days.String(), q.HalfNote(), q.Status,
 			csvText(q.ApproverName), csvText(q.DecidedBy), q.DecidedAt, csvText(q.Note),
 			csvText(q.DecisionNote), q.CreatedAt, csvText(q.RecordedBy)})
 	}

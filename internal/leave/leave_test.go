@@ -370,9 +370,11 @@ func TestAdjustmentsAndSickCycle(t *testing.T) {
 		t.Fatalf("adjustment to a non-cycle start: %v", err)
 	}
 	// Sick leave taken in 2025 still counts in October 2026: same 36-month cycle.
-	f.db.Exec(`INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, status,
+	if _, err := seedRequest(f.db, `INSERT INTO requests (user_id, type_id, kind, start_date, end_date, days_x100, cycle_start, status,
 		approver_id, created_at) VALUES (?, ?, 'leave', '2025-06-02', '2025-06-06', 500, '2025-01-01', 'approved', ?, '')`,
-		f.people["staff"].ID, f.types["sick"].ID, f.people["head"].ID)
+		f.people["staff"].ID, f.types["sick"].ID, f.people["head"].ID); err != nil {
+		t.Fatal(err)
+	}
 	if got := f.available("staff", "sick"); got != 25 {
 		t.Fatalf("sick available = %d, want 25", got)
 	}

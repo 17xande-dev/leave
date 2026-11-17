@@ -121,7 +121,7 @@ func newHomeData(bs []leave.Balance, rs []leave.Request, today time.Time) homeDa
 			}
 		}
 		if r.Status == leave.StatusApproved && r.Kind == leave.KindLeave {
-			for _, rg := range requestRanges(r) {
+			for _, rg := range r.Ranges {
 				if rg.End < day {
 					continue
 				}
@@ -232,7 +232,7 @@ func (h *Handler) pickerMarks(ctx context.Context, rs []leave.Request) (pickerMa
 			status = "pending"
 		}
 		if status != "" {
-			for _, rg := range requestRanges(r) {
+			for _, rg := range r.Ranges {
 				m.Booked = append(m.Booked, markedRange{rg.Start, rg.End, status})
 			}
 		}
@@ -394,13 +394,6 @@ func inputRanges(in leave.Input) []leave.Range {
 		return in.Ranges
 	}
 	return []leave.Range{{Start: in.Start, End: in.End}}
-}
-
-func requestRanges(r leave.Request) []leave.Range {
-	if len(r.Ranges) > 0 {
-		return r.Ranges
-	}
-	return []leave.Range{{Start: r.Start, End: r.End}}
 }
 
 // quoteData is the live preview under the apply form.
@@ -1104,7 +1097,7 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 		if err != nil {
 			return queueData{}, err
 		}
-		row.Away, row.AwayMore = queueAway(awayDuring(away, requestRanges(req)), req.UserID)
+		row.Away, row.AwayMore = queueAway(awayDuring(away, req.Ranges), req.UserID)
 		anyBulk = anyBulk || row.Bulk
 		rows = append(rows, row)
 	}

@@ -128,11 +128,6 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 			return err
 		}
 		for _, rr := range ranges {
-			if rr.LegacyEventID != "" {
-				if err := cal.Delete(ctx, rr.LegacyEventID); err != nil {
-					return err
-				}
-			}
 			if rr.EventID == "" {
 				continue
 			}

@@ -2,14 +2,32 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 )
 
+func assertContractRanges(t *testing.T, d *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`SELECT count(*) FROM requests r WHERE NOT EXISTS (SELECT 1 FROM request_ranges rr WHERE rr.request_id=r.id)`,
+		`SELECT count(*) FROM request_ranges rr WHERE NOT EXISTS (SELECT 1 FROM requests r WHERE r.id=rr.request_id)`,
+		`SELECT count(*) FROM requests r WHERE r.start_date<>(SELECT min(start_date) FROM request_ranges rr WHERE rr.request_id=r.id) OR r.end_date<>(SELECT max(end_date) FROM request_ranges rr WHERE rr.request_id=r.id)`,
+		`SELECT count(*) FROM request_ranges a JOIN request_ranges b ON b.request_id=a.request_id AND b.start_date>a.start_date AND b.start_date<=date(a.end_date,'+1 day')`,
+		`SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name IN ('requests_default_range','requests_sync_range')`,
+	} {
+		var n int
+		if err := d.QueryRow(q).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("range invariant %s: %d %v", q, n, err)
+		}
+	}
+}
+
 func TestRangesThroughMCP(t *testing.T) {
 	f := newFixture(t)
+	defer assertContractRanges(t, f.db)
 	staff, hr := f.as("staff1"), f.as("hr")
 	ranges := []DateRange{{"2026-10-12", "2026-10-13"}, {"2026-10-15", "2026-10-16"}}
 	args := map[string]any{"type": "annual", "ranges": ranges}
@@ -50,6 +68,7 @@ func TestRangesThroughMCP(t *testing.T) {
 	recorded := []DateRange{{"2026-06-01", "2026-06-02"}, {"2026-07-06", "2026-07-07"}}
 	rec := f.ok(hr, "record_leave", map[string]any{"person": "staff2", "type": "annual", "ranges": recorded, "note": "HR log", "half_start": true, "half_end": true})
 	assertRanges(rec, recorded)
+	assertRanges(f.ok(hr, "set_half_days", map[string]any{"id": id(rec), "half_start": false, "half_end": false}), recorded)
 	if get(rec.Data, "request", "days") != float64(3) || get(rec.Data, "request", "half_start") != true || get(rec.Data, "request", "half_end") != true {
 		t.Fatalf("record ranges with endpoint halves = %v", rec.Data)
 	}

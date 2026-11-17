@@ -700,7 +700,7 @@ func TestPickerMarksOnBothForms(t *testing.T) {
 func TestPickerMarksFilter(t *testing.T) {
 	hs := newHarness(t)
 	req := func(kind, status, start, end string) leave.Request {
-		return leave.Request{Kind: kind, Status: status, Start: start, End: end}
+		return leave.Request{Kind: kind, Status: status, Start: start, End: end, Ranges: []leave.Range{{Start: start, End: end}}}
 	}
 	rs := []leave.Request{
 		req(leave.KindLeave, leave.StatusApproved, "2026-11-02", "2026-11-03"),

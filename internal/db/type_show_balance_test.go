@@ -162,7 +162,7 @@ func TestTypeShowBalanceMigration(t *testing.T) {
 		t.Fatalf("old UPDATE visibility=%d: %v", n, err)
 	}
 	beforeRepeat := balanceMigrationHashes(t, d)
-	if _, err := p.Up(ctx); err != nil {
+	if _, err := p.UpTo(ctx, 5); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(beforeRepeat, balanceMigrationHashes(t, d)) {

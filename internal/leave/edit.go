@@ -168,9 +168,5 @@ func unchangedRanges(in Input, old Request) bool {
 	if err != nil {
 		return false
 	}
-	stored := old.Ranges
-	if len(stored) == 0 {
-		stored = []Range{{old.Start, old.End}}
-	}
-	return rangesString(ranges) == rangesString(stored)
+	return rangesString(ranges) == rangesString(old.Ranges)
 }

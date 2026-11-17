@@ -73,8 +73,8 @@ func rangesString(ranges []Range) string {
 }
 
 // insertRanges is the sole application writer of range dates. The request's
-// span and its ranges are committed together, including the temporary default
-// row inserted by requests_default_range during the expand/contract window.
+// span and its ranges are committed together. The leading DELETE supports
+// Edit's replacement and SubmitDraft's rewrite of existing ranges.
 func insertRanges(tx *sql.Tx, id int64, ranges []Range) error {
 	ranges, err := normaliseRanges(ranges)
 	if err != nil {
