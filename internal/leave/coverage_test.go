@@ -390,8 +390,14 @@ func TestEscalationStopsAtTheRequester(t *testing.T) {
 	if r, err = f.svc.Decide(f.ctx, f.people["hr"], r.ID, true, ""); err != nil || r.ApproverID != f.people["head"].ID {
 		t.Fatalf("first level: %+v %v", r, err)
 	}
-	if r, err = f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil || r.Status != StatusApproved {
-		t.Fatalf("head's approval should have been the last: %+v %v", r, err)
+	// The chain cannot go back to staff, but a request needing special
+	// permission must still end with the final approver, so head's approval
+	// hands it to pastor instead of finishing it (it used to finish here).
+	if r, err = f.svc.Decide(f.ctx, f.people["head"], r.ID, true, ""); err != nil || r.Status != StatusPending || r.ApproverID != f.people["pastor"].ID {
+		t.Fatalf("head's approval should hand over to the final approver: %+v %v", r, err)
+	}
+	if r, err = f.svc.Decide(f.ctx, f.people["pastor"], r.ID, true, ""); err != nil || r.Status != StatusApproved {
+		t.Fatalf("pastor's approval should be the last: %+v %v", r, err)
 	}
 }
 

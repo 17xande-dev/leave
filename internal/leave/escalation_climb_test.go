@@ -115,6 +115,9 @@ func TestEscalationFinalApproverStandsInThenBoss(t *testing.T) {
 
 // A directory loop among people already through the request cannot spin: head
 // and boss each have the other as approver, neither is the final approver.
+// The loop ends the climb, but a request needing special permission must
+// still be finished by the final approver, so it goes to pastor rather than
+// being approved without them (it used to finish here).
 func TestEscalationDirectoryCycleTerminates(t *testing.T) {
 	f := newFixture(t)
 	f.climbChain(false)
@@ -126,8 +129,10 @@ func TestEscalationDirectoryCycleTerminates(t *testing.T) {
 	r = f.approve("head", r.ID)
 	f.wantPendingWith(r, "boss")
 	// boss's approver is head, who is through it; head's is boss: a cycle.
-	if r = f.approve("boss", r.ID); r.Status != StatusApproved {
-		t.Fatalf("after boss = %+v", r)
+	r = f.approve("boss", r.ID)
+	f.wantPendingWith(r, "pastor")
+	if r = f.approve("pastor", r.ID); r.Status != StatusApproved {
+		t.Fatalf("after pastor = %+v", r)
 	}
 }
 

@@ -405,6 +405,39 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 	// which also covered their own level, so the chain carries on above them
 	// -- unless they are the final approver, where it ends. The visited set
 	// and the cap stop a cycle in the directory.
+	//
+	// Only an 'approved' step counts as having been through it: a 'granted'
+	// step is an admin allowing a negative balance before the request was even
+	// submitted, not an approval of it.
+	approved := func(id int64) (bool, error) {
+		if id == actor.ID || id == acting.ID {
+			return true, nil
+		}
+		var seen int
+		if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
+			AND decision = 'approved' AND (approver_id = ? OR on_behalf_of_id = ?)`,
+			r.ID, id, id).Scan(&seen); err != nil {
+			return false, err
+		}
+		return seen > 0, nil
+	}
+	// When the chain runs out (a cycle, the requester, the cap) a request that
+	// needs special permission still has to be finished by the final approver,
+	// in either capacity: hand it to them if they can still do it, else end.
+	finish := func() (int64, error) {
+		fa := st.FinalApproverID
+		if fa == 0 || fa == r.UserID {
+			return 0, nil
+		}
+		if done, err := approved(fa); err != nil || done {
+			return 0, err
+		}
+		u, err := s.users.ByID(ctx, fa)
+		if errors.Is(err, users.ErrNotFound) || (err == nil && u.Disabled) {
+			return 0, nil
+		}
+		return fa, err
+	}
 	const maxClimb = 10
 	visited := map[int64]bool{}
 	next, err := s.ResolveApprover(ctx, acting)
@@ -412,18 +445,15 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 		return 0, err
 	}
 	for i := 0; i < maxClimb; i++ {
-		if next == 0 || next == r.UserID {
+		if next == 0 {
 			return 0, nil
 		}
-		done := next == actor.ID || next == acting.ID
-		if !done {
-			var seen int
-			if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
-				AND (approver_id = ? OR on_behalf_of_id = ?)`,
-				r.ID, next, next).Scan(&seen); err != nil {
-				return 0, err
-			}
-			done = seen > 0
+		if next == r.UserID {
+			return finish()
+		}
+		done, err := approved(next)
+		if err != nil {
+			return 0, err
 		}
 		if !done {
 			return next, nil
@@ -432,7 +462,7 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 			return 0, nil
 		}
 		if visited[next] {
-			return 0, nil
+			return finish()
 		}
 		visited[next] = true
 		u, err := s.users.ByID(ctx, next)
@@ -443,7 +473,7 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 			return 0, err
 		}
 	}
-	return 0, nil
+	return finish()
 }
 
 // NextApprover is who an escalated request would go to if actor approved it;
