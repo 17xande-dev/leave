@@ -1,0 +1,5 @@
+{{define "subject"}}{{if .ToDelegate}}You are no longer approving leave for {{.Delegator}}{{else}}{{.Delegate}} no longer approves leave for you{{end}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{if .ToDelegate}}{{if .ByDelegator}}{{.Delegator}} has ended{{else}}{{.Actor}} has ended{{end}} the arrangement for you to approve leave requests for {{.Delegator}} ({{.Dates}}). Their requests are theirs alone again.{{else}}{{.Actor}} has ended the arrangement for {{.Delegate}} to approve leave requests for you ({{.Dates}}). Your requests are yours alone again.{{end}}
+{{end}}

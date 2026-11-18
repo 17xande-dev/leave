@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	htmltemplate "html/template"
 	"log/slog"
@@ -31,7 +32,7 @@ var templateFS embed.FS
 var (
 	// Each .txt file defines "subject" and "body", so each is parsed into a
 	// set of its own: in one shared set the last file parsed would win.
-	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited", "halves", "corrected")
+	textTmpls  = parseText("submitted", "decided", "withdrawn", "drafts", "escalated", "negative", "granted", "recorded", "revoked", "edited", "halves", "corrected", "delegated", "delegation_revoked")
 	htmlLayout = htmltemplate.Must(htmltemplate.ParseFS(templateFS, "templates/layout.html"))
 )
 
@@ -61,14 +62,19 @@ func New(baseURL string) *Notifier {
 	return &Notifier{baseURL: strings.TrimRight(baseURL, "/")}
 }
 
-type recipient struct{ Name, Email string }
+// recipient is someone to email. StandInFor and StandInUntil are set when they
+// are hearing as a stand-in: the approver they act for and the last day.
+type recipient struct{ Name, Email, StandInFor, StandInUntil string }
 
 // Hook is the leave.EventHook.
 func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 	r := e.Request
 	switch e.Kind {
+	case leave.EventDelegated, leave.EventDelegationRevoked:
+		// About a delegation, not a request: e.Request is zero.
+		return n.delegationMail(ctx, tx, e)
 	case leave.EventSubmitted, leave.EventReassigned:
-		to, err := approvers(ctx, tx, r)
+		to, err := approversAndStandIn(ctx, tx, e)
 		if err != nil {
 			return err
 		}
@@ -76,7 +82,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			return err
 		}
 	case leave.EventEscalated:
-		to, err := approvers(ctx, tx, r)
+		to, err := approversAndStandIn(ctx, tx, e)
 		if err != nil {
 			return err
 		}
@@ -94,14 +100,14 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			return err
 		}
 	case leave.EventNegativeGranted:
-		if err := n.send(ctx, tx, "granted", []recipient{{r.UserName, r.UserEmail}}, r, false, "Submit your leave", "",
+		if err := n.send(ctx, tx, "granted", []recipient{{Name: r.UserName, Email: r.UserEmail}}, r, false, "Submit your leave", "",
 			func(d *msgData) { d.Note = e.Note }); err != nil {
 			return err
 		}
 	case leave.EventRecorded:
 		// Approved from the start: no approver to tell, but the person hears
 		// of it, and it goes on the shared calendar like approved leave.
-		if err := n.send(ctx, tx, "recorded", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the leave", "",
+		if err := n.send(ctx, tx, "recorded", []recipient{{Name: r.UserName, Email: r.UserEmail}}, r, false, "View the leave", "",
 			func(d *msgData) { d.Shortfall = daysOf(e.Shortfall, r.TypeUnit) }); err != nil {
 			return err
 		}
@@ -120,7 +126,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			return err
 		}
 	case leave.EventRevoked:
-		if err := n.send(ctx, tx, "revoked", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the leave", "",
+		if err := n.send(ctx, tx, "revoked", []recipient{{Name: r.UserName, Email: r.UserEmail}}, r, false, "View the leave", "",
 			func(d *msgData) { d.Actor = e.Actor.Name }); err != nil {
 			return err
 		}
@@ -128,7 +134,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			return err
 		}
 	case leave.EventEdited:
-		to, err := approvers(ctx, tx, r)
+		to, err := approversAndStandIn(ctx, tx, e)
 		if err != nil {
 			return err
 		}
@@ -136,9 +142,9 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			return err
 		}
 	case leave.EventHalvesChanged:
-		to := []recipient{{r.UserName, r.UserEmail}}
+		to := []recipient{{Name: r.UserName, Email: r.UserEmail}}
 		if r.Status == leave.StatusPending {
-			approvers, err := approvers(ctx, tx, r)
+			approvers, err := approversAndStandIn(ctx, tx, e)
 			if err != nil {
 				return err
 			}
@@ -155,9 +161,9 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 	case leave.EventCorrected:
 		// The person always hears; the approver (or every admin but the
 		// person, when it sits in the admins' queue) only while it is pending.
-		to := []recipient{{r.UserName, r.UserEmail}}
+		to := []recipient{{Name: r.UserName, Email: r.UserEmail}}
 		if r.Status == leave.StatusPending {
-			who, err := approvers(ctx, tx, r)
+			who, err := approversAndStandIn(ctx, tx, e)
 			if err != nil {
 				return err
 			}
@@ -191,11 +197,11 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		}
 	case leave.EventDraftsCreated:
 		// To the home page, which lists every draft, rather than the first.
-		if err := n.send(ctx, tx, "drafts", []recipient{{r.UserName, r.UserEmail}}, r, false, "Submit your leave", "/"); err != nil {
+		if err := n.send(ctx, tx, "drafts", []recipient{{Name: r.UserName, Email: r.UserEmail}}, r, false, "Submit your leave", "/"); err != nil {
 			return err
 		}
 	case leave.EventDecided:
-		if err := n.send(ctx, tx, "decided", []recipient{{r.UserName, r.UserEmail}}, r, false, "View the request", ""); err != nil {
+		if err := n.send(ctx, tx, "decided", []recipient{{Name: r.UserName, Email: r.UserEmail}}, r, false, "View the request", ""); err != nil {
 			return err
 		}
 		if r.Status == leave.StatusApproved {
@@ -238,13 +244,96 @@ func approvers(ctx context.Context, tx *sql.Tx, r leave.Request) ([]recipient, e
 	return out, rows.Err()
 }
 
+// approversAndStandIn is approvers plus, when e carries an active stand-in for
+// the approver, the stand-in (if they can sign in and are not the requester),
+// marked so their copy says who they are approving for.
+func approversAndStandIn(ctx context.Context, tx *sql.Tx, e leave.Event) ([]recipient, error) {
+	out, err := approvers(ctx, tx, e.Request)
+	if err != nil || e.StandIn == nil || e.Request.ApproverID == 0 {
+		return out, err
+	}
+	var p recipient
+	err = tx.QueryRowContext(ctx, `SELECT name, email FROM users WHERE id = ? AND disabled = 0 AND id <> ?`,
+		e.StandIn.DelegateID, e.Request.UserID).Scan(&p.Name, &p.Email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	p.StandInFor, p.StandInUntil = e.StandIn.DelegatorName, Dates(e.StandIn.End, e.StandIn.End)
+	return append(out, p), nil
+}
+
+// delegationData is what the delegation messages are rendered from.
+type delegationData struct {
+	To string
+	// Delegator, Delegate and Actor are names; Actor set the delegation up (or
+	// ended it).
+	Delegator, Delegate, Actor string
+	Dates                      string
+	Note                       string
+	// ToDelegate: the message is to the stand-in; otherwise to the approver
+	// they stand in for. ByDelegator: the approver did it themselves.
+	ToDelegate, ByDelegator bool
+}
+
+// delegationMail tells the stand-in, and the approver too when someone else
+// (an admin) set the delegation up or ended it.
+func (n *Notifier) delegationMail(ctx context.Context, tx *sql.Tx, e leave.Event) error {
+	d := e.Delegation
+	if d == nil {
+		return fmt.Errorf("notify: %s event without a delegation", e.Kind)
+	}
+	tmpl := "delegated"
+	if e.Kind == leave.EventDelegationRevoked {
+		tmpl = "delegation_revoked"
+	}
+	type person struct {
+		id         int64
+		toDelegate bool
+	}
+	people := []person{{d.DelegateID, true}}
+	if e.Actor.ID != d.DelegatorID {
+		people = append(people, person{d.DelegatorID, false})
+	}
+	for _, pe := range people {
+		var name, email string
+		err := tx.QueryRowContext(ctx, `SELECT name, email FROM users WHERE id = ? AND disabled = 0`, pe.id).Scan(&name, &email)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if email == "" {
+			slog.Warn("notify: recipient has no email address in the directory", "name", name, "delegation", d.ID)
+			continue
+		}
+		data := delegationData{To: firstName(name), Delegator: d.DelegatorName, Delegate: d.DelegateName, Actor: e.Actor.Name,
+			Dates: Dates(d.Start, d.End), Note: d.Note, ToDelegate: pe.toDelegate, ByDelegator: e.Actor.ID == d.DelegatorID}
+		m, err := n.render(tmpl, data, n.baseURL+"/approvals", "Open your approvals")
+		if err != nil {
+			return err
+		}
+		m.To = []string{email}
+		if err := outbox.Enqueue(ctx, tx, outbox.KindEmail, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type msgData struct {
-	Owner      bool
-	To         string
-	Request    leave.Request
-	Dates      string
-	Days       string
-	Reassigned bool
+	// StandInFor and StandInUntil: the recipient is approving for this person
+	// until this date (see recipient).
+	StandInFor, StandInUntil string
+	Owner                    bool
+	To                       string
+	Request                  leave.Request
+	Dates                    string
+	Days                     string
+	Reassigned               bool
 	// Coverage is each warning sentence and ApprovedBy who has approved so
 	// far, for a request needing special permission.
 	Coverage   []string
@@ -315,7 +404,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			continue
 		}
 		d := msgData{To: firstName(p.Name), Owner: p.Email == r.UserEmail, Request: r, Dates: RangesText(r),
-			Days: days(r), Reassigned: reassigned}
+			Days: days(r), Reassigned: reassigned, StandInFor: p.StandInFor, StandInUntil: p.StandInUntil}
 		for _, f := range extra {
 			f(&d)
 		}
@@ -331,7 +420,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 	return nil
 }
 
-func (n *Notifier) render(tmpl string, d msgData, link, linkText string) (mailer.Message, error) {
+func (n *Notifier) render(tmpl string, d any, link, linkText string) (mailer.Message, error) {
 	own, ok := textTmpls[tmpl]
 	if !ok {
 		return mailer.Message{}, fmt.Errorf("notify: no template %s", tmpl)

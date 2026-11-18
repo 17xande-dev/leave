@@ -1,0 +1,7 @@
+{{define "subject"}}{{if .ToDelegate}}You are approving leave for {{.Delegator}}: {{.Dates}}{{else}}{{.Delegate}} will approve leave for you: {{.Dates}}{{end}}{{end}}
+{{define "body"}}Hi {{.To}},
+
+{{if .ToDelegate}}{{if .ByDelegator}}{{.Delegator}} has asked you to approve leave requests for them{{else}}{{.Actor}} has asked you to approve leave requests for {{.Delegator}}{{end}}, covering {{.Dates}}. Their requests stay with them, and you can approve or decline them in that time as well.{{else}}{{.Actor}} has named {{.Delegate}} to approve leave requests for you, covering {{.Dates}}. Your requests stay with you, and you can still decide them yourself.{{end}}
+{{with .Note}}
+Note: {{.}}
+{{end}}{{end}}

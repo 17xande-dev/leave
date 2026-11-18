@@ -2,7 +2,7 @@
 //
 // Every tool runs as the person the bearer token belongs to and goes through
 // the same leave.Service methods, users.Store lookups and permission helpers
-// (leave.CanView, leave.CanDecide, leave.CanWithdraw, users.User.Admin) as the
+// (leave.CanView, leave.CanDecide, their delegation-aware Service forms, leave.CanWithdraw, users.User.Admin) as the
 // pages do. There is no permission logic in this package: a tool that would do
 // something the person cannot do on the website gets the same refusal.
 //
@@ -231,10 +231,21 @@ func (d *deps) load(ctx context.Context, u users.User, id int64) (leave.Request,
 		return leave.Request{}, errNotFound
 	}
 	r, err := d.leave.Get(ctx, id)
-	if errors.Is(err, leave.ErrNotFound) || (err == nil && !leave.CanView(u, r)) {
+	if errors.Is(err, leave.ErrNotFound) {
 		return leave.Request{}, errNotFound
 	}
-	return r, err
+	if err != nil {
+		return r, err
+	}
+	// A stand-in may open what they can decide today.
+	ok, err := d.leave.CanViewNow(ctx, u, r)
+	if err != nil {
+		return r, err
+	}
+	if !ok {
+		return leave.Request{}, errNotFound
+	}
+	return r, nil
 }
 
 func ptr[T any](v T) *T { return &v }

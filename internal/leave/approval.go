@@ -188,7 +188,7 @@ func (s *Service) RequestCancellation(ctx context.Context, u users.User, id int6
 		if out, err = s.get(ctx, tx, newID); err != nil {
 			return err
 		}
-		return s.hook(ctx, tx, Event{Kind: EventSubmitted, Request: out, Actor: u})
+		return s.emit(ctx, tx, Event{Kind: EventSubmitted, Request: out, Actor: u})
 	})
 	return out, err
 }
@@ -265,9 +265,15 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 	if err != nil {
 		return Request{}, err
 	}
+	// A stand-in's approval is the delegator's: routing is worked out for the
+	// acting approver, not for whoever clicked.
+	acting, err := s.actingApprover(ctx, actor, before)
+	if err != nil {
+		return Request{}, err
+	}
 	var next int64
 	if approve && before.Escalate && before.Kind == KindLeave {
-		if next, err = s.escalationNext(ctx, s.db, before, actor); err != nil {
+		if next, err = s.escalationNext(ctx, s.db, before, actor, acting); err != nil {
 			return Request{}, err
 		}
 	}
@@ -280,7 +286,13 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 		if err != nil {
 			return err
 		}
-		if !CanDecide(actor, r) || r.ApproverID != before.ApproverID {
+		// Judged here, on the delegations as they stand now: one revoked or
+		// ended since the page was read refuses.
+		onBehalf, ok, err := s.CanDecideNow(ctx, tx, actor, r)
+		if err != nil {
+			return err
+		}
+		if !ok || r.ApproverID != before.ApproverID {
 			return ErrNotAllowed
 		}
 		// An edit can land between the read above and this transaction, and
@@ -312,7 +324,7 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 			if !approve {
 				decision = "declined"
 			}
-			if err := s.logStep(ctx, tx, id, actor.ID, decision, note); err != nil {
+			if err := s.logStep(ctx, tx, id, actor.ID, decision, note, onBehalf); err != nil {
 				return err
 			}
 			if approve && next != 0 {
@@ -334,8 +346,8 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 		if approve {
 			status = StatusApproved
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = ?, decided_by_id = ?, decided_at = ?,
-			decision_note = ? WHERE id = ? AND status = 'pending'`, status, actor.ID, stampNow(s.Now()), note, id)
+		res, err := tx.ExecContext(ctx, `UPDATE requests SET status = ?, decided_by_id = ?, decided_for_id = ?, decided_at = ?,
+			decision_note = ? WHERE id = ? AND status = 'pending'`, status, actor.ID, nullID(onBehalf), stampNow(s.Now()), note, id)
 		if err != nil {
 			return err
 		}
@@ -373,21 +385,28 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 // approver, when the request is in the admins' queue (one admin finishes it),
 // when nobody sits above actor, when that person is the requester, and when
 // they have already been through this request -- so it cannot loop.
-func (s *Service) escalationNext(ctx context.Context, q querier, r Request, actor users.User) (int64, error) {
+//
+// acting is whose approval this is: actor themselves, or the approver actor
+// stands in for. Routing follows acting (their final-approver status, their
+// approver), so a stand-in moves the request exactly where the delegator's own
+// approval would. actor is also never chosen next: they have just approved.
+// A step done on someone's behalf counts as that someone's.
+func (s *Service) escalationNext(ctx context.Context, q querier, r Request, actor, acting users.User) (int64, error) {
 	st, err := s.settings(ctx, q)
 	if err != nil {
 		return 0, err
 	}
-	if r.ApproverID == 0 || (st.FinalApproverID != 0 && actor.ID == st.FinalApproverID) {
+	if r.ApproverID == 0 || (st.FinalApproverID != 0 && acting.ID == st.FinalApproverID) {
 		return 0, nil
 	}
-	next, err := s.ResolveApprover(ctx, actor)
-	if err != nil || next == 0 || next == r.UserID || next == actor.ID {
+	next, err := s.ResolveApprover(ctx, acting)
+	if err != nil || next == 0 || next == r.UserID || next == acting.ID || next == actor.ID {
 		return 0, err
 	}
 	var seen int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ? AND approver_id = ?`,
-		r.ID, next).Scan(&seen); err != nil || seen > 0 {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
+		AND (approver_id = ? OR on_behalf_of_id = ?)`,
+		r.ID, next, next).Scan(&seen); err != nil || seen > 0 {
 		return 0, err
 	}
 	return next, nil
@@ -399,7 +418,11 @@ func (s *Service) NextApprover(ctx context.Context, actor users.User, r Request)
 	if !r.Escalate || r.Kind != KindLeave {
 		return users.User{}, false, nil
 	}
-	id, err := s.escalationNext(ctx, s.db, r, actor)
+	acting, err := s.actingApprover(ctx, actor, r)
+	if err != nil {
+		return users.User{}, false, err
+	}
+	id, err := s.escalationNext(ctx, s.db, r, actor, acting)
 	if err != nil || id == 0 {
 		return users.User{}, false, err
 	}
@@ -417,11 +440,17 @@ type Step struct {
 	Decision  string
 	Note      string
 	DecidedAt string
+	// OnBehalfOfID and OnBehalfOf: the approver this step was done for, when
+	// ApproverID acted as their stand-in (0 and "" otherwise).
+	OnBehalfOfID int64
+	OnBehalfOf   string
 }
 
-func (s *Service) logStep(ctx context.Context, tx *sql.Tx, requestID, approverID int64, decision, note string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO request_steps (request_id, approver_id, decision, note, decided_at)
-		VALUES (?, ?, ?, ?, ?)`, requestID, approverID, decision, note, stampNow(s.Now()))
+// logStep records a decision; onBehalfOf is the delegator when the approver
+// acted as a stand-in, else 0 (stored as NULL).
+func (s *Service) logStep(ctx context.Context, tx *sql.Tx, requestID, approverID int64, decision, note string, onBehalfOf int64) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO request_steps (request_id, approver_id, decision, note, decided_at, on_behalf_of_id)
+		VALUES (?, ?, ?, ?, ?, ?)`, requestID, approverID, decision, note, stampNow(s.Now()), nullID(onBehalfOf))
 	return err
 }
 
@@ -432,7 +461,9 @@ func (s *Service) Steps(ctx context.Context, requestID int64) ([]Step, error) {
 
 func (s *Service) steps(ctx context.Context, q querier, requestID int64) ([]Step, error) {
 	rows, err := q.QueryContext(ctx, `SELECT st.id, st.request_id, st.approver_id, u.name, st.decision, st.note,
-		st.decided_at FROM request_steps st JOIN users u ON u.id = st.approver_id
+		st.decided_at, COALESCE(st.on_behalf_of_id, 0), COALESCE(ob.name, '')
+		FROM request_steps st JOIN users u ON u.id = st.approver_id
+		LEFT JOIN users ob ON ob.id = st.on_behalf_of_id
 		WHERE st.request_id = ? ORDER BY st.id`, requestID)
 	if err != nil {
 		return nil, err
@@ -442,7 +473,7 @@ func (s *Service) steps(ctx context.Context, q querier, requestID int64) ([]Step
 	for rows.Next() {
 		var st Step
 		if err := rows.Scan(&st.ID, &st.RequestID, &st.ApproverID, &st.ApproverName, &st.Decision, &st.Note,
-			&st.DecidedAt); err != nil {
+			&st.DecidedAt, &st.OnBehalfOfID, &st.OnBehalfOf); err != nil {
 			return nil, err
 		}
 		out = append(out, st)
@@ -454,6 +485,12 @@ func (s *Service) steps(ctx context.Context, q querier, requestID int64) ([]Step
 // it attaches the coverage warnings and the trail so far, which the messages
 // quote, as they stand inside this transaction.
 func (s *Service) emit(ctx context.Context, tx *sql.Tx, e Event) error {
+	if e.Request.Status == StatusPending && e.Request.ApproverID != 0 {
+		var err error
+		if e.StandIn, err = s.ActiveStandIn(ctx, tx, e.Request.ApproverID); err != nil {
+			return err
+		}
+	}
 	if e.Request.Escalate && e.Request.Status == StatusPending {
 		var err error
 		if e.Coverage, err = s.coverageFor(ctx, tx, e.Request); err != nil {
@@ -525,7 +562,7 @@ func (s *Service) GrantNegative(ctx context.Context, admin users.User, id int64,
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
 		}
-		if err := s.logStep(ctx, tx, id, admin.ID, "granted", note); err != nil {
+		if err := s.logStep(ctx, tx, id, admin.ID, "granted", note, 0); err != nil {
 			return err
 		}
 		if out, err = s.get(ctx, tx, id); err != nil {
@@ -563,7 +600,7 @@ func (s *Service) RefuseNegative(ctx context.Context, admin users.User, id int64
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
 		}
-		if err := s.logStep(ctx, tx, id, admin.ID, "refused", note); err != nil {
+		if err := s.logStep(ctx, tx, id, admin.ID, "refused", note, 0); err != nil {
 			return err
 		}
 		if out, err = s.get(ctx, tx, id); err != nil {

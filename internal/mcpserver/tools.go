@@ -284,8 +284,10 @@ func (d *deps) getRequest(ctx context.Context, u users.User, in IDIn) (RequestDe
 		Fingerprint:      req.Fingerprint(),
 		CanWithdraw:      leave.CanWithdraw(u, req),
 		CanRequestCancel: d.leave.CanRequestCancellation(u, req),
-		CanDecide:        leave.CanDecide(u, req),
 		CanSubmit:        req.UserID == u.ID && req.Status == leave.StatusDraft,
+	}
+	if out.CanDecide, err = d.leave.CanDecideToday(ctx, u, req); err != nil {
+		return out, "", err
 	}
 	if out.CanEdit, err = d.leave.CanEdit(ctx, u, req); err != nil {
 		return out, "", err

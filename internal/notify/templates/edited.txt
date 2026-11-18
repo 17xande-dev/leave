@@ -1,7 +1,9 @@
 {{define "subject"}}Leave request changed by {{.Request.UserName}}: {{.Dates}}{{end}}
 {{define "body"}}Hi {{.To}},
 
-{{.Request.UserName}} has changed a request that was waiting for you.
+{{if .StandInFor}}You are approving for {{.StandInFor}} until {{.StandInUntil}}.
+
+{{end}}{{.Request.UserName}} has changed a request that was waiting for you.
 
 Was: {{.Was}}
 Now: {{.Now}}

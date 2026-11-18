@@ -316,3 +316,44 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 		t.Fatalf("an event was created for leave cancelled before the worker ran: %+v", cal.Events)
 	}
 }
+
+// A stand-in's approval is written on the shared calendar as such: "Approved
+// by B for A.", so whoever reads the event knows the approver was away.
+func TestCalendarBodyNamesTheApproverStoodInFor(t *testing.T) {
+	ctx := context.Background()
+	d := dbtest.New(t)
+	us := users.NewStore(d)
+	svc := leave.New(d, us, leave.Config{Location: time.UTC})
+	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
+	svc.SeedTypes(ctx)
+	boss, _ := us.Upsert(ctx, directory.User{ID: "CN=boss", DN: "CN=boss", Username: "boss", Name: "Big Boss", Email: "boss@x.test"})
+	deputy, _ := us.Upsert(ctx, directory.User{ID: "CN=dep", DN: "CN=dep", Username: "dep", Name: "Dee Deputy", Email: "dep@x.test"})
+	staff, _ := us.Upsert(ctx, directory.User{ID: "CN=s", DN: "CN=s", Username: "s", Name: "Sam Staff", Email: "s@x.test", ManagerDN: "CN=boss"})
+	types, _ := svc.Types(ctx, true)
+
+	cal := &calendar.Log{}
+	create, remove := calendarHandlers(cal, svc)
+	w := outbox.NewWorker(outbox.NewStore(d), map[string]outbox.Handler{
+		outbox.KindEmail: emailHandler(mailer.NewFake()), outbox.KindCalendarCreate: create, outbox.KindCalendarDelete: remove,
+	})
+	svc.OnEvent(notify.New("https://leave.test").Hook)
+
+	if _, err := svc.Delegate(ctx, boss, boss.ID, deputy.ID, "2026-10-05", "2026-10-09", ""); err != nil {
+		t.Fatal(err)
+	}
+	r, err := svc.Submit(ctx, staff, leave.Input{TypeID: types[0].ID, Start: "2026-10-12", End: "2026-10-16"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Decide(ctx, deputy, r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	w.RunDue(ctx)
+	ranges, err := svc.CalendarRanges(ctx, r.ID)
+	if err != nil || len(ranges) != 1 {
+		t.Fatalf("ranges = %+v %v", ranges, err)
+	}
+	if want := "Annual leave, Mon 12 Oct – Fri 16 Oct 2026.\nApproved by Dee Deputy for Big Boss."; cal.Events[ranges[0].EventID].Body != want {
+		t.Fatalf("event body = %q, want %q", cal.Events[ranges[0].EventID].Body, want)
+	}
+}

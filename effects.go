@@ -108,7 +108,7 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 		}
 		approved := "Approved automatically."
 		if r.DecidedBy != "" {
-			approved = "Approved by " + r.DecidedBy + "."
+			approved = "Approved by " + r.DecidedByFor() + "."
 			if r.IsRecorded() {
 				approved = "Recorded by " + r.DecidedBy + "."
 			}

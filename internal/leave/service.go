@@ -90,6 +90,11 @@ const (
 	// as it is now, Before as it was, Note the admin's reason; the person and,
 	// while it is pending, the approver are told.
 	EventCorrected EventKind = "corrected"
+	// EventDelegated: someone named a stand-in for their approvals; Delegation
+	// is it, Actor who set it up. EventDelegationRevoked: it was ended early.
+	// Neither concerns one request, so Request is zero.
+	EventDelegated         EventKind = "delegated"
+	EventDelegationRevoked EventKind = "delegation_revoked"
 )
 
 type Event struct {
@@ -112,6 +117,12 @@ type Event struct {
 	// StaleEventIDs, set only by Correct on approved leave, are the calendar
 	// events of the ranges it replaced; the calendar job deletes them.
 	StaleEventIDs []string
+	// Delegation accompanies EventDelegated and EventDelegationRevoked.
+	Delegation *Delegation
+	// StandIn is, for an event about a pending request (see emit), the
+	// delegation active today for the request's approver: the stand-in is told
+	// too. Nil when there is none.
+	StandIn *Delegation
 }
 
 // EventHook runs inside the transaction making the change. An error rolls the

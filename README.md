@@ -196,6 +196,49 @@ kamal rollback
 `get_request` tool fails, for those few seconds. Do not restart it in between: it would
 reapply 0008.
 
+**Stand-ins for approvals (core; nothing in the UI or MCP creates one yet).** An approver
+who is going away names a stand-in for a date range of at most 30 days (first and last
+day both counted); one stand-in at a time per approver, no chains, and anyone with a
+working account can be named. The requests stay with the real approver. While a
+delegation is active *today* (unrevoked, inside its dates, app timezone) the stand-in
+also sees them in their queue and badge, can open them, and may decide them through the
+same code paths (pages, bulk approve, MCP). Requests already waiting when it starts
+appear at once; whatever is undecided when it ends is the approver's alone again. A
+stand-in never decides the leave of whoever set the delegation up, never their own
+leave, and never the admins' queue, and gets no administrator powers. An escalated
+request is routed as the *delegator's* approval would be, so a stand-in for the final
+approver can give the final special-permission approval. Decisions are shown as
+"Approved by B for A" (request page, history, the decided email, the calendar event) and
+stored in `requests.decided_for_id` / `request_steps.on_behalf_of_id`. While a
+delegation is active the stand-in is also emailed what is submitted, edited, escalated,
+reassigned or corrected for the approver, with "You are approving for A until ...", and
+both are emailed when it is created or revoked by someone else. The service methods are
+`Delegate`, `RevokeDelegation`, `Delegations`, `ActingFor`, `CanDecideNow` and
+`CanViewNow`; the pages and tools to use them arrive in the next phase.
+
+**0009 rehearsal and rollback (operator).** `0009_approval_delegations.sql` adds the
+`approval_delegations` table and two nullable columns (`requests.decided_for_id`,
+`request_steps.on_behalf_of_id`). Take a backup and rehearse on a separate copy, as for
+0008 (same commands with `0009` in the file names and `-migrate` run against the
+rehearsal copy). Expect `8 -> 9` on the first `-migrate`; the counts of `users`,
+`requests`, `request_ranges`, `request_steps` and `balance_adjustments` must be
+unchanged, `SELECT count(*) FROM approval_delegations` must be `0`,
+`SELECT count(*) FROM requests WHERE decided_for_id IS NOT NULL` and
+`SELECT count(*) FROM request_steps WHERE on_behalf_of_id IS NOT NULL` must be `0`, both
+integrity and foreign-key checks clean, and the repeated `-migrate` must report
+`9 -> 9`. During the swap the previous container never reads the table and its INSERTs
+name explicit columns, so the new columns stay NULL; a stand-in simply cannot act for
+those seconds. Fix forward by default. For an image rollback, run from the repo root
+(it discards only the delegations and the "for A" audit, never a request):
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0009.db"'
+kamal app exec --reuse "sqlite3 -bail -cmd '.timeout 10000' /data/leave.db \"$(cat internal/db/testdata/undo_0009.sql)\""
+kamal rollback
+```
+**Warning:** between the undo and `kamal rollback`, the running new container fails every
+page that reads a request (`no such column: r.decided_for_id`) for those few seconds. Do
+not restart it in between: it would reapply 0009.
+
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
 Applicants' working-day leave must fit within 31 days from its first to last day,
@@ -610,7 +653,7 @@ starting the server. `go run . -migrate` applies pending migrations, prints stat
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all eight migrations pending until startup or `-migrate`. A database newer than
+reports all nine migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;

@@ -725,9 +725,17 @@ func (h *Handler) loadRequest(w http.ResponseWriter, r *http.Request) (leave.Req
 	req, err := h.leave.Get(r.Context(), id)
 	// Someone else's request is a 404, not a 403: its existence is not
 	// something to confirm to a person who cannot see it.
-	if errors.Is(err, leave.ErrNotFound) || (err == nil && !leave.CanView(currentUser(r), req)) {
+	if errors.Is(err, leave.ErrNotFound) {
 		http.NotFound(w, r)
 		return leave.Request{}, false
+	}
+	if err == nil {
+		// A stand-in may open what they can decide today.
+		var ok bool
+		if ok, err = h.leave.CanViewNow(r.Context(), currentUser(r), req); err == nil && !ok {
+			http.NotFound(w, r)
+			return leave.Request{}, false
+		}
 	}
 	if err != nil {
 		h.serverError(w, r, err)
@@ -743,7 +751,6 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		Back:         backLink{"/", "My leave"},
 		CanWithdraw:  leave.CanWithdraw(u, req),
 		CanCancel:    h.leave.CanRequestCancellation(u, req),
-		CanDecide:    leave.CanDecide(u, req),
 		CanUnrecord:  u.Admin && req.IsRecorded() && req.Status == leave.StatusApproved && req.UserID != u.ID,
 		CanSetHalves: leave.CanSetHalves(u, req),
 		HalvesStart:  req.HalfStart, HalvesEnd: req.HalfEnd,
@@ -757,6 +764,9 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		d.CorrectBlocked = blocked
 	}
 	var cerr error
+	if d.CanDecide, cerr = h.leave.CanDecideToday(r.Context(), u, req); cerr != nil {
+		return d, cerr
+	}
 	if d.Corrections, cerr = h.leave.Corrections(r.Context(), req.ID); cerr != nil {
 		return d, cerr
 	}
@@ -1195,7 +1205,11 @@ func (h *Handler) ApproveMany(w http.ResponseWriter, r *http.Request) {
 	approved := 0
 	for _, id := range ids {
 		req, err := h.leave.Get(r.Context(), id)
-		if errors.Is(err, leave.ErrNotFound) || (err == nil && !leave.CanDecide(u, req)) {
+		allowed := false
+		if err == nil {
+			allowed, err = h.leave.CanDecideToday(r.Context(), u, req)
+		}
+		if errors.Is(err, leave.ErrNotFound) || (err == nil && !allowed) {
 			failures = append(failures, fmt.Sprintf("Request %d: you cannot approve it. It may already be decided.", id))
 			continue
 		}

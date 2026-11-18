@@ -14,7 +14,7 @@
   {{with .RemovedBy}}<tr><th>Removed by</th><td>{{.}}{{with $.Data.Request.RemovedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}</td></tr>{{end}}
   {{else}}
   <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
-  {{with .DecidedBy}}<tr><th>Decided by</th><td>{{.}}</td></tr>{{end}}
+  {{if .DecidedBy}}<tr><th>Decided by</th><td>{{.DecidedByFor}}</td></tr>{{end}}
   {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}{{end}}
 </table>
 {{if and .HalvesSetByID .HalvesSetAt}}<p class="hint">Half days set by {{.HalvesSetBy}} on {{date (slice .HalvesSetAt 0 10)}}</p>{{end}}
@@ -82,7 +82,7 @@
 <div class="panel">
   <h2>History</h2>
   <ul>
-  {{range .}}<li>{{if eq .Decision "approved"}}Approved (override){{else if eq .Decision "declined"}}Declined{{else if eq .Decision "granted"}}Allowed to go below zero{{else}}Refused to go below zero{{end}} by {{.ApproverName}}{{with .Note}}: {{.}}{{end}}</li>{{end}}
+  {{range .}}<li>{{if eq .Decision "approved"}}Approved (override){{else if eq .Decision "declined"}}Declined{{else if eq .Decision "granted"}}Allowed to go below zero{{else}}Refused to go below zero{{end}} by {{.ApproverName}}{{with .OnBehalfOf}} for {{.}}{{end}}{{with .Note}}: {{.}}{{end}}</li>{{end}}
   {{if and $.Data.Request.Escalate (eq $.Data.Request.Status "pending")}}<li>Now with {{with $.Data.Request.ApproverName}}{{.}}{{else}}the leave administrators{{end}}</li>{{end}}
   </ul>
 </div>

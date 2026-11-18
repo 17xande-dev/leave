@@ -71,6 +71,19 @@ type Request struct {
 	HalvesSetByID int64
 	HalvesSetBy   string
 	HalvesSetAt   string
+	// DecidedForID and DecidedFor: the approver DecidedBy decided for, when
+	// they acted as that approver's stand-in (0 and "" otherwise).
+	DecidedForID int64
+	DecidedFor   string
+}
+
+// DecidedByFor is who decided r as a line of text: "B", or "B for A" when B
+// was A's stand-in.
+func (r Request) DecidedByFor() string {
+	if r.DecidedFor != "" {
+		return r.DecidedBy + " for " + r.DecidedFor
+	}
+	return r.DecidedBy
 }
 
 // RecordedPrefix starts the decision note RecordLeave writes, for display
@@ -113,7 +126,8 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 	u.name, u.email, u.department, t.name, t.unit, COALESCE(a.name, ''), COALESCE(dby.name, ''),
 	COALESCE(sd.name, ''),
 	COALESCE(r.recorded_by_id, 0), COALESCE(rb.name, ''), COALESCE(r.removed_by_id, 0), COALESCE(rm.name, ''),
-	COALESCE(r.removed_at, ''), COALESCE(r.halves_set_by_id, 0), COALESCE(hb.name, ''), COALESCE(r.halves_set_at, '')
+	COALESCE(r.removed_at, ''), COALESCE(r.halves_set_by_id, 0), COALESCE(hb.name, ''), COALESCE(r.halves_set_at, ''),
+	COALESCE(r.decided_for_id, 0), COALESCE(dfor.name, '')
 	FROM requests r
 	JOIN users u ON u.id = r.user_id
 	JOIN leave_types t ON t.id = r.type_id
@@ -123,7 +137,8 @@ const requestSelect = `SELECT r.id, r.user_id, r.type_id, r.kind, COALESCE(r.can
 	LEFT JOIN shutdowns sd ON sd.id = sp.shutdown_id
 	LEFT JOIN users rb ON rb.id = r.recorded_by_id
 	LEFT JOIN users rm ON rm.id = r.removed_by_id
-	LEFT JOIN users hb ON hb.id = r.halves_set_by_id`
+	LEFT JOIN users hb ON hb.id = r.halves_set_by_id
+	LEFT JOIN users dfor ON dfor.id = r.decided_for_id`
 
 func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 	var r Request
@@ -132,7 +147,7 @@ func scanRequest(row interface{ Scan(...any) error }) (Request, error) {
 		&r.Note, &r.Status, &r.ApproverID, &r.DecidedByID, &r.DecidedAt, &r.DecisionNote, &ranges,
 		&r.CreatedAt, &r.ShutdownPartID, &r.Escalate, &r.AllowNegative, &r.UserName, &r.UserEmail, &r.Department, &r.TypeName, &r.TypeUnit,
 		&r.ApproverName, &r.DecidedBy, &r.ShutdownName, &r.RecordedByID, &r.RecordedBy, &r.RemovedByID, &r.RemovedBy,
-		&r.RemovedAt, &r.HalvesSetByID, &r.HalvesSetBy, &r.HalvesSetAt)
+		&r.RemovedAt, &r.HalvesSetByID, &r.HalvesSetBy, &r.HalvesSetAt, &r.DecidedForID, &r.DecidedFor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Request{}, ErrNotFound
 	}
@@ -177,7 +192,8 @@ func (s *Service) get(ctx context.Context, q querier, id int64) (Request, error)
 func (s *Service) Get(ctx context.Context, id int64) (Request, error) { return s.get(ctx, s.db, id) }
 
 // CanView reports whether someone may see a request: its owner, whoever it is
-// or was routed to, whoever decided it, and admins.
+// or was routed to, whoever decided it, and admins. A stand-in who has not
+// decided it is not covered; see Service.CanViewNow.
 func CanView(u users.User, r Request) bool {
 	return u.Admin || u.ID == r.UserID || u.ID == r.ApproverID || u.ID == r.DecidedByID
 }
@@ -197,7 +213,9 @@ func CanWithdraw(u users.User, r Request) bool {
 	return false
 }
 
-// CanDecide reports whether u may approve or decline r now.
+// CanDecide reports whether u may approve or decline r now as its own approver
+// (or as an admin, in the admins' queue). It knows nothing of delegation: where
+// a stand-in may also decide, use Service.CanDecideNow.
 func CanDecide(u users.User, r Request) bool {
 	if r.Status != StatusPending || u.ID == r.UserID || u.Disabled {
 		return false
@@ -213,19 +231,40 @@ func (s *Service) ForUser(ctx context.Context, userID int64) ([]Request, error) 
 	return s.queryRequests(ctx, s.db, `WHERE r.user_id = ? ORDER BY r.start_date DESC, r.id DESC`, userID)
 }
 
-// Queue lists the pending requests u can decide, oldest first.
+// delegatedClause adds to a queue the requests waiting for someone the user
+// stands in for today: unrevoked, in range, not set up by the request's owner,
+// and one level only (the subquery looks at delegations naming the user, never
+// at who delegated to the delegator). Its three placeholders are the user's id,
+// today and today; the caller passes 0 for the id of a disabled user, who
+// stands in for nobody.
+const delegatedClause = `r.approver_id IN (SELECT d.delegator_id FROM approval_delegations d
+	WHERE d.delegate_id = ? AND d.revoked_at IS NULL AND d.start_date <= ? AND d.end_date >= ?
+	AND d.created_by_id <> r.user_id)`
+
+func delegateID(u users.User) int64 {
+	if u.Disabled {
+		return 0
+	}
+	return u.ID
+}
+
+// Queue lists the pending requests u can decide, oldest first: those waiting
+// for u, the admins' queue for an admin, and those waiting for an approver u is
+// standing in for today (see CanDecideNow).
 func (s *Service) Queue(ctx context.Context, u users.User) ([]Request, error) {
+	today := fmtDate(s.today())
 	return s.queryRequests(ctx, s.db, `WHERE r.status = 'pending' AND r.user_id <> ?
-		AND (r.approver_id = ? OR (r.approver_id IS NULL AND ? = 1))
-		ORDER BY r.created_at, r.id`, u.ID, u.ID, u.Admin)
+		AND (r.approver_id = ? OR (r.approver_id IS NULL AND ? = 1) OR `+delegatedClause+`)
+		ORDER BY r.created_at, r.id`, u.ID, u.ID, u.Admin, delegateID(u), today, today)
 }
 
 // PendingCount is len(Queue) without the rows, for the navigation badge.
 func (s *Service) PendingCount(ctx context.Context, u users.User) (int, error) {
 	var n int
+	today := fmtDate(s.today())
 	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM requests r WHERE r.status = 'pending'
-		AND r.user_id <> ? AND (r.approver_id = ? OR (r.approver_id IS NULL AND ? = 1))`,
-		u.ID, u.ID, u.Admin).Scan(&n)
+		AND r.user_id <> ? AND (r.approver_id = ? OR (r.approver_id IS NULL AND ? = 1) OR `+delegatedClause+`)`,
+		u.ID, u.ID, u.Admin, delegateID(u), today, today).Scan(&n)
 	return n, err
 }
 

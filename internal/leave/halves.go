@@ -91,7 +91,7 @@ func (s *Service) SetHalves(ctx context.Context, admin users.User, id int64, hal
 		if out, err = s.get(ctx, tx, id); err != nil {
 			return err
 		}
-		return s.hook(ctx, tx, Event{Kind: EventHalvesChanged, Request: out, Before: &old, Actor: admin})
+		return s.emit(ctx, tx, Event{Kind: EventHalvesChanged, Request: out, Before: &old, Actor: admin})
 	})
 	return out, err
 }

@@ -86,7 +86,7 @@ func TestRequestCorrectionsMigration(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, "../..").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, want := range []string{"7 -> 8", "8 -> 8"} {
+	for _, want := range []string{"7 -> 9", "9 -> 9"} {
 		cmd := exec.Command(binary, "-migrate")
 		cmd.Env = append(os.Environ(), "DB_PATH="+path)
 		out, err := cmd.CombinedOutput()
