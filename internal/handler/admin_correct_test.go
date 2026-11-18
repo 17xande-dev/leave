@@ -150,6 +150,9 @@ func TestAdminCorrectFlow(t *testing.T) {
 	if _, body := hs.get(hr, page); !strings.Contains(body, "Correct this request") {
 		t.Errorf("approved request page offers no correction")
 	}
+	if !strings.Contains(formBody, "It stays approved (decided by") || strings.Contains(formBody, "and with") {
+		t.Errorf("approved form's status line:\n%s", formBody)
+	}
 	m = seenRE.FindStringSubmatch(formBody)
 	if m == nil {
 		t.Fatal("approved form lacks the fingerprint")
@@ -161,6 +164,20 @@ func TestAdminCorrectFlow(t *testing.T) {
 	}
 	if _, body := hs.get(hr, page); !strings.Contains(body, "approved") || !strings.Contains(body, "Reason: fix dates") {
 		t.Errorf("page after correcting approved leave:\n%s", body)
+	}
+	// A declined request is not correctable: the form is refused down the
+	// not-possible path, and so is a post.
+	declined := hs.apply(staff, "annual", "2026-11-09", "2026-11-10")
+	if res, b := hs.post(head, declined+"/decide", url.Values{"decision": {"decline"}, "note": {"no"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("decline: %d\n%s", res.StatusCode, b)
+	}
+	dform := "/admin/requests/" + strings.TrimPrefix(declined, "/leave/") + "/correct"
+	if res, _ := hs.get2(hr, dform); res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=not-possible") {
+		t.Errorf("declined GET: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	res, _ = hs.post(hr, dform, url.Values{"type": {hs.typeID("annual")}, "start": {"2026-11-09"}, "end": {"2026-11-11"}, "reason": {"x"}, "seen": {"x"}})
+	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=not-possible") {
+		t.Errorf("declined POST: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
 }
 

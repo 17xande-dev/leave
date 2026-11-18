@@ -35,6 +35,7 @@ type graphLikeCalendar struct {
 	n          int
 	failCreate int // fail the Nth Create call (1-based), once
 	calls      int
+	afterNew   func() // runs once, after an event is made but before Create returns
 }
 
 func newGraphLike() *graphLikeCalendar {
@@ -54,6 +55,10 @@ func (c *graphLikeCalendar) Create(_ context.Context, e calendar.Event) (string,
 	id := fmt.Sprintf("ev%d", c.n)
 	c.byKey[e.Key] = id
 	c.live[id] = e
+	if f := c.afterNew; f != nil {
+		c.afterNew = nil
+		f()
+	}
 	return id, nil
 }
 
@@ -390,5 +395,57 @@ func TestCorrectApprovedTwiceWithJobBetween(t *testing.T) {
 	ids := r.eventIDs(req.ID)
 	if len(ids) != 1 || ids[0] == "" || r.cal.live[ids[0]].Start != "2026-10-19" {
 		t.Fatalf("range ids %v", ids)
+	}
+}
+
+// A correction that commits while the first job is inside the Graph call has
+// replaced the ranges, so the event just made is stale. It must not be
+// recorded on the new range (same start date: the correction's job would skip
+// it and the calendar would be wrong for good; different start date: the
+// record would fail and the event be orphaned). The job removes it and the
+// correction's own job makes the right one.
+func TestCreateRacingACorrectionLeavesOnlyTheNewEvent(t *testing.T) {
+	cases := []struct {
+		name   string
+		code   string
+		ranges []leave.Range
+		want   string
+	}{
+		{"same start, new end", "annual", []leave.Range{rg("2026-10-12", "2026-10-13")}, "2026-10-12..2026-10-13 Sam Staff — Annual leave"},
+		{"different start", "annual", []leave.Range{rg("2026-10-19", "2026-10-20")}, "2026-10-19..2026-10-20 Sam Staff — Annual leave"},
+		// Same dates, new type: only the correction count tells the ranges changed.
+		{"same dates, new type", "compassionate", []leave.Range{rg("2026-10-12", "2026-10-14")}, "2026-10-12..2026-10-14 Sam Staff — Compassionate leave"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newCorrectRig(t)
+			req, err := r.svc.Submit(r.ctx, r.staff, leave.Input{TypeID: r.typeIDs["annual"], Ranges: []leave.Range{rg("2026-10-12", "2026-10-14")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.svc.Decide(r.ctx, r.boss, req.ID, true, ""); err != nil {
+				t.Fatal(err)
+			}
+			first := r.jobs()
+			if len(first) != 1 {
+				t.Fatalf("approval queued %d jobs", len(first))
+			}
+			r.cal.afterNew = func() { r.correct(req.ID, tc.code, tc.ranges...) }
+			r.mustRun(first...)
+			if len(r.cal.live) != 0 {
+				t.Fatalf("stale event left on the calendar: %v", r.cal.liveRanges())
+			}
+			if ids := r.eventIDs(req.ID); slices.ContainsFunc(ids, func(s string) bool { return s != "" }) {
+				t.Fatalf("stale id recorded on the new range: %v", ids)
+			}
+			r.mustRun(r.jobs()...)
+			if got := r.cal.liveRanges(); !reflect.DeepEqual(got, []string{tc.want}) {
+				t.Fatalf("calendar %v, want [%s]", got, tc.want)
+			}
+			ids := r.eventIDs(req.ID)
+			if len(ids) != 1 || ids[0] == "" {
+				t.Fatalf("range ids %v", ids)
+			}
+		})
 	}
 }

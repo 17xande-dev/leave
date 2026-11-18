@@ -64,7 +64,11 @@ func (h *Handler) correctData(r *http.Request, req leave.Request, in leave.Input
 			d.Approver = a.Name
 		}
 	}
-	if req.Status != leave.StatusPending {
+	if req.Status == leave.StatusApproved {
+		// Approved leave stays as decided; empty when it was approved
+		// automatically, and the page then says only that it stays approved.
+		d.Approver = req.DecidedBy
+	} else if req.Status != leave.StatusPending {
 		d.Approver = "HR"
 	}
 	return d, nil

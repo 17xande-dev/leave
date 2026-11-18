@@ -7,7 +7,7 @@
 <h1>{{if .Data.CorrectID}}Correct this request{{else if .Data.EditID}}Edit your request{{else}}Apply for leave{{end}}</h1>
 {{with .Data}}
 {{if .CorrectID}}
-<p class="muted">You are changing <strong>{{.Owner}}</strong>'s request. It stays {{.Status}} and with <strong>{{.Approver}}</strong>; {{.Owner}} is emailed what changed{{if eq .Status "pending"}}, and so is whoever approves it{{end}}.</p>
+<p class="muted">You are changing <strong>{{.Owner}}</strong>'s request. It stays {{.Status}}{{if eq .Status "approved"}}{{if .Approver}} (decided by <strong>{{.Approver}}</strong>){{end}}{{else}} and with <strong>{{.Approver}}</strong>{{end}}; {{.Owner}} is emailed what changed{{if eq .Status "pending"}}, and so is whoever approves it{{end}}.</p>
 {{if eq .Status "approved"}}<p class="hint">The shared calendar is updated, and their balance follows the new figure.</p>{{end}}
 {{else}}
 <p class="muted">{{if .EditID}}Your request is with{{else}}Your request will go to{{end}} <strong>{{.Approver}}</strong> for approval.{{if .EditID}} Saving your changes emails them.{{end}}</p>

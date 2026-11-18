@@ -88,6 +88,12 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 				return err
 			}
 		}
+		// The correction count is read before the request and its ranges, so
+		// RecordRangeEvent can tell if a correction landed after this point.
+		revision, err := svc.CorrectionCount(ctx, j.RequestID)
+		if err != nil {
+			return err
+		}
 		r, err := svc.Get(ctx, j.RequestID)
 		if err != nil {
 			return err
@@ -110,10 +116,6 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 		// Each correction of approved leave deletes its events and makes new
 		// ones, so the key carries the correction count: otherwise Graph's
 		// transactionId dedupe could hand back the event just deleted.
-		revision, err := svc.CorrectionCount(ctx, r.ID)
-		if err != nil {
-			return err
-		}
 		for i, rr := range ranges {
 			if rr.EventID != "" {
 				continue
@@ -143,8 +145,18 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 			if err != nil {
 				return err
 			}
-			if err := svc.SetRangeEventID(ctx, r.ID, rr.Start, id); err != nil {
+			ok, err := svc.RecordRangeEvent(ctx, r.ID, rr.Start, rr.End, id, revision)
+			if err != nil {
 				return err
+			}
+			if !ok {
+				// A correction committed during the Graph call and replaced
+				// the ranges: this event is stale. Remove it; the
+				// correction's own job creates the right one.
+				if err := cal.Delete(ctx, id); err != nil {
+					return err
+				}
+				return nil
 			}
 		}
 		return nil

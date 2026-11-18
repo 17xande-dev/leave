@@ -150,14 +150,20 @@ func Summary(j Job) string {
 		}
 	case KindCalendarCreate, KindCalendarDelete:
 		var c struct {
-			RequestID int64 `json:"request_id"`
+			RequestID      int64    `json:"request_id"`
+			DeleteEventIDs []string `json:"delete_event_ids"`
 		}
 		if json.Unmarshal(j.Payload, &c) == nil {
 			verb := "Add"
 			if j.Kind == KindCalendarDelete {
 				verb = "Remove"
 			}
-			return fmt.Sprintf("%s request %d on the shared calendar", verb, c.RequestID)
+			out := fmt.Sprintf("%s request %d on the shared calendar", verb, c.RequestID)
+			// A correction's job removes the events it replaces first.
+			if n := len(c.DeleteEventIDs); n > 0 {
+				out += fmt.Sprintf(" (and removes %d old %s)", n, map[bool]string{true: "event", false: "events"}[n == 1])
+			}
+			return out
 		}
 	}
 	return j.Kind

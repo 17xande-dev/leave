@@ -158,9 +158,15 @@ then creates one event per range, with a `-c<n>` suffix on the Graph `transactio
 corrections so far) so Graph cannot hand back an event it just deleted. A retry
 re-deletes and re-creates only what is missing. Only the person is emailed (the email says the calendar
 is updated); a correction is refused while a cancellation of the leave is pending.
-During a deploy swap an old container's worker ignores `delete_event_ids`: an
-approved-leave correction made in those few seconds leaves its old events in Outlook;
-delete them by hand as in the Outlook clean-up below.
+During a deploy swap the old (11c) worker ignores `delete_event_ids` and uses the key
+`leave-request-<id>` with no `-c<n>` suffix, so it can record the original, still-live
+event on the corrected request's first range and leave Outlook showing the old type and
+dates. Avoid correcting approved leave during the swap window. If it happened, make one
+more correction of that request: it captures the recorded ids, deletes those events and
+creates new ones. Or delete the old events by hand (as in the Outlook clean-up below)
+**and** blank that request's `request_ranges.calendar_event_id`, then retry or queue a
+`calendar_create`; deleting the events alone would remove the leave from the calendar
+while the range still holds the id.
 
 **0008 rehearsal and rollback (operator).** `0008_request_corrections.sql` only adds the
 `request_corrections` table. Before deploying, take a backup and rehearse on a separate

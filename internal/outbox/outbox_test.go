@@ -94,3 +94,18 @@ func TestKickRunsPromptly(t *testing.T) {
 		t.Fatal("kicked job did not run")
 	}
 }
+
+// A correction's calendar job also removes the events it replaces, and the
+// admin queue page must say so: otherwise it reads as a plain add.
+func TestSummaryMentionsOldEventsACorrectionRemoves(t *testing.T) {
+	cases := []struct{ payload, want string }{
+		{`{"request_id":7}`, "Add request 7 on the shared calendar"},
+		{`{"request_id":7,"delete_event_ids":["a"]}`, "Add request 7 on the shared calendar (and removes 1 old event)"},
+		{`{"request_id":7,"delete_event_ids":["a","b"]}`, "Add request 7 on the shared calendar (and removes 2 old events)"},
+	}
+	for _, c := range cases {
+		if got := Summary(Job{Kind: KindCalendarCreate, Payload: []byte(c.payload)}); got != c.want {
+			t.Errorf("Summary(%s) = %q, want %q", c.payload, got, c.want)
+		}
+	}
+}

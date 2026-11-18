@@ -192,3 +192,36 @@ func TestCorrectionCount(t *testing.T) {
 		f.mustCorrect("hr", r.ID, typ, "2026-10-12", "2026-10-14", "n", "r")
 	}
 }
+
+// Correcting approved leave from late December into January moves it to the
+// next leave cycle: cycle_start is recomputed from the new dates, so the days
+// leave one year's balance and count against the other's. A stale cycle_start
+// would leave them charged to the wrong year.
+func TestCorrectApprovedAcrossYearEndMovesCycle(t *testing.T) {
+	f := newFixture(t)
+	r := f.approvedAnnual("2026-12-28", "2026-12-30")
+	annual := f.types["annual"]
+	staff := f.people["staff"]
+	taken := func(cycle string) Days {
+		t.Helper()
+		c, err := ParseDate(cycle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := f.svc.balance(f.ctx, f.svc.db, staff.ID, annual, c, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b.Taken
+	}
+	if a, b := taken("2026-01-01"), taken("2027-01-01"); a != WholeDays(3) || b != 0 {
+		t.Fatalf("before: 2026 %v, 2027 %v", a, b)
+	}
+	out := f.mustCorrect("hr", r.ID, "annual", "2027-01-04", "2027-01-06", "n", "wrong year")
+	if out.CycleStart != "2027-01-01" {
+		t.Fatalf("cycle_start %s, want 2027-01-01", out.CycleStart)
+	}
+	if a, b := taken("2026-01-01"), taken("2027-01-01"); a != 0 || b != WholeDays(3) {
+		t.Fatalf("after: 2026 %v, 2027 %v (days must move between the years)", a, b)
+	}
+}
