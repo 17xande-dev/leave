@@ -1138,7 +1138,11 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 	}
 	creators := map[int64]bool{}
 	for _, g := range grants {
-		creators[g.CreatedByID] = true
+		// An approver who set up their own stand-in is not hidden: their own
+		// requests go to their own approver, never to the stand-in's queue.
+		if g.CreatedByID != g.DelegatorID {
+			creators[g.CreatedByID] = true
+		}
 	}
 	rows := make([]queueRow, 0, len(q))
 	anyBulk := false

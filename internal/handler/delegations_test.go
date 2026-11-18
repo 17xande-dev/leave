@@ -269,6 +269,34 @@ func TestDelegationsQueueAwayHidesTheCreatorFromTheStandIn(t *testing.T) {
 	if !strings.Contains(row, "Also away: Olivia Operations") {
 		t.Fatalf("an ordinary Also away entry went missing:\n%s", row)
 	}
+
+	// The filter is for the stand-in's rows only: headkids' own row, held as
+	// the normal approver, still names Hannah (she is on the Kids team).
+	if _, err := hs.db.Exec(`INSERT INTO team_members (team_id, user_id) VALUES (?, ?)`,
+		hs.teamID("Kids team"), hs.staffID("hr")); err != nil {
+		t.Fatal(err)
+	}
+	thandi := hs.apply(hs.signIn("staff2"), "annual", "2026-10-12", "2026-10-14")
+	_, body = hs.get(hs.signIn("headkids"), "/approvals")
+	own := rowFor(t, body, thandi)
+	if strings.Contains(own, "for Olivia Operations") || !strings.Contains(own, "Hannah HR") {
+		t.Fatalf("the filter reached a row held as the normal approver:\n%s", own)
+	}
+}
+
+// An approver who names their own stand-in created the delegation, but their
+// own requests never reach the stand-in's queue, so they are not hidden: they
+// still show under Also away on the stand-in's rows.
+func TestDelegationsQueueAwayKeepsTheApproverWhoSetUpTheirOwnStandIn(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	hs.apply(hs.signIn("headops"), "annual", "2026-10-12", "2026-10-14")
+	hs.delegate("headops", "headkids", "2026-10-05", "2026-10-09") // created by headops itself
+	_, body := hs.get(hs.signIn("headkids"), "/approvals")
+	row := rowFor(t, body, path)
+	if !strings.Contains(row, "for Olivia Operations") || !strings.Contains(row, "Also away: Olivia Operations") {
+		t.Fatalf("the approver vanished from Also away on their stand-in's row:\n%s", row)
+	}
 }
 
 // A disabled stand-in cannot decide, so the request page must not say they are

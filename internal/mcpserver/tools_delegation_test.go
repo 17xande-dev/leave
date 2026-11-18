@@ -65,6 +65,13 @@ func TestDelegateApprovalsAdminForSomeoneElse(t *testing.T) {
 		f.refused(f.as(who), "delegate_approvals", a, "Only administrators can act for someone else")
 		f.refused(f.as(who), "my_delegations", map[string]any{"approver": other}, "Only administrators can act for someone else")
 	}
+	// Partial names are not "yourself": a contains match would let headops act
+	// for anyone whose name merely includes what they typed.
+	for _, part := range []string{"head", "Olivia", "ops", "olivia op"} {
+		a := map[string]any{"approver": part, "delegate": "staff2", "start": "2026-10-05", "end": "2026-10-09"}
+		f.refused(f.as("headops"), "delegate_approvals", a, "Only administrators can act for someone else")
+		f.refused(f.as("headops"), "my_delegations", map[string]any{"approver": part}, "Only administrators can act for someone else")
+	}
 	if ds, _ := f.svc.Delegations(t.Context(), leaveFilter()); len(ds) != 0 {
 		t.Fatal("a non-admin created a delegation for someone")
 	}
