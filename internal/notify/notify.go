@@ -252,6 +252,11 @@ func approversAndStandIn(ctx context.Context, tx *sql.Tx, e leave.Event) ([]reci
 	if err != nil || e.StandIn == nil || e.Request.ApproverID == 0 {
 		return out, err
 	}
+	// Second line of defence, as in leave.emit: whoever created the delegation
+	// cannot use it on their own leave, so its details are not sent on.
+	if e.StandIn.CreatedByID == e.Request.UserID || e.StandIn.DelegateID == e.Request.UserID {
+		return out, nil
+	}
 	var p recipient
 	err = tx.QueryRowContext(ctx, `SELECT name, email FROM users WHERE id = ? AND disabled = 0 AND id <> ?`,
 		e.StandIn.DelegateID, e.Request.UserID).Scan(&p.Name, &p.Email)

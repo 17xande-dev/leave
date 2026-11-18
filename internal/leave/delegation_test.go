@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/17xande-dev/leave/internal/directory"
 )
 
 // The fixture's "today" is Monday 2026-10-05. head approves staff and hr;
@@ -583,6 +585,14 @@ func TestDelegateEscalatedRequest(t *testing.T) {
 		// hr would leave the request with head. It must go to head's approver.
 		f.mustDelegate("head", "hr", "2026-10-05", "2026-10-09")
 		f.mustDelegate("pastor", "hr", "2026-10-05", "2026-10-09")
+		// The final approver has someone above them here (orphan, made an
+		// admin so they can be an override), so only the acting approver's
+		// final-approver status ends the chain: judged on hr instead it
+		// would carry on to orphan.
+		f.exec(`UPDATE users SET is_admin = 1 WHERE id = ?`, f.people["orphan"].ID)
+		if err := f.svc.SetOverride(f.ctx, f.people["pastor"].ID, f.people["orphan"].ID); err != nil {
+			t.Fatal(err)
+		}
 
 		f.events = nil
 		r, err := f.svc.Decide(f.ctx, f.people["hr"], r.ID, true, "ok for head")
@@ -644,6 +654,48 @@ func TestDelegateEscalatedRequest(t *testing.T) {
 		}
 	})
 
+	// staff -> head -> boss -> pastor, with boss standing in for head: boss's
+	// one approval counts for head's level and for their own, so the request
+	// goes on to pastor rather than being approved with pastor never seeing it.
+	t.Run("stand-in is next but not final", func(t *testing.T) {
+		f, r := setup(t)
+		boss, err := f.us.Upsert(f.ctx, directory.User{ID: "CN=boss,OU=Staff", DN: "CN=boss,OU=Staff", Username: "boss", Name: "boss",
+			Email: "boss@example.test", ManagerDN: "CN=pastor,OU=Staff"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.people["boss"] = boss
+		if _, err := f.us.Upsert(f.ctx, directory.User{ID: "CN=head,OU=Staff", DN: "CN=head,OU=Staff", Username: "head", Name: "head",
+			Email: "head@example.test", ManagerDN: "CN=boss,OU=Staff"}); err != nil {
+			t.Fatal(err)
+		}
+		f.mustDelegate("head", "boss", "2026-10-05", "2026-10-09")
+
+		next, ok, err := f.svc.NextApprover(f.ctx, boss, r)
+		if err != nil || !ok || next.ID != f.people["pastor"].ID {
+			t.Fatalf("next for the stand-in = %v %v %v, want pastor", next.Username, ok, err)
+		}
+		r, err = f.svc.Decide(f.ctx, boss, r.ID, true, "for head")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != StatusPending || r.ApproverID != f.people["pastor"].ID {
+			t.Fatalf("after boss's approval = %+v", r)
+		}
+		steps, _ := f.svc.Steps(f.ctx, r.ID)
+		if len(steps) != 1 || steps[0].ApproverID != boss.ID || steps[0].OnBehalfOf != "head" {
+			t.Fatalf("steps = %+v", steps)
+		}
+		r, err = f.svc.Decide(f.ctx, f.people["pastor"], r.ID, true, "")
+		if err != nil || r.Status != StatusApproved || r.DecidedByID != f.people["pastor"].ID || r.DecidedForID != 0 {
+			t.Fatalf("pastor's approval = %+v %v", r, err)
+		}
+		steps, _ = f.svc.Steps(f.ctx, r.ID)
+		if len(steps) != 2 || steps[1].ApproverID != f.people["pastor"].ID || steps[1].OnBehalfOfID != 0 {
+			t.Fatalf("steps = %+v", steps)
+		}
+	})
+
 	t.Run("declining ends it", func(t *testing.T) {
 		f, r := setup(t)
 		f.mustDelegate("head", "hr", "2026-10-05", "2026-10-09")
@@ -656,6 +708,31 @@ func TestDelegateEscalatedRequest(t *testing.T) {
 			t.Fatalf("steps = %+v", steps)
 		}
 	})
+}
+
+// The stand-in rides on an event only when the requester did not create the
+// delegation: its creator cannot use it on their own leave, and the event is
+// what the messages are built from.
+func TestEventCarriesStandInUnlessRequesterCreatedIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, creator string
+		want          bool
+	}{
+		{"made by the approver", "head", true},
+		{"made by the requester", "hr", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			if _, err := f.svc.Delegate(f.ctx, f.people[tc.creator], f.people["head"].ID, f.people["pastor"].ID, "2026-10-05", "2026-10-09", ""); err != nil {
+				t.Fatal(err)
+			}
+			f.events = nil
+			f.mustSubmit("hr", "annual", "2026-10-12", "2026-10-14")
+			if len(f.events) != 1 || (f.events[0].StandIn != nil) != tc.want {
+				t.Fatalf("events = %+v, want a stand-in: %v", f.events, tc.want)
+			}
+		})
+	}
 }
 
 // The guard against a request coming back to someone it has been through

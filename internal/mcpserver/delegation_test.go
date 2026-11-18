@@ -43,6 +43,23 @@ func TestStandInUsesTheTools(t *testing.T) {
 		t.Fatalf("decision = %v", a.Data)
 	}
 
+	// Assistants are told it was done "for" the approver, on the request and,
+	// for an escalated one, on the step.
+	if get(a.Data, "request", "decided_for") != d.Name {
+		t.Fatalf("decided_for = %v, want %q", get(a.Data, "request", "decided_for"), d.Name)
+	}
+	if got := f.ok(head, "get_request", map[string]any{"id": reqID}); get(got.Data, "request", "decided_for") != d.Name {
+		t.Fatalf("get_request decided_for = %v", get(got.Data, "request", "decided_for"))
+	}
+	if _, err := f.db.Exec(`INSERT INTO request_steps (request_id, approver_id, decision, note, decided_at, on_behalf_of_id)
+		VALUES (?, ?, 'approved', '', '2026-10-06T08:00:00Z', ?)`, reqID, o.ID, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	steps := f.ok(head, "get_request", map[string]any{"id": reqID}).Data["steps"].([]any)
+	if len(steps) != 1 || steps[0].(map[string]any)["on_behalf_of"] != d.Name || steps[0].(map[string]any)["approver"] != o.Name {
+		t.Fatalf("steps = %v", steps)
+	}
+
 	// Over: a fresh request waits with headops and the stand-in cannot reach it.
 	r2 := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-11-02", "end": "2026-11-02"})
 	f.svc.Now = func() time.Time { return time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC) }

@@ -75,6 +75,7 @@ type RequestInfo struct {
 	// Approver is who must decide it while it is pending; empty means any administrator.
 	Approver          string `json:"approver,omitempty"`
 	DecidedBy         string `json:"decided_by,omitempty"`
+	DecidedFor        string `json:"decided_for,omitempty" jsonschema:"set when decided_by acted as a stand-in: the approver they decided it for"`
 	DecisionNote      string `json:"decision_note,omitempty"`
 	CreatedAt         string `json:"created_at"`
 	RemovedBy         string `json:"removed_by,omitempty" jsonschema:"for recorded leave an administrator later removed: who removed it"`
@@ -87,7 +88,7 @@ type RequestInfo struct {
 func requestInfo(r leave.Request) RequestInfo {
 	return RequestInfo{ID: r.ID, Kind: r.Kind, Person: r.UserName, Department: r.Department,
 		Type: r.TypeName, Unit: r.TypeUnit, Start: r.Start, End: r.End, Ranges: dateRanges(r.Ranges), Days: r.Days, HalfStart: r.HalfStart, HalfEnd: r.HalfEnd, Status: r.Status,
-		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecisionNote: r.DecisionNote,
+		Note: r.Note, RecordedBy: r.RecordedBy, Approver: r.ApproverName, DecidedBy: r.DecidedBy, DecidedFor: r.DecidedFor, DecisionNote: r.DecisionNote,
 		CreatedAt: r.CreatedAt, RemovedBy: r.RemovedBy, RemovedAt: r.RemovedAt, CancelsRequestID: r.CancelsID, Shutdown: r.ShutdownName,
 		SpecialPermission: r.Escalate}
 }
@@ -113,6 +114,8 @@ type StepInfo struct {
 	Decision string `json:"decision" jsonschema:"approved, declined, granted or refused"`
 	Note     string `json:"note,omitempty"`
 	At       string `json:"at"`
+	// OnBehalfOf is set when Approver acted as a stand-in: who they did it for.
+	OnBehalfOf string `json:"on_behalf_of,omitempty" jsonschema:"set when the approver acted as a stand-in: the approver this step was done for"`
 }
 
 func (d *deps) steps(ctx context.Context, id int64) ([]StepInfo, error) {
@@ -122,7 +125,7 @@ func (d *deps) steps(ctx context.Context, id int64) ([]StepInfo, error) {
 	}
 	out := make([]StepInfo, 0, len(st))
 	for _, s := range st {
-		out = append(out, StepInfo{Approver: s.ApproverName, Decision: s.Decision, Note: s.Note, At: s.DecidedAt})
+		out = append(out, StepInfo{Approver: s.ApproverName, Decision: s.Decision, Note: s.Note, At: s.DecidedAt, OnBehalfOf: s.OnBehalfOf})
 	}
 	return out, nil
 }

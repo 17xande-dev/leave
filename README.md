@@ -218,9 +218,17 @@ both are emailed when it is created or revoked by someone else. The service meth
 
 **0009 rehearsal and rollback (operator).** `0009_approval_delegations.sql` adds the
 `approval_delegations` table and two nullable columns (`requests.decided_for_id`,
-`request_steps.on_behalf_of_id`). Take a backup and rehearse on a separate copy, as for
-0008 (same commands with `0009` in the file names and `-migrate` run against the
-rehearsal copy). Expect `8 -> 9` on the first `-migrate`; the counts of `users`,
+`request_steps.on_behalf_of_id`). Before deploying, take a backup and rehearse on a
+separate copy, never the live database:
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0009.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0009.db ".backup /data/leave-rehearsal.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT count(*) FROM approval_delegations; SELECT count(*) FROM requests WHERE decided_for_id IS NOT NULL; SELECT count(*) FROM request_steps WHERE on_behalf_of_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+```
+Expect `8 -> 9` on the first `-migrate`; the counts of `users`,
 `requests`, `request_ranges`, `request_steps` and `balance_adjustments` must be
 unchanged, `SELECT count(*) FROM approval_delegations` must be `0`,
 `SELECT count(*) FROM requests WHERE decided_for_id IS NOT NULL` and

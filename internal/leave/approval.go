@@ -400,8 +400,22 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 		return 0, nil
 	}
 	next, err := s.ResolveApprover(ctx, acting)
-	if err != nil || next == 0 || next == r.UserID || next == acting.ID || next == actor.ID {
+	if err != nil {
 		return 0, err
+	}
+	// The stand-in is also the next level up: their one approval counts for
+	// the delegator's level and for their own, so the chain carries on from
+	// them rather than ending here (or sending it back to them).
+	if next == actor.ID && acting.ID != actor.ID {
+		if st.FinalApproverID != 0 && actor.ID == st.FinalApproverID {
+			return 0, nil
+		}
+		if next, err = s.ResolveApprover(ctx, actor); err != nil {
+			return 0, err
+		}
+	}
+	if next == 0 || next == r.UserID || next == acting.ID || next == actor.ID {
+		return 0, nil
 	}
 	var seen int
 	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
@@ -486,9 +500,14 @@ func (s *Service) steps(ctx context.Context, q querier, requestID int64) ([]Step
 // quote, as they stand inside this transaction.
 func (s *Service) emit(ctx context.Context, tx *sql.Tx, e Event) error {
 	if e.Request.Status == StatusPending && e.Request.ApproverID != 0 {
-		var err error
-		if e.StandIn, err = s.ActiveStandIn(ctx, tx, e.Request.ApproverID); err != nil {
+		d, err := s.ActiveStandIn(ctx, tx, e.Request.ApproverID)
+		if err != nil {
 			return err
+		}
+		// Whoever created the delegation cannot use it on their own leave
+		// (CanDecideNow refuses), so the stand-in must not be sent it either.
+		if d != nil && d.CreatedByID != e.Request.UserID && d.DelegateID != e.Request.UserID {
+			e.StandIn = d
 		}
 	}
 	if e.Request.Escalate && e.Request.Status == StatusPending {
