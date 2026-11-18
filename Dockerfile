@@ -1,4 +1,4 @@
-FROM golang:1.27.3-alpine AS build
+FROM golang:1.27.4-alpine AS build
 # gcc and musl-dev: go-sqlite3 needs cgo.
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src

@@ -9,7 +9,7 @@ Microsoft 365 calendar.
 - **htmx** only for the live preview on the apply form (days charged, and which days are not and why). Every form is a plain
   POST that works without JavaScript.
 - **SQLite** in a single file. **One plain CSS file**, no framework or build step.
-- One binary with everything embedded, running in Docker on the on-prem work-docker02 host next to the DC, deployed with Kamal.
+- One binary with everything embedded, running in Docker on the on-prem sdt-vm-docker02 host next to the DC, deployed with Kamal.
 
 ## How it works
 
@@ -96,9 +96,9 @@ rehearse on a separate copy, never the live database:
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0007.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0007.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT code, active, show_balance, staff_can_apply FROM leave_types ORDER BY sort; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 Expect `6 -> 7`; counts of `users`, `requests`, `request_ranges`,
 `balance_adjustments` and `request_steps` must be unchanged. Check
@@ -177,9 +177,9 @@ copy, never the live database:
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0008.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0008.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT count(*) FROM request_corrections; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 Expect `7 -> 8` on the first `-migrate`; the counts of `users`, `requests`,
 `request_ranges`, `balance_adjustments` and `request_steps` must be unchanged,
@@ -226,9 +226,9 @@ separate copy, never the live database:
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0009.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0009.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT count(*) FROM approval_delegations; SELECT count(*) FROM requests WHERE decided_for_id IS NOT NULL; SELECT count(*) FROM request_steps WHERE on_behalf_of_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 Expect `8 -> 9` on the first `-migrate`; the counts of `users`,
 `requests`, `request_ranges`, `request_steps` and `balance_adjustments` must be
@@ -627,16 +627,16 @@ until the new secret is in place, then Retry clears them.
 
 ### 3. Deploying (Kamal)
 
-The app runs on `work-docker02` behind a shared `kamal-proxy`, reached through one shared
+The app runs on `sdt-vm-docker02` behind a shared `kamal-proxy`, reached through one shared
 Cloudflare Tunnel. Host-side setup (kamal-proxy and the tunnel's `cloudflared`) lives in
-`~/dev/riverschurch/infra`; this repo only deploys the app. `make deploy` runs the check
+`~/dev/riverschurch/infra/sdt-vm-docker02`; this repo only deploys the app. `make deploy` runs the check
 gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
 `ghcr.io/17xande-dev/leave`, and swap it in behind kamal-proxy once `GET /healthz`
 answers. It refuses to run with uncommitted changes, because Kamal builds from `HEAD`.
 
 One-time setup, on your workstation:
 
-1. **`work-docker02` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
+1. **`sdt-vm-docker02` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
    user too). That user needs passwordless `docker`.
 2. **`gh` logged in** with a token that can write packages: `.kamal/secrets` uses
    `gh auth token` as the ghcr.io password.
@@ -678,7 +678,7 @@ image selected by `$VERSION`, record the following counts on the copy before mig
 ```sh
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS users FROM users; SELECT count(*) AS requests FROM requests; SELECT count(*) AS request_ranges FROM request_ranges; SELECT count(*) AS balance_adjustments FROM balance_adjustments; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) AS users FROM users; SELECT count(*) AS requests FROM requests; SELECT count(*) AS request_ranges FROM request_ranges; SELECT count(*) AS balance_adjustments FROM balance_adjustments; SELECT code, active, show_balance FROM leave_types ORDER BY sort; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
@@ -721,8 +721,8 @@ Make a separate rehearsal copy on the host's volume:
 ```sh
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-rehearsal.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM requests WHERE status IN ('"'"'pending'"'"','"'"'draft'"'"','"'"'awaiting_hr'"'"') AND (half_start=1 OR half_end=1); PRAGMA integrity_check; PRAGMA foreign_key_check;"'
-ssh work-docker02 "docker pull ghcr.io/17xande-dev/leave:$VERSION"
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker pull ghcr.io/17xande-dev/leave:$VERSION"
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM balance_adjustments; SELECT half_days_enabled FROM settings; SELECT count(*) FROM requests WHERE halves_set_by_id IS NOT NULL; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
 ```
 
@@ -770,11 +770,11 @@ kamal build push --version "$VERSION"
 # Take and copy the fresh off-host backup before continuing.
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0006.db"'
 kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0006.db ".backup /data/leave-rehearsal.db"'
-ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/precheck_0006.sql
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
-ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/verify_0006.sql
-ssh work-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/compare_0006.sql
-ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/precheck_0006.sql
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/verify_0006.sql
+ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail -readonly /data/leave-rehearsal.db" < internal/db/testdata/compare_0006.sql
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 
 The stdin-over-ssh form above is **untested on the host**; the SQL files are tested
@@ -944,7 +944,7 @@ The database lives in the `leave-data` named volume. Back it up and copy it out:
 
 ```sh
 kamal app exec --reuse 'sqlite3 /data/leave.db ".backup /data/backup.db"'
-ssh work-docker02 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/backup.db" -' > leave-backup-$(date +%F).tar
+ssh sdt-vm-docker02 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/data/backup.db" -' > leave-backup-$(date +%F).tar
 ```
 
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
@@ -974,12 +974,12 @@ signed off. Do the copy **before** moving the hostname to the shared tunnel, so 
 written to the empty new database is overwritten:
 
 ```sh
-# on work-docker02, after the first `make deploy` has created `leave-data`
+# on sdt-vm-docker02, after the first `make deploy` has created `leave-data`
 docker compose -f ~/leave/compose.yaml stop leave        # nothing writes to the source
 docker run --rm -v leave_leave-data:/from:ro -v "$PWD":/b alpine tar czf /b/leave-data-premigrate.tgz -C /from .
 # on the workstation: stop the new app so nothing writes to the target
 kamal app stop
-# on work-docker02: copy EVERYTHING (leave.db and any -journal), then own it as the app's uid
+# on sdt-vm-docker02: copy EVERYTHING (leave.db and any -journal), then own it as the app's uid
 docker run --rm -v leave_leave-data:/from:ro -v leave-data:/to alpine \
   sh -c 'cp -a /from/. /to/ && chown -R 10001 /to'
 # on the workstation
@@ -998,7 +998,7 @@ example). It is low risk and accepted.
 
 The app must be served over HTTPS: its session cookies are `Secure`, and `BASE_URL`
 (the public address) is used for CSRF checks, email links and the AI connector's OAuth
-issuer. Cloudflare terminates TLS; the tunnel (run by `~/dev/riverschurch/infra`) makes an
+issuer. Cloudflare terminates TLS; the tunnel (run by `~/dev/riverschurch/infra/sdt-vm-docker02`) makes an
 outbound-only connection to Cloudflare, so no inbound port is opened, and forwards each
 hostname to `http://kamal-proxy:80`, which routes by `Host` to the app. kamal-proxy
 serves plain http (`proxy.ssl: false`).

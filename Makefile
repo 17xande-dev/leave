@@ -80,7 +80,7 @@ mailpit:
 # The gem's bin dir is not on PATH everywhere; override with `make deploy KAMAL=/path/to/kamal`.
 KAMAL ?= kamal
 
-## deploy: run the check gate and bin/check-env, then `kamal deploy` (build, push to ghcr.io, swap in on work-docker02)
+## deploy: run the check gate and bin/check-env, then `kamal deploy` (build, push to ghcr.io, swap in on sdt-vm-docker02)
 deploy: check
 	@bin/check-env
 	@# Kamal builds from HEAD, not the working tree, so refuse edits the checks just ran against.

@@ -1,7 +1,7 @@
-# Kamal deploy for the work Docker host (work-docker02). `make deploy` runs the check
+# Kamal deploy for the work Docker host (sdt-vm-docker02). `make deploy` runs the check
 # gate, then `kamal deploy`: build the image locally, push it to ghcr.io, and swap it
 # in behind kamal-proxy with a health check. Host-side setup (kamal-proxy and the
-# shared Cloudflare tunnel) lives in ~/dev/riverschurch/infra.
+# shared Cloudflare tunnel) lives in ~/dev/riverschurch/infra/sdt-vm-docker02.
 service: leave
 
 image: 17xande-dev/leave
@@ -24,7 +24,7 @@ ssh:
 servers:
   web:
     hosts:
-      - work-docker02
+      - sdt-vm-docker02
     options:
       # A small Go binary plus SQLite; this is ample and stops a runaway from
       # taking the shared host.
@@ -34,6 +34,12 @@ servers:
 # http://kamal-proxy:80, so kamal-proxy serves plain http and asks for no cert.
 # kamal-proxy's HTTP check of /healthz is the health check.
 proxy:
+  run:
+    # Pinned: Kamal defaults to v0.9.2. A running proxy is not swapped by `kamal deploy`;
+    # `kamal proxy reboot` (brief outage) applies a change here. `publish: false` replaces
+    # the old `kamal proxy boot_config set --no-publish`: the tunnel is the only way in.
+    version: v0.10.3
+    publish: false
   ssl: false
   host: leave.rivers.tools
   app_port: 8080
@@ -52,7 +58,7 @@ env:
     COOKIE_SECURE: "true"
     DIRECTORY: ldap
     TZ_NAME: Africa/Johannesburg
-    # The `kamal` docker network (fixed subnet 172.30.17.0/24 on work-docker02) holds
+    # The `kamal` docker network (fixed subnet 172.30.17.0/24 on sdt-vm-docker02) holds
     # kamal-proxy and the app. The peer is kamal-proxy, which passes Cloudflare's
     # CF-Connecting-IP through; trusting the subnet is what makes the app honour it,
     # so the sign-in rate limit sees real client addresses. Safe only while the
