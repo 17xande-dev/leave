@@ -140,6 +140,8 @@ type me struct {
 	Name             string
 	Admin            bool
 	PendingApprovals int
+	// ShowAway: the layout links "Away", the page for naming a stand-in.
+	ShowAway bool
 }
 
 // render executes a page through its layout into a buffer first, so a template
@@ -246,6 +248,9 @@ var notices = map[string]string{
 	"reassign-not-admin":      leave.MsgReassignNotAdmin,
 	"reassign-no-other-admin": leave.MsgReassignNoOtherAdmin,
 	"reassign-dormant":        "Choose someone who can currently sign in.",
+	"delegated":               "Your stand-in is set. They have been emailed.",
+	"delegation-revoked":      "Stand-in ended. They have been emailed.",
+	"delegation-over":         "That stand-in had already ended.",
 	"not-possible":            "That is no longer possible. The request may already have been decided or withdrawn.",
 }
 

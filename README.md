@@ -22,7 +22,9 @@ Microsoft 365 calendar.
    manager while no final approver is set (or theirs is disabled).
 
 A disabled account or yourself is always skipped. The approver is frozen on the
-request, so a directory change afterwards cannot strand it. An admin can reassign a pending request, including their own, to another administrator (never to the person whose request it is) or to the leave administrators. An approver override on a person's page can likewise only name an administrator other than that person. Overrides set before this rule keep working until changed.
+request, so a directory change afterwards cannot strand it. An admin can reassign a pending request, including their own, to another administrator (never to the person whose request it is) or to the leave administrators. An approver override on a person's page can likewise only name an administrator other than that person. Overrides set before this rule keep working until changed. An approver who is away can name a stand-in for a date range (**Approvals while you are away**, under "Away" in the navigation); the request stays theirs.
+
+**Stand-ins while away.** Anyone can name a stand-in for the approvals that come to them, on **Away** or through the assistant tools; an admin can set one up or end one for anyone from the person's page (**Admin → People**) and sees them all at **Admin → Stand-ins**. For the dates chosen (the first day today or later, at most 30 days, both days counted) the stand-in also sees what waits for the approver in **Approvals** and may approve or decline it, as the approver would; the approver can still decide it too, and whatever is undecided when it ends is the approver's alone. Anyone who can sign in can be named, an approver has one stand-in at a time, and there are no chains: a stand-in acts for the person who named them, never for people who named them. A stand-in can never decide the leave of whoever set the delegation up (an admin who arranges cover for their own approver does not cover their own leave), and the leave administrators' queue is not delegated. The stand-in and, when an admin made it, the approver are emailed when it is set up and ended, and the stand-in is copied on what arrives for the approver meanwhile. A decision records who made it and for whom ("Approved by B for A") on the request, its history, the email and the calendar event. For an escalated request the stand-in's approval counts as the approver's: it moves up from the approver's level, and a stand-in for the final approver gives the final approval.
 
 ### Before deploying the reassignment rule
 
@@ -486,8 +488,11 @@ anything unless the person has asked.
 | `withdraw_request` | Withdraw their own undecided request |
 | `submit_draft` | Submit a shutdown draft, or one HR allowed to go below zero |
 | `request_cancellation` | Ask for approved, not-yet-started leave to be cancelled |
-| `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, the requester's balance afterwards (`balance_after`, absent for unlimited types) and the trail |
+| `approval_queue` | What is waiting for their decision, with coverage warnings, who it goes to next, the requester's balance afterwards (`balance_after`, absent for unlimited types) and the trail; `for` names the approver when the person may decide the row only as their stand-in |
 | `decide_request` | Approve or decline (a decline needs a note). `expected` is optional: pass the `fingerprint` from `get_request` or `approval_queue` and the decision is refused if the person has edited the request since |
+| `my_delegations` | Their stand-ins (who approves for them while they are away), who they are standing in for, and their recent past ones, with the ids `revoke_delegation` takes. Administrators can pass `approver` to look at someone else |
+| `delegate_approvals` | Name a stand-in for their approvals: `delegate`, `start`, `end` (at most 30 days), optional `note`. Open to everyone for their own; `approver` (someone else) is for administrators only. The stand-in is emailed. Only when the person has asked for it |
+| `revoke_delegation` | End a stand-in now (the approver or an administrator): destructive, the stand-in is emailed |
 | `all_requests` | Administrators only: every request, filtered by status, dates and person |
 | `who_is_away` | Administrators only: who is away in a date range, by department |
 | `outbox_problems` | Administrators only: failing emails and calendar jobs |

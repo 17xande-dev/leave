@@ -215,7 +215,7 @@ func TestToolAnnotations(t *testing.T) {
 	readOnly := map[string]bool{"my_balances": true, "my_requests": true, "get_request": true, "team_leave": true,
 		"public_holidays": true, "preview_request": true, "approval_queue": true, "all_requests": true,
 		"who_is_away": true, "outbox_problems": true}
-	for _, n := range []string{"person_balances", "permission_queue"} {
+	for _, n := range []string{"person_balances", "permission_queue", "my_delegations"} {
 		readOnly[n] = true
 	}
 	// grant_negative commits the person to a decision that cannot be recalled
@@ -223,9 +223,10 @@ func TestToolAnnotations(t *testing.T) {
 	destructiveTools := map[string]bool{"decide_request": true, "withdraw_request": true,
 		"set_half_days":         true,
 		"correct_request":       true,
-		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true, "grant_negative": true}
+		"remove_recorded_leave": true, "refuse_negative": true, "reassign_request": true, "grant_negative": true,
+		"revoke_delegation": true}
 	changing := map[string]bool{"apply_for_leave": true, "edit_request": true, "submit_draft": true, "request_cancellation": true,
-		"record_leave": true, "adjust_balance": true}
+		"record_leave": true, "adjust_balance": true, "delegate_approvals": true}
 	seen := map[string]bool{}
 	for _, tool := range tools.Tools {
 		seen[tool.Name] = true

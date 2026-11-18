@@ -32,6 +32,13 @@
   <div class="actions"><button type="submit">Save</button></div>
 </form>
 
+{{template "delegation_form" .Stand}}
+<div class="panel">
+  <h2>Stand-ins <small>(current and upcoming)</small></h2>
+  {{template "delegation_current" .Stand}}
+  {{template "delegation_past" .Stand}}
+</div>
+
 <form method="post" action="/admin/users/{{.User.ID}}/long-weekend" class="panel">
   {{template "csrf" $.CSRF}}
   <h2>Weekends off</h2>

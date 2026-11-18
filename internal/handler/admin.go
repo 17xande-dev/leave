@@ -30,6 +30,9 @@ func (h *Handler) adminRoutes() []route {
 		a("GET /admin/users", h.AdminUsers),
 		a("GET /admin/users/{id}", h.AdminUser),
 		a("POST /admin/users/{id}/approver", h.AdminSetApprover),
+		a("POST /admin/users/{id}/delegations", h.AdminCreateDelegation),
+		a("GET /admin/delegations", h.AdminDelegations),
+		a("POST /admin/delegations/{id}/revoke", h.AdminRevokeDelegation),
 		a("POST /admin/users/{id}/adjustments", h.AdminAddAdjustment),
 		a("POST /admin/users/{id}/long-weekend", h.AdminSetLongWeekend),
 		a("POST /admin/users/{id}/sex", h.AdminSetSex),
@@ -74,6 +77,7 @@ type adminHomeData struct {
 	AwaitingHR int
 	Problems   int
 	Users      int
+	StandIns   int
 }
 
 func (h *Handler) AdminHome(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +101,20 @@ func (h *Handler) AdminHome(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
+	standIns, err := h.leave.Delegations(r.Context(), leave.DelegationFilter{})
+	if err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	today := h.leave.Today().Format(time.DateOnly)
+	active := 0
+	for _, d := range standIns {
+		if d.Active(today) {
+			active++
+		}
+	}
 	h.render(w, r, http.StatusOK, "admin_home.html", view{Title: "Admin",
-		Data: adminHomeData{Pending: len(pending), AwaitingHR: len(hr), Problems: len(problems), Users: len(us)}})
+		Data: adminHomeData{Pending: len(pending), AwaitingHR: len(hr), Problems: len(problems), Users: len(us), StandIns: active}})
 }
 
 // --- Requests ------------------------------------------------------------
@@ -328,6 +344,8 @@ type adminUserData struct {
 	Teams []leave.Team
 	// Marks are for the Record leave picker: this person's leave, not the admin's.
 	Marks pickerMarks
+	// Stand is the "Stand-in for approvals" panel.
+	Stand delegationPanel
 }
 
 func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error) {
@@ -391,7 +409,15 @@ func (h *Handler) adminUserData(r *http.Request, id int64) (adminUserData, error
 	if d.Requests, err = h.leave.ForUser(ctx, u.ID); err != nil {
 		return d, err
 	}
-	d.Marks, err = h.pickerMarks(ctx, d.Requests)
+	if d.Marks, err = h.pickerMarks(ctx, d.Requests); err != nil {
+		return d, err
+	}
+	d.Stand, err = h.delegationPanel(r, u, delegationInput{}, nil)
+	d.Stand.Heading = "Stand-in for approvals"
+	d.Stand.Hint = fmt.Sprintf("%s is away: someone else approves what comes to them, for at most %d days. Both are emailed.", u.Name, leave.MaxDelegationDays)
+	d.Stand.IDP = "stand-"
+	d.Stand.Action = "/admin/users/" + strconv.FormatInt(u.ID, 10) + "/delegations"
+	d.Stand.RevokeBase, d.Stand.From = "/admin/delegations", "user"
 	return d, err
 }
 
@@ -410,7 +436,7 @@ func (h *Handler) AdminUser(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	h.render(w, r, http.StatusOK, "admin_user.html", view{Title: d.User.Name, Data: d})
+	h.render(w, r, http.StatusOK, "admin_user.html", view{Title: d.User.Name, Notice: h.delegationNotice(r), Data: d})
 }
 
 func (h *Handler) AdminSetApprover(w http.ResponseWriter, r *http.Request) {

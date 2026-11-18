@@ -19,7 +19,7 @@
   {{range .}}{{$row := .}}
     <tr>
       <td class="tick">{{if .Bulk}}<input type="checkbox" form="bulk" name="id" value="{{.ID}}:{{.Fingerprint}}" aria-label="Select {{if .IsCancellation}}Cancel: {{end}}{{.UserName}}, {{.TypeName}}, {{date .Start}}">{{end}}</td>
-      <td class="who">{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}</td>
+      <td class="who">{{.UserName}}{{with .Department}}<br><small>{{.}}</small>{{end}}{{with .For}}<br><small class="muted">for {{.}}</small>{{end}}</td>
       <td><a href="/leave/{{.ID}}?from=approvals">{{if .IsCancellation}}Cancel: {{end}}{{.TypeName}}</a>{{if .Escalate}} <span class="badge special">Special permission</span>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}{{range .Coverage}}<br><small>{{.Sentence}}</small>{{end}}
         {{with .After}}<br><small class="after">{{if .Below}}{{.Below}} {{units .Below .Unit}} below zero{{else}}{{.Left}} {{units .Left .Unit}} left in {{with .CycleName}}{{.}}{{else}}this cycle{{end}}{{end}}{{if .Shared}} if all their pending requests are approved{{else}} afterwards{{end}}</small>{{end}}
         {{with .Away}}<br><small class="away">Also away: {{range $i, $a := .}}{{if $i}}; {{end}}{{$a.Name}}{{with $a.Types}}, {{range $j, $type := .}}{{if $j}}, {{end}}{{$type}}{{end}}{{end}} ({{range $j, $r := $a.Ranges}}{{if $j}}, {{end}}{{shortrange $r.Start $r.End (index $a.Ranges 0).Start (index $a.Ranges (add (len $a.Ranges) -1)).End}}{{end}}){{if eq $a.Pending "all"}} (not yet approved){{else if $a.Pending}} (some not yet approved){{end}}{{end}}{{with $row.AwayMore}}{{if gt (len $row.Away) 1}};{{end}} and {{.}} more{{end}}</small>{{end}}</td>

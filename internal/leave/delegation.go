@@ -338,3 +338,34 @@ func (s *Service) actingApprover(ctx context.Context, u users.User, r Request) (
 	}
 	return s.users.ByID(ctx, r.ApproverID)
 }
+
+// Delegation is one delegation by id, or ErrNotFound. It checks nothing about
+// who may see it: callers decide that.
+func (s *Service) Delegation(ctx context.Context, id int64) (Delegation, error) {
+	return s.getDelegation(ctx, s.db, id)
+}
+
+// InDelegation is whether u is the delegator or the delegate of any unrevoked
+// delegation that has not ended: what decides if the "Away" link shows.
+func (s *Service) InDelegation(ctx context.Context, u users.User) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM approval_delegations
+		WHERE (delegator_id = ? OR delegate_id = ?) AND revoked_at IS NULL AND end_date >= ?`,
+		u.ID, u.ID, fmtDate(s.today())).Scan(&n)
+	return n > 0, err
+}
+
+// StandInFor is who is approving for r's approver today, for showing beside
+// the approver: nil when there is nobody, when r is not pending with a named
+// approver, or when the only stand-in could not act on r (the requester set the
+// delegation up or is the stand-in: CanDecideNow refuses both).
+func (s *Service) StandInFor(ctx context.Context, r Request) (*Delegation, error) {
+	if r.Status != StatusPending || r.ApproverID == 0 {
+		return nil, nil
+	}
+	d, err := s.ActiveStandIn(ctx, s.db, r.ApproverID)
+	if err != nil || d == nil || d.CreatedByID == r.UserID || d.DelegateID == r.UserID {
+		return nil, err
+	}
+	return d, nil
+}

@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>Approvals while you are away</h1>
+<p>While you are away, someone else can approve or decline the leave that comes to you. You can still decide it yourself. Requests that are not decided by the last day come back to you alone.</p>
+<p class="hint">A stand-in covers at most {{.Data.MaxDays}} days, and you can have one at a time. They are emailed when you save.</p>
+{{with .Data}}
+{{template "delegation_form" .Panel}}
+
+<h2>Current and upcoming</h2>
+{{template "delegation_current" .Panel}}
+{{template "delegation_past" .Panel}}
+
+{{if .ToYou}}
+<h2>You are approving for</h2>
+<p class="muted">Their requests are in your approvals while the dates last.</p>
+<ul>
+  {{range .ToYou}}<li>{{.DelegatorName}}, {{date .Start}} to {{date .End}}{{if .Active $.Data.TodayStr}} <span class="badge">now</span>{{end}}</li>{{end}}
+</ul>
+{{end}}
+{{end}}
+{{end}}

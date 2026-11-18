@@ -48,7 +48,7 @@ type Config struct {
 
 const instructions = `This is the staff leave system. Everything you do here is done as the signed-in person, with exactly their permissions.
 Use my_balances to see visible balances and other_types you can also apply for, and preview_request before apply_for_leave to see the day count and any rule that would stop the request.
-Never apply for, withdraw, approve or decline leave, and never record or remove recorded leave, adjust a balance, grant or refuse a negative balance, or reassign a request, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
+Never apply for, withdraw, approve or decline leave, and never record or remove recorded leave, adjust a balance, grant or refuse a negative balance, reassign a request, or set up a stand-in for approvals, unless the person has clearly asked you to. Dates are YYYY-MM-DD.`
 
 const requestDateContract = "Use start/end for one stretch or ranges: [{start, end}] instead, never both. Several stretches are for workdays types only, max 3. Applicants' working-day leave must fit within 31 days from first to last day, including single stretches. half_start / half_end apply to the first day of the first range and last day of the last range of the whole request (0.5); only on charged working days, when applicant half days are enabled. A one-day request uses half_start only."
 
@@ -133,6 +133,8 @@ func fieldLabel(field string) string {
 		return "Person: "
 	case "approver":
 		return "Approver: "
+	case "delegate":
+		return "Stand-in: "
 	case "cycle":
 		return "Cycle: "
 	case "days":
@@ -319,5 +321,6 @@ func (d *deps) register(s *mcp.Server) {
 	add(d, s, &mcp.Tool{Name: "outbox_problems", Annotations: readOnly("Failing emails and calendar jobs (administrators)"),
 		Description: "Administrators only: notification emails and calendar jobs that are failing or have given up."}, d.outboxProblems)
 
+	d.registerDelegation(s)
 	d.registerAdminActions(s)
 }

@@ -1,0 +1,9 @@
+{{define "content"}}
+{{template "adminnav"}}
+<h1>Stand-ins for approvals</h1>
+<p class="muted">Everyone's current and upcoming stand-ins. To set one up for someone, open them under <a href="/admin/users">People</a>.</p>
+{{with .Data}}
+{{template "delegation_current" .Panel}}
+{{template "delegation_past" .Panel}}
+{{end}}
+{{end}}

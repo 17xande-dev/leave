@@ -143,6 +143,9 @@ func (h *Handler) protectedRoutes() []route {
 		u("GET /approvals", h.Approvals),
 		u("POST /approvals/approve", h.ApproveMany),
 		u("GET /team", h.Team),
+		u("GET /delegations", h.Delegations),
+		u("POST /delegations", h.CreateDelegation),
+		u("POST /delegations/{id}/revoke", h.RevokeDelegation),
 		// The consent screen. It stays behind the session and under CSRF: it is
 		// a form a person submits in a browser.
 		u("GET /oauth/authorize", h.Authorize),
@@ -215,5 +218,25 @@ func (h *Handler) meFor(r *http.Request) *me {
 	m := &me{ID: u.ID, Name: u.Name, Admin: u.Admin}
 	// The badge is a convenience: failing to count must not fail the page.
 	m.PendingApprovals, _ = h.leave.PendingCount(r.Context(), u)
+	m.ShowAway = h.showAway(r.Context(), u, m.PendingApprovals)
 	return m
+}
+
+// showAway is whether the "Away" link (the page for naming a stand-in) shows:
+// for admins, anyone with something waiting, anyone in a delegation (so one
+// with a stand-in, or standing in, can always find it), anyone with reports and
+// the final approver. Like the badge it is a convenience, so a failed lookup
+// shows nothing rather than failing the page; the page itself is open to all.
+func (h *Handler) showAway(ctx context.Context, u users.User, waiting int) bool {
+	if u.Admin || waiting > 0 {
+		return true
+	}
+	if in, err := h.leave.InDelegation(ctx, u); err == nil && in {
+		return true
+	}
+	if has, err := h.leave.HasReports(ctx, u); err == nil && has {
+		return true
+	}
+	st, err := h.leave.Settings(ctx)
+	return err == nil && st.FinalApproverID != 0 && st.FinalApproverID == u.ID
 }

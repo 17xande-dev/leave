@@ -13,7 +13,7 @@
   {{if .IsRecorded}}<tr><th>Recorded by</th><td>{{.RecordedBy}}{{with .DecidedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}{{if .AllowNegative}} <span class="badge problem">took the balance below zero</span>{{end}}</td></tr>
   {{with .RemovedBy}}<tr><th>Removed by</th><td>{{.}}{{with $.Data.Request.RemovedAt}} <small>on {{date (slice . 0 10)}}</small>{{end}}</td></tr>{{end}}
   {{else}}
-  <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}</td></tr>
+  <tr><th>Approver</th><td>{{with .ApproverName}}{{.}}{{else}}Leave administrators{{end}}{{with $.Data.StandIn}} <small>({{.DelegateName}} is approving for them until {{date .End}})</small>{{end}}</td></tr>
   {{if .DecidedBy}}<tr><th>Decided by</th><td>{{.DecidedByFor}}</td></tr>{{end}}
   {{with .DecisionNote}}<tr><th>Reason</th><td>{{.}}</td></tr>{{end}}{{end}}
 </table>
@@ -99,7 +99,7 @@
 <form method="post" action="/leave/{{.Request.ID}}/decide{{if $.Data.From}}?from={{$.Data.From}}{{end}}" class="panel">
   {{template "csrf" $.CSRF}}
   <input type="hidden" name="seen" value="{{.Request.Fingerprint}}">
-  <h2>Your decision</h2>
+  <h2>Your decision{{with .DecidingFor}} <small>(for {{.}})</small>{{end}}</h2>
   <div class="field">
     <label for="note">Note <small>(required to decline)</small></label>
     <textarea id="note" name="note" rows="2">{{.Note}}</textarea>

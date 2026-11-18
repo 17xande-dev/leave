@@ -321,7 +321,7 @@ func TestNoInlineStyleOrHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n < 5 {
+	if n < 36 { // 33 before the stand-in pages; the count only goes up
 		t.Fatalf("checked only %d templates", n)
 	}
 }

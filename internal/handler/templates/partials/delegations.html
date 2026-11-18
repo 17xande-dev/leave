@@ -1,0 +1,68 @@
+{{/*
+  The stand-in form and lists, shared by the person's own page and the admin's
+  person page. They take a delegationPanel; the CSRF token and the revoke path
+  travel in it, so the partial needs nothing from the page around it.
+*/}}
+{{define "delegation_form"}}
+<form method="post" action="{{.Action}}" class="panel">
+  {{template "csrf" .CSRF}}
+  {{with .From}}<input type="hidden" name="from" value="{{.}}">{{end}}
+  <h2>{{.Heading}}</h2>
+  {{with .Hint}}<p class="hint">{{.}}</p>{{end}}
+  <div class="field">
+    <label for="{{.IDP}}delegate">Stand-in</label>
+    <select id="{{.IDP}}delegate" name="delegate" required>
+      <option value=""{{if not .In.Delegate}} selected{{end}} disabled>Choose…</option>
+      {{range .People}}<option value="{{.ID}}"{{if eq .ID $.In.Delegate}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    {{template "err" index .Errors "delegate"}}
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="{{.IDP}}start">First day</label>
+      <input id="{{.IDP}}start" name="start" type="date" min="{{.Today}}" value="{{.In.Start}}" required>
+      {{template "err" index .Errors "start"}}
+    </div>
+    <div class="field">
+      <label for="{{.IDP}}end">Last day</label>
+      <input id="{{.IDP}}end" name="end" type="date" min="{{.Today}}" value="{{.In.End}}" required>
+      {{template "err" index .Errors "end"}}
+    </div>
+  </div>
+  <div class="field">
+    <label for="{{.IDP}}note">Note <small>(optional)</small></label>
+    <textarea id="{{.IDP}}note" name="note" rows="2">{{.In.Note}}</textarea>
+    {{template "err" index .Errors "note"}}
+  </div>
+  <div class="actions"><button type="submit">Save</button></div>
+</form>
+{{end}}
+
+{{define "delegation_current"}}
+{{if .Current}}
+<div class="scroll-x">
+<table>
+  <thead><tr>{{if .ShowDelegator}}<th>Approver</th>{{end}}<th>Stand-in</th><th>Dates</th><th></th></tr></thead>
+  <tbody>
+  {{range .Current}}
+    <tr>
+      {{if $.ShowDelegator}}<td><a href="/admin/users/{{.DelegatorID}}">{{.DelegatorName}}</a></td>{{end}}
+      <td>{{.DelegateName}}{{if ne .CreatedByID .DelegatorID}}<br><small>set up by {{.CreatedBy}}</small>{{end}}{{with .Note}}<br><small>{{.}}</small>{{end}}</td>
+      <td>{{shortrange .Start .End}}</td>
+      <td><form method="post" action="{{$.RevokeBase}}/{{.ID}}/revoke">{{template "csrf" $.CSRF}}{{with $.From}}<input type="hidden" name="from" value="{{.}}">{{end}}<button type="submit" class="quiet">Revoke</button></form></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="muted">No stand-in is set.</p>{{end}}
+{{end}}
+
+{{define "delegation_past"}}
+{{with .Past}}
+<h3>Past</h3>
+<ul>
+  {{range .}}<li>{{if $.ShowDelegator}}{{.DelegatorName}}: {{end}}{{.DelegateName}}, {{date .Start}} to {{date .End}}{{if .RevokedAt}} <small>(ended early by {{.RevokedBy}} on {{date (slice .RevokedAt 0 10)}})</small>{{end}}{{if ne .CreatedByID .DelegatorID}} <small>(set up by {{.CreatedBy}})</small>{{end}}</li>{{end}}
+</ul>
+{{end}}
+{{end}}

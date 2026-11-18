@@ -712,8 +712,13 @@ type requestData struct {
 	Candidates       []users.User
 	CanReassign      bool
 	CanReassignQueue bool
-	Errors           leave.FieldErrors
-	Note             string
+	// StandIn is who is approving for the request's approver while they are
+	// away, shown beside the approver. DecidingFor is the approver the viewer
+	// decides for when they are the stand-in.
+	StandIn     *leave.Delegation
+	DecidingFor string
+	Errors      leave.FieldErrors
+	Note        string
 }
 
 func (h *Handler) loadRequest(w http.ResponseWriter, r *http.Request) (leave.Request, bool) {
@@ -763,12 +768,18 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 		}
 		d.CorrectBlocked = blocked
 	}
-	var cerr error
+	var cerr, err error
 	if d.CanDecide, cerr = h.leave.CanDecideToday(r.Context(), u, req); cerr != nil {
 		return d, cerr
 	}
 	if d.Corrections, cerr = h.leave.Corrections(r.Context(), req.ID); cerr != nil {
 		return d, cerr
+	}
+	if d.StandIn, err = h.leave.StandInFor(r.Context(), req); err != nil {
+		return d, err
+	}
+	if d.CanDecide && req.ApproverID != 0 && req.ApproverID != u.ID {
+		d.DecidingFor = req.ApproverName
 	}
 	d.CanReassign = u.Admin && !u.Disabled && req.Status == leave.StatusPending
 	if d.CanReassign {
@@ -786,7 +797,6 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 	if k := fromKey(r); k != "" {
 		d.Back, d.From = backLinks[k], k
 	}
-	var err error
 	if d.CanEdit, err = h.leave.CanEdit(r.Context(), u, req); err != nil {
 		return d, err
 	}
@@ -1057,6 +1067,9 @@ type queueRow struct {
 	// Bulk: the row may be ticked for "Approve selected". Special permission
 	// needs a deliberate override each, so those rows get no checkbox.
 	Bulk bool
+	// For is the approver the viewer decides this row for, when they are
+	// their stand-in; empty for the viewer's own requests.
+	For string
 	// After is nil for an unlimited type.
 	After *queueAfter
 	// Away is who else is away then, with the leave type where the approver
@@ -1115,6 +1128,11 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 	anyBulk := false
 	for _, req := range q {
 		row := queueRow{Request: req, Bulk: !(req.Escalate && req.Kind == leave.KindLeave)}
+		// A row that is neither the viewer's own nor the admins' queue is one
+		// they were given as a stand-in.
+		if req.ApproverID != 0 && req.ApproverID != u.ID {
+			row.For = req.ApproverName
+		}
 		if req.Escalate {
 			if row.Coverage, err = h.leave.CoverageFor(r.Context(), req); err != nil {
 				return queueData{}, err

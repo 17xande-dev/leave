@@ -5,6 +5,7 @@
 <ul class="stats">
   <li><a href="/admin/requests?status=pending"><strong>{{.Pending}}</strong> {{plural .Pending "request" "requests"}} awaiting a decision</a></li>
   <li><a href="/admin/permissions"><strong>{{.AwaitingHR}}</strong> {{plural .AwaitingHR "request" "requests"}} waiting for permission to go below zero</a></li>
+  <li><a href="/admin/delegations"><strong>{{.StandIns}}</strong> {{plural .StandIns "stand-in" "stand-ins"}} active</a></li>
   <li><a href="/admin/users"><strong>{{.Users}}</strong> people from the directory</a></li>
   <li><a href="/admin/outbox"><strong>{{.Problems}}</strong> {{plural .Problems "email or calendar update" "emails or calendar updates"}} not yet delivered</a>{{if .Problems}} <span class="badge problem">check</span>{{end}}</li>
 </ul>

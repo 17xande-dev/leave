@@ -704,6 +704,8 @@ type QueueItem struct {
 	CoverageWarnings []string    `json:"coverage_warnings,omitempty"`
 	NextApprover     string      `json:"next_approver,omitempty" jsonschema:"who it goes to if you approve; empty when yours is the last approval"`
 	Steps            []StepInfo  `json:"steps"`
+	// For is set when the request is decidable only as someone's stand-in.
+	For string `json:"for,omitempty" jsonschema:"set when you may decide this only as a stand-in: the approver you would decide it for"`
 	// BalanceAfter is the requester's balance once this is approved, as on the page.
 	BalanceAfter *BalanceAfterInfo `json:"balance_after,omitempty" jsonschema:"the requester's balance for this request's cycle after approving; absent for unlimited types"`
 }
@@ -729,6 +731,9 @@ func (d *deps) approvalQueue(ctx context.Context, u users.User, _ none) (QueueOu
 	out := QueueOut{Queue: make([]QueueItem, 0, len(q))}
 	for _, req := range q {
 		item := QueueItem{Request: requestInfo(req), Fingerprint: req.Fingerprint()}
+		if req.ApproverID != 0 && req.ApproverID != u.ID {
+			item.For = req.ApproverName
+		}
 		if item.Steps, err = d.steps(ctx, req.ID); err != nil {
 			return QueueOut{}, "", err
 		}

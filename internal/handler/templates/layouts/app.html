@@ -14,6 +14,7 @@
       <a href="/"{{if eq .Path "/"}} aria-current="page"{{end}}>My leave</a>
       <a href="/leave/new"{{if eq .Path "/leave/new"}} aria-current="page"{{end}}>Apply</a>
       <a href="/approvals"{{if eq .Path "/approvals"}} aria-current="page"{{end}}>Approvals{{with .Me}}{{if .PendingApprovals}} <span class="count">{{.PendingApprovals}}</span>{{end}}{{end}}</a>
+      {{if and .Me .Me.ShowAway}}<a href="/delegations"{{if eq .Path "/delegations"}} aria-current="page"{{end}}>Away</a>{{end}}
       <a href="/team"{{if eq .Path "/team"}} aria-current="page"{{end}}>Team</a>
       <a href="/apps"{{if eq .Path "/apps"}} aria-current="page"{{end}}>Apps</a>
       {{if and .Me .Me.Admin}}<a href="/admin"{{if eq .Path "/admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
