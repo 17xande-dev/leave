@@ -399,31 +399,51 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 	if r.ApproverID == 0 || (st.FinalApproverID != 0 && acting.ID == st.FinalApproverID) {
 		return 0, nil
 	}
+	// Climb from acting's approver. Anyone who has not been through this
+	// request is next. Anyone who has (in either capacity, and actor and
+	// acting count: they approve right now) has already given their approval,
+	// which also covered their own level, so the chain carries on above them
+	// -- unless they are the final approver, where it ends. The visited set
+	// and the cap stop a cycle in the directory.
+	const maxClimb = 10
+	visited := map[int64]bool{}
 	next, err := s.ResolveApprover(ctx, acting)
 	if err != nil {
 		return 0, err
 	}
-	// The stand-in is also the next level up: their one approval counts for
-	// the delegator's level and for their own, so the chain carries on from
-	// them rather than ending here (or sending it back to them).
-	if next == actor.ID && acting.ID != actor.ID {
-		if st.FinalApproverID != 0 && actor.ID == st.FinalApproverID {
+	for i := 0; i < maxClimb; i++ {
+		if next == 0 || next == r.UserID {
 			return 0, nil
 		}
-		if next, err = s.ResolveApprover(ctx, actor); err != nil {
+		done := next == actor.ID || next == acting.ID
+		if !done {
+			var seen int
+			if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
+				AND (approver_id = ? OR on_behalf_of_id = ?)`,
+				r.ID, next, next).Scan(&seen); err != nil {
+				return 0, err
+			}
+			done = seen > 0
+		}
+		if !done {
+			return next, nil
+		}
+		if st.FinalApproverID != 0 && next == st.FinalApproverID {
+			return 0, nil
+		}
+		if visited[next] {
+			return 0, nil
+		}
+		visited[next] = true
+		u, err := s.users.ByID(ctx, next)
+		if err != nil {
+			return 0, err
+		}
+		if next, err = s.ResolveApprover(ctx, u); err != nil {
 			return 0, err
 		}
 	}
-	if next == 0 || next == r.UserID || next == acting.ID || next == actor.ID {
-		return 0, nil
-	}
-	var seen int
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM request_steps WHERE request_id = ?
-		AND (approver_id = ? OR on_behalf_of_id = ?)`,
-		r.ID, next, next).Scan(&seen); err != nil || seen > 0 {
-		return 0, err
-	}
-	return next, nil
+	return 0, nil
 }
 
 // NextApprover is who an escalated request would go to if actor approved it;
@@ -507,6 +527,8 @@ func (s *Service) emit(ctx context.Context, tx *sql.Tx, e Event) error {
 		// Whoever created the delegation cannot use it on their own leave
 		// (CanDecideNow refuses), so the stand-in must not be sent it either.
 		if d != nil && d.CreatedByID != e.Request.UserID && d.DelegateID != e.Request.UserID {
+			// (the delegate being the requester is pinned by
+			// TestEventCarriesStandInUnlessRequesterCreatedIt)
 			e.StandIn = d
 		}
 	}

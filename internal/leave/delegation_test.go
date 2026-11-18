@@ -715,15 +715,17 @@ func TestDelegateEscalatedRequest(t *testing.T) {
 // what the messages are built from.
 func TestEventCarriesStandInUnlessRequesterCreatedIt(t *testing.T) {
 	for _, tc := range []struct {
-		name, creator string
-		want          bool
+		name, creator, delegate string
+		want                    bool
 	}{
-		{"made by the approver", "head", true},
-		{"made by the requester", "hr", false},
+		{"made by the approver", "head", "pastor", true},
+		{"made by the requester", "hr", "pastor", false},
+		// The stand-in would be approving their own leave: not offered it.
+		{"delegate is the requester", "head", "hr", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			if _, err := f.svc.Delegate(f.ctx, f.people[tc.creator], f.people["head"].ID, f.people["pastor"].ID, "2026-10-05", "2026-10-09", ""); err != nil {
+			if _, err := f.svc.Delegate(f.ctx, f.people[tc.creator], f.people["head"].ID, f.people[tc.delegate].ID, "2026-10-05", "2026-10-09", ""); err != nil {
 				t.Fatal(err)
 			}
 			f.events = nil
@@ -765,8 +767,17 @@ func TestEscalationLoopGuardCountsOnBehalfOf(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if onBehalf && got.Status != StatusApproved {
-				t.Fatalf("it went back to head: %+v", got)
+			// Head's level is already covered (orphan stood in), so it must not
+			// go back to head -- but it climbs on to pastor, the final
+			// approver, who has not seen it, rather than finishing at hr.
+			if onBehalf {
+				if got.Status != StatusPending || got.ApproverID != f.people["pastor"].ID {
+					t.Fatalf("it went back to head, or skipped pastor: %+v", got)
+				}
+				got, err = f.svc.Decide(f.ctx, f.people["pastor"], r.ID, true, "")
+				if err != nil || got.Status != StatusApproved {
+					t.Fatalf("pastor's approval = %+v %v", got, err)
+				}
 			}
 			if !onBehalf && (got.Status != StatusPending || got.ApproverID != f.people["head"].ID) {
 				t.Fatalf("it did not move to head: %+v", got)
