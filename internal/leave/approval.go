@@ -381,10 +381,14 @@ func (s *Service) decide(ctx context.Context, actor users.User, id int64, approv
 }
 
 // escalationNext is who an escalated request moves to when actor approves it,
-// or 0 when the approval is final. It is final when actor is the final
-// approver, when the request is in the admins' queue (one admin finishes it),
-// when nobody sits above actor, when that person is the requester, and when
-// they have already been through this request -- so it cannot loop.
+// or 0 when the approval is final. It is final when acting is the final
+// approver, and when nobody usable is left to hand it to. When the chain runs
+// out -- nobody sits above acting, the next person is the requester, or has
+// already been through this request (so it cannot loop), or the climb hits its
+// cap -- the request goes to the final approver if they can still decide it
+// (finish below), and ends only when they cannot. A request in the admins'
+// queue is judged the same way: it is escalated, so one admin's approval does
+// not finish it while a usable final approver has yet to approve.
 //
 // acting is whose approval this is: actor themselves, or the approver actor
 // stands in for. Routing follows acting (their final-approver status, their
@@ -396,7 +400,7 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 	if err != nil {
 		return 0, err
 	}
-	if r.ApproverID == 0 || (st.FinalApproverID != 0 && acting.ID == st.FinalApproverID) {
+	if st.FinalApproverID != 0 && acting.ID == st.FinalApproverID {
 		return 0, nil
 	}
 	// Climb from acting's approver. Anyone who has not been through this
@@ -437,6 +441,10 @@ func (s *Service) escalationNext(ctx context.Context, q querier, r Request, acto
 			return 0, nil
 		}
 		return fa, err
+	}
+	// The admins' queue has no approver to climb from: straight to the end.
+	if r.ApproverID == 0 {
+		return finish()
 	}
 	const maxClimb = 10
 	visited := map[int64]bool{}
