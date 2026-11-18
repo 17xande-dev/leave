@@ -147,16 +147,32 @@ A correction never checks coverage limits, the balance (a shortfall sets the
 past or future; overlap with the person's other leave is still refused.
 
 **0008 rehearsal and rollback (operator).** `0008_request_corrections.sql` only adds the
-`request_corrections` table. Back up and rehearse on a copy as for 0007, then check:
+`request_corrections` table. Before deploying, take a backup and rehearse on a separate
+copy, never the live database:
 ```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0008.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0008.db ".backup /data/leave-rehearsal.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal.db "SELECT count(*) FROM users; SELECT count(*) FROM requests; SELECT count(*) FROM request_ranges; SELECT count(*) FROM balance_adjustments; SELECT count(*) FROM request_steps; SELECT count(*) FROM request_corrections; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh work-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
-Expect `7 -> 8`, the five counts unchanged, `request_corrections` empty, a clean
-integrity and foreign-key check, and `8 -> 8` on the second `-migrate`. The previous
-container never reads the table, so it is harmless during the swap. Fix forward by
-default. For an image rollback, `internal/db/testdata/undo_0008.sql` drops the table
-(**discarding only the correction history**, never a request) and removes the version
-row; take a `.backup` first and run it as for `undo_0007.sql`, then `kamal rollback`.
+Expect `7 -> 8` on the first `-migrate`; the counts of `users`, `requests`,
+`request_ranges`, `balance_adjustments` and `request_steps` must be unchanged,
+`request_corrections` must be `0`, and both integrity and foreign-key checks clean.
+The repeated `-migrate` must report `8 -> 8`. The previous container never reads the
+table, so it is harmless during the swap. Fix forward by default. For an image
+rollback, run from the repo root (it discards only the correction history, never a
+request):
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0008.db"'
+kamal app exec --reuse "sqlite3 -bail -cmd '.timeout 10000' /data/leave.db \"$(cat internal/db/testdata/undo_0008.sql)\""
+kamal rollback
+```
+**Warning:** between the undo and `kamal rollback`, the running new container returns
+500 on every request page (`no such table: request_corrections`) and the MCP
+`get_request` tool fails, for those few seconds. Do not restart it in between: it would
+reapply 0008.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.

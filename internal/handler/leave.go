@@ -1053,8 +1053,6 @@ type queueRow struct {
 	// may see it; AwayMore counts the people past the cap.
 	Away     []awayView
 	AwayMore int
-	// Was is the admin correction form's "Was 4 days, now 3 days" line.
-	Was string
 }
 
 // queueAfter is the balance line: Below is how far under zero, else 0.

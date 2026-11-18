@@ -227,6 +227,12 @@ func (s *Service) Correct(ctx context.Context, admin users.User, id int64, in In
 	if !CanCorrect(admin, r) {
 		return Request{}, ErrNotAllowed
 	}
+	// A stale form is refused as changed before anything else, so fixing a
+	// missing reason cannot carry it past a change the admin never saw. Judged
+	// again in the transaction below.
+	if seen != "" && seen != r.Fingerprint() {
+		return Request{}, ErrChanged
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return Request{}, FieldErrors{"reason": MsgCorrectReason}

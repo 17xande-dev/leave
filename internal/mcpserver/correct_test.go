@@ -1,9 +1,38 @@
 package mcpserver
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+// A correction states the whole request, so a field left out is cleared, not
+// kept. The tool description says so, and the behaviour is pinned beside it.
+func TestCorrectRequestOmittedFieldsClear(t *testing.T) {
+	f := newFixture(t)
+	staff, hr := f.as("staff1"), f.as("hr")
+	tools, err := hr.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tl := range tools.Tools {
+		if tl.Name == "correct_request" {
+			found = true
+			if !strings.Contains(tl.Description, "omitting the note or the half-day flags clears them") {
+				t.Errorf("description does not warn that omitted fields clear: %s", tl.Description)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("correct_request is not listed")
+	}
+	r := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-14", "note": "keep me?"})
+	out := f.ok(hr, "correct_request", map[string]any{"id": id(r), "type": "annual", "start": "2026-10-12", "end": "2026-10-13", "reason": "shorter"})
+	if n, _ := get(out.Data, "request", "note").(string); n != "" {
+		t.Fatalf("an omitted note was kept: %q", n)
+	}
+}
 
 func TestCorrectRequestTool(t *testing.T) {
 	f := newFixture(t)

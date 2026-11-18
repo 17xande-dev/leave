@@ -151,6 +151,70 @@ func TestAdminCorrectFlow(t *testing.T) {
 	}
 }
 
+// A failed post must not refresh the fingerprint: otherwise the admin fixes
+// the missing reason, posts again, and silently overwrites an edit the owner
+// made after the form was opened.
+func TestAdminCorrectKeepsPostedFingerprintOnError(t *testing.T) {
+	hs := newHarness(t)
+	staff, hr := hs.signIn("staff1"), hs.signIn("hr")
+	page := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
+	id := strings.TrimPrefix(page, "/leave/")
+	form := "/admin/requests/" + id + "/correct"
+
+	_, body := hs.get(hr, form)
+	m := seenRE.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("form lacks the fingerprint:\n%s", body)
+	}
+	seen := m[1]
+
+	// The owner edits after the admin opened the form.
+	if res, b := hs.post(staff, page+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-13"}, "end": {"2026-10-16"}, "note": {"moved"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("owner edit: %d\n%s", res.StatusCode, b)
+	}
+	fields := func(reason, seen string) url.Values {
+		return url.Values{"type": {hs.typeID("compassionate")}, "start": {"2026-10-13"}, "end": {"2026-10-14"},
+			"note": {"funeral"}, "reason": {reason}, "seen": {seen}}
+	}
+	// Blank reason: the stale form is refused as changed first; and when a
+	// re-render does happen the posted fingerprint must survive it.
+	res, body := hs.post(hr, form, fields("", seen))
+	if res.StatusCode == http.StatusUnprocessableEntity {
+		m2 := seenRE.FindStringSubmatch(body)
+		if m2 == nil || m2[1] != seen {
+			t.Fatalf("re-rendered form replaced the fingerprint %s with %v", seen, m2)
+		}
+	}
+	res, _ = hs.post(hr, form, fields("a reason", seen))
+	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=changed") {
+		t.Fatalf("second post: %d %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	req, err := hs.svc.Get(context.Background(), mustAtoi(t, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Note != "moved" || req.TypeID != mustAtoi(t, hs.typeID("annual")) {
+		t.Fatalf("the owner's edit was overwritten: %+v", req)
+	}
+	// An unreadable pair of dates (inputFrom's own error) keeps the posted value too.
+	_, body = hs.get(hr, form)
+	cur := seenRE.FindStringSubmatch(body)[1]
+	// The owner edits again before the post; the date error never reaches the
+	// service, so only the handler can keep cur from being refreshed.
+	if res, b := hs.post(staff, page+"/edit", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-14"}, "end": {"2026-10-16"}, "note": {"again"}}); res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("owner second edit: %d\n%s", res.StatusCode, b)
+	}
+	bad := fields("why", cur)
+	bad["start"] = []string{"2026-10-13", "2026-10-19"} // two starts, one end: inputFrom's own error
+	res, body = hs.post(hr, form, bad)
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("bad date: %d %s\n%s", res.StatusCode, res.Header.Get("Location"), body)
+	}
+	if m3 := seenRE.FindStringSubmatch(body); m3 == nil || m3[1] != cur {
+		t.Fatalf("input-error re-render lost the fingerprint: %v", m3)
+	}
+}
+
 func TestAdminCorrectRefusesOwnRequest(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")

@@ -190,6 +190,10 @@ func (h *Handler) AdminCorrect(w http.ResponseWriter, r *http.Request) {
 			h.serverError(w, r, derr)
 			return
 		}
+		// Keep the fingerprint the admin actually read, not the current one:
+		// refreshing it here would let the next post overwrite an edit the
+		// admin never saw.
+		d.Seen = seen
 		h.render(w, r, http.StatusUnprocessableEntity, "apply.html", view{Title: "Correct request", Data: d})
 	case errors.Is(err, leave.ErrNotAllowed):
 		notPossible(w, r, req.ID)
