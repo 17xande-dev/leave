@@ -60,13 +60,24 @@ func TestDelegateApprovalsAdminForSomeoneElse(t *testing.T) {
 
 	// A non-admin naming someone else is refused, for every tool that takes approver,
 	// and nothing is created or revealed.
-	for _, who := range []string{"staff1", "headops"} {
-		f.refused(f.as(who), "delegate_approvals", args, "Only administrators can act for someone else")
-		f.refused(f.as(who), "my_delegations", map[string]any{"approver": "headops"}, "Only administrators can act for someone else")
+	for who, other := range map[string]string{"staff1": "headops", "headops": "staff1"} {
+		a := map[string]any{"approver": other, "delegate": "staff2", "start": "2026-10-05", "end": "2026-10-09"}
+		f.refused(f.as(who), "delegate_approvals", a, "Only administrators can act for someone else")
+		f.refused(f.as(who), "my_delegations", map[string]any{"approver": other}, "Only administrators can act for someone else")
 	}
 	if ds, _ := f.svc.Delegations(t.Context(), leaveFilter()); len(ds) != 0 {
 		t.Fatal("a non-admin created a delegation for someone")
 	}
+	// Naming yourself is not acting for someone else, however you spell it.
+	for _, self := range []string{"headops", "HEADOPS", "Olivia Operations"} {
+		in := map[string]any{"approver": self, "delegate": "staff2", "start": "2026-10-05", "end": "2026-10-06"}
+		r := f.ok(f.as("headops"), "delegate_approvals", in)
+		if get(r.Data, "delegation", "approver") != "Olivia Operations" {
+			t.Fatalf("self-named approver %q: %v", self, r.Data)
+		}
+		f.ok(f.as("headops"), "revoke_delegation", map[string]any{"id": get(r.Data, "delegation", "id").(float64)})
+	}
+	f.ok(f.as("headops"), "my_delegations", map[string]any{"approver": "headops"})
 
 	r := f.ok(hr, "delegate_approvals", args)
 	if get(r.Data, "delegation", "approver") != "Olivia Operations" || get(r.Data, "delegation", "set_up_by") != "Hannah HR" ||

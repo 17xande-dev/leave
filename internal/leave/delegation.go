@@ -273,6 +273,11 @@ func (s *Service) ActingFor(ctx context.Context, q querier, u users.User) ([]Gra
 	return out, rows.Err()
 }
 
+// StandingInFor is ActingFor for callers outside a transaction (pages).
+func (s *Service) StandingInFor(ctx context.Context, u users.User) ([]Grant, error) {
+	return s.ActingFor(ctx, s.db, u)
+}
+
 // CanDecideNow is CanDecide plus delegation: onBehalfOf is 0 when u decides
 // as the request's own approver (or as an admin in the admins' queue), and the
 // delegator's id when u decides as their stand-in. A stand-in must be able to
@@ -319,6 +324,7 @@ func (s *Service) ActiveStandIn(ctx context.Context, q querier, approverID int64
 	today := fmtDate(s.today())
 	d, err := scanDelegation(q.QueryRowContext(ctx, delegationSelect+`
 		WHERE d.delegator_id = ? AND d.revoked_at IS NULL AND d.start_date <= ? AND d.end_date >= ?
+		AND de.disabled = 0
 		ORDER BY d.id LIMIT 1`, approverID, today, today))
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil

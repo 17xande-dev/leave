@@ -416,6 +416,12 @@ func TestActingForAndActiveStandIn(t *testing.T) {
 	if sd, err := f.svc.ActiveStandIn(f.ctx, f.db, f.people["staff"].ID); err != nil || sd != nil {
 		t.Fatalf("stand-in for staff = %+v %v", sd, err)
 	}
+	// A disabled stand-in cannot act, so none is named.
+	f.exec(`UPDATE users SET disabled = 1 WHERE id = ?`, f.people["orphan"].ID)
+	if sd, err := f.svc.ActiveStandIn(f.ctx, f.db, f.people["head"].ID); err != nil || sd != nil {
+		t.Fatalf("a disabled stand-in is named: %+v %v", sd, err)
+	}
+	f.exec(`UPDATE users SET disabled = 0 WHERE id = ?`, f.people["orphan"].ID)
 	f.setToday("2026-10-11")
 	if sd, _ := f.svc.ActiveStandIn(f.ctx, f.db, f.people["head"].ID); sd != nil {
 		t.Fatal("a stand-in after the end")

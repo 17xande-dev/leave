@@ -188,9 +188,12 @@ body {
       margin-inline-start: auto;
     }
 
+    /* The tighter gap keeps six links and a badge on one row at 390px; the
+       24px one wrapped "Apps" onto a second line for anyone with Away. */
     nav {
       order: 3;
       flex-basis: 100%;
+      gap: var(--gap-sm);
     }
 
     .signout {

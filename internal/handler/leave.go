@@ -781,6 +781,11 @@ func (h *Handler) requestData(r *http.Request, req leave.Request) (requestData, 
 	if d.CanDecide && req.ApproverID != 0 && req.ApproverID != u.ID {
 		d.DecidingFor = req.ApproverName
 	}
+	// The line beside the approver is for everyone but the stand-in: they
+	// already see "for X" in their own panel.
+	if d.StandIn != nil && d.StandIn.DelegateID == u.ID {
+		d.StandIn = nil
+	}
 	d.CanReassign = u.Admin && !u.Disabled && req.Status == leave.StatusPending
 	if d.CanReassign {
 		all, err := h.users.Admins(r.Context())
@@ -1124,6 +1129,17 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 	if err != nil {
 		return queueData{}, err
 	}
+	// Whoever set up a delegation the viewer is acting under: the viewer may
+	// not see their leave (CanDecideNow refuses it), so "Also away" must not
+	// name them on the rows the viewer holds as stand-in either.
+	grants, err := h.leave.StandingInFor(r.Context(), u)
+	if err != nil {
+		return queueData{}, err
+	}
+	creators := map[int64]bool{}
+	for _, g := range grants {
+		creators[g.CreatedByID] = true
+	}
 	rows := make([]queueRow, 0, len(q))
 	anyBulk := false
 	for _, req := range q {
@@ -1162,6 +1178,15 @@ func (h *Handler) queueData(r *http.Request) (queueData, error) {
 		away, err := h.leave.AwayFor(r.Context(), u, requester, req.Start, req.End)
 		if err != nil {
 			return queueData{}, err
+		}
+		if row.For != "" {
+			kept := away[:0:0]
+			for _, a := range away {
+				if !creators[a.UserID] {
+					kept = append(kept, a)
+				}
+			}
+			away = kept
 		}
 		row.Away, row.AwayMore = queueAway(awayDuring(away, req.Ranges), req.UserID)
 		anyBulk = anyBulk || row.Bulk

@@ -241,6 +241,57 @@ func TestDelegationsNoStandInLineOnTheCreatorsOwnRequest(t *testing.T) {
 	}
 }
 
+// The stand-in's queue row for someone else's request must not name the person
+// who set the delegation up: CanViewNow refuses that person's own leave, so
+// "Also away" would be the one place it leaked. Anyone else away still shows.
+func TestDelegationsQueueAwayHidesTheCreatorFromTheStandIn(t *testing.T) {
+	hs := newHarness(t)
+	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-14")
+	hs.apply(hs.signIn("hr"), "annual", "2026-10-12", "2026-10-14")
+	hs.apply(hs.signIn("headops"), "annual", "2026-10-12", "2026-10-14") // same department as staff1
+	hr := mustUser(t, hs, "hr")
+	if _, err := hs.svc.Delegate(t.Context(), hr, hs.userID("headops"), hs.userID("headkids"), "2026-10-05", "2026-10-09", ""); err != nil {
+		t.Fatal(err)
+	}
+	// The approver is not acting as a stand-in: they still see both.
+	_, body := hs.get(hs.signIn("headops"), "/approvals")
+	if row := rowFor(t, body, path); !strings.Contains(row, "Hannah HR") || !strings.Contains(row, "Also away") {
+		t.Fatalf("the approver's own row lost the away line:\n%s", row)
+	}
+	_, body = hs.get(hs.signIn("headkids"), "/approvals")
+	row := rowFor(t, body, path)
+	if !strings.Contains(row, "for Olivia Operations") {
+		t.Fatalf("not the stand-in's row:\n%s", row)
+	}
+	if strings.Contains(row, "Hannah HR") {
+		t.Fatalf("the delegation's creator leaked to the stand-in through Also away:\n%s", row)
+	}
+	if !strings.Contains(row, "Also away: Olivia Operations") {
+		t.Fatalf("an ordinary Also away entry went missing:\n%s", row)
+	}
+}
+
+// A disabled stand-in cannot decide, so the request page must not say they are
+// approving; and the stand-in themself is not told about themself.
+func TestDelegationsStandInLineSkipsDisabledAndTheStandInThemself(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	path := hs.apply(staff, "annual", "2026-10-12", "2026-10-14")
+	hs.delegate("headops", "headkids", "2026-10-05", "2026-10-09")
+	if _, body := hs.get(hs.signIn("headkids"), path); strings.Contains(body, "is approving for them") || !strings.Contains(body, "for Olivia Operations") {
+		t.Fatalf("the stand-in sees a line about themself, or lost their panel:\n%s", body)
+	}
+	if _, body := hs.get(staff, path); !strings.Contains(body, "Kagiso Kids is approving for them") {
+		t.Fatalf("others lost the line:\n%s", body)
+	}
+	if _, err := hs.db.Exec(`UPDATE users SET disabled = 1 WHERE username = 'headkids'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, body := hs.get(staff, path); strings.Contains(body, "is approving for them") {
+		t.Fatalf("a disabled stand-in is shown as approving:\n%s", body)
+	}
+}
+
 func TestDelegationsAdminPanelAndList(t *testing.T) {
 	hs := newHarness(t)
 	hr, staff := hs.signIn("hr"), hs.signIn("staff1")

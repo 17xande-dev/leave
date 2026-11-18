@@ -53,6 +53,10 @@ func (d *deps) approverFor(ctx context.Context, u users.User, who string) (users
 		return u, nil
 	}
 	if !u.Admin {
+		// Naming yourself is the same as leaving it out.
+		if strings.EqualFold(who, u.Username) || strings.EqualFold(who, u.Email) || strings.EqualFold(who, u.Name) {
+			return u, nil
+		}
 		return users.User{}, userError("Only administrators can act for someone else. Leave approver out to use your own approvals.")
 	}
 	return d.resolvePerson(ctx, who)
