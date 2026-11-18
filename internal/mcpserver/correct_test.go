@@ -80,3 +80,28 @@ func TestCorrectRequestTool(t *testing.T) {
 	}
 	f.ok(hr, "correct_request", map[string]any{"id": id(mine), "type": "unpaid", "start": "2026-11-02", "end": "2026-11-03", "note": "n", "reason": "x"})
 }
+
+// Approved leave is correctable through the tool: it stays approved, says the
+// calendar follows, and a pending cancellation blocks it (can_correct false).
+func TestCorrectRequestToolApprovedLeave(t *testing.T) {
+	f := newFixture(t)
+	staff, hr, head := f.as("staff1"), f.as("hr"), f.as("headops")
+	r := f.ok(staff, "apply_for_leave", map[string]any{"type": "annual", "start": "2026-10-12", "end": "2026-10-14"})
+	f.ok(head, "decide_request", map[string]any{"id": id(r), "decision": "approve"})
+	read := f.ok(hr, "get_request", map[string]any{"id": id(r)})
+	if get(read.Data, "request", "status") != "approved" || read.Data["can_correct"] != true {
+		t.Fatalf("approved leave not correctable: %+v", read.Data)
+	}
+	out := f.ok(hr, "correct_request", map[string]any{"id": id(r), "type": "compassionate", "start": "2026-10-12", "end": "2026-10-14",
+		"note": "funeral", "reason": "bereavement"})
+	if get(out.Data, "request", "status") != "approved" || get(out.Data, "request", "type") != "Compassionate leave" ||
+		!strings.Contains(out.Text, "shared calendar will be updated") {
+		t.Fatalf("correct approved: %+v %s", out.Data, out.Text)
+	}
+	f.ok(staff, "request_cancellation", map[string]any{"id": id(r)})
+	if f.ok(hr, "get_request", map[string]any{"id": id(r)}).Data["can_correct"] != false {
+		t.Fatal("can_correct true with a pending cancellation")
+	}
+	f.refused(hr, "correct_request", map[string]any{"id": id(r), "type": "annual", "start": "2026-10-12", "end": "2026-10-14", "reason": "x"},
+		"pending cancellation")
+}

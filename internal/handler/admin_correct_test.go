@@ -139,15 +139,28 @@ func TestAdminCorrectFlow(t *testing.T) {
 	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=changed") {
 		t.Fatalf("stale form: %d %s", res.StatusCode, res.Header.Get("Location"))
 	}
-	// Approved leave is not correctable (until 11d): the form says so.
+	// Approved leave is correctable too (Phase 11d): the form opens and says
+	// the calendar follows. A declined request is not.
 	head := hs.signIn("headops")
 	hs.approveAs(head, page)
-	res, _ = hs.post(hr, form, fields("late"))
-	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=not-possible") {
-		t.Fatalf("approved: %d %s", res.StatusCode, res.Header.Get("Location"))
+	code, formBody := hs.get(hr, form)
+	if code != http.StatusOK || !strings.Contains(formBody, "The shared calendar is updated, and their balance follows the new figure.") {
+		t.Fatalf("approved GET: %d\n%s", code, formBody)
 	}
-	if code, _ := hs.get(hr, form); code != http.StatusSeeOther {
-		t.Fatalf("approved GET: %d", code)
+	if _, body := hs.get(hr, page); !strings.Contains(body, "Correct this request") {
+		t.Errorf("approved request page offers no correction")
+	}
+	m = seenRE.FindStringSubmatch(formBody)
+	if m == nil {
+		t.Fatal("approved form lacks the fingerprint")
+	}
+	res, body = hs.post(hr, form, url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-13"}, "end": {"2026-10-14"},
+		"note": {"funeral"}, "reason": {"fix dates"}, "seen": {m[1]}})
+	if res.StatusCode != http.StatusSeeOther || !strings.Contains(res.Header.Get("Location"), "notice=corrected") {
+		t.Fatalf("correct approved: %d %s\n%s", res.StatusCode, res.Header.Get("Location"), body)
+	}
+	if _, body := hs.get(hr, page); !strings.Contains(body, "approved") || !strings.Contains(body, "Reason: fix dates") {
+		t.Errorf("page after correcting approved leave:\n%s", body)
 	}
 }
 

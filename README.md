@@ -126,8 +126,9 @@ for those few seconds. Do not restart it in between: it would reapply 0007.
 so they apply as another type with a note, and an admin fixes it. On a request page,
 **Correct this request** (or MCP `correct_request`) lets an admin change the **type,
 dates (up to 3 stretches), half days and note** of someone else's request. It works
-while the request is **pending, waiting for HR, or an HR-allowed draft**; not once it is
-approved, declined, withdrawn or cancelled, not for recorded leave or a company
+while the request is **pending, waiting for HR, an HR-allowed draft, or approved**
+(including leave already started or over); not once it is declined, withdrawn or
+cancelled, not for recorded leave or a company
 shutdown's days, not while a cancellation of it is pending, and not for a pending
 request that someone has already begun to approve through special permission ("Someone
 has started approving this"). An admin never corrects their own request: another admin
@@ -145,6 +146,21 @@ approver (or admin) holding the old page is told it changed instead of deciding 
 A correction never checks coverage limits, the balance (a shortfall sets the
 "below zero" flag instead), the backdating limit or the 31-day span, and the dates may be
 past or future; overlap with the person's other leave is still refused.
+
+**Correcting approved leave.** The request stays approved, with the same approver and
+decision date; the days are recounted and the balance follows (the old type gets its days
+back, the new one counts them). Approved leave is on the shared calendar, so the
+correction deletes its Outlook events and creates new ones for the corrected type and
+dates: the correction transaction reads the event ids off the old date ranges before
+replacing them and queues one `calendar_create` job carrying them
+(`delete_event_ids`). The job deletes those events first (a Graph 404 counts as done),
+then creates one event per range, with a `-c<n>` suffix on the Graph `transactionId` (n =
+corrections so far) so Graph cannot hand back an event it just deleted. A retry
+re-deletes and re-creates only what is missing. Only the person is emailed (the email says the calendar
+is updated); a correction is refused while a cancellation of the leave is pending.
+During a deploy swap an old container's worker ignores `delete_event_ids`: an
+approved-leave correction made in those few seconds leaves its old events in Outlook;
+delete them by hand as in the Outlook clean-up below.
 
 **0008 rehearsal and rollback (operator).** `0008_request_corrections.sql` only adds the
 `request_corrections` table. Before deploying, take a backup and rehearse on a separate
@@ -426,7 +442,7 @@ anything unless the person has asked.
 | `grant_negative` | Administrators only (destructive: it cannot be recalled): allow a request awaiting HR to go below zero; it returns to the person as a draft and they are emailed. The note is optional |
 | `refuse_negative` | Administrators only: decline a request awaiting HR; a note is required and the person is emailed |
 | `reassign_request` | Administrators only: move a pending request (including your own) to an enabled administrator other than the applicant, or with none to the leave administrators; the new approver is emailed |
-| `correct_request` | Administrators only: change the type, dates, half days and note of someone else's request that is not yet approved (pending, waiting for HR, an HR-allowed draft), a reason required; works on admin-only types, refused for your own request; the person (and the approver while pending) is emailed. `get_request` shows `can_correct` and the `corrections` history |
+| `correct_request` | Administrators only: change the type, dates, half days and note of someone else's request that is pending, waiting for HR, an HR-allowed draft or approved (approved: the shared calendar events are recreated), a reason required; works on admin-only types, refused for your own request; the person (and the approver while pending) is emailed. `get_request` shows `can_correct` and the `corrections` history |
 
 The administrators' tools identify a person by sign-in username (as `all_requests` does),
 email address or exact full name, and refuse a name that matches two people rather than

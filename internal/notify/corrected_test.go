@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -88,5 +89,45 @@ func TestCorrectedGoesToTheAdminsQueue(t *testing.T) {
 	}
 	if len(to) != 2 || to[0] != "pastor@x.test" || to[1] != "hr@x.test" {
 		t.Fatalf("recipients: %v", to)
+	}
+}
+
+// Approved leave: only the person is emailed (the email says the calendar is
+// updated), and one calendar_create job carries the old event ids. A payload
+// with no ids stays exactly {"request_id":N}, so older payloads and the other
+// calendar jobs are byte-identical.
+func TestCorrectedApprovedEmailsPersonAndQueuesCalendar(t *testing.T) {
+	e := setup(t)
+	r, err := e.svc.Submit(e.ctx, e.people["staff"], leave.Input{TypeID: e.annual, Start: "2026-10-12", End: "2026-10-14", Note: "n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Decide(e.ctx, e.people["head"], r.ID, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+	if err := e.svc.SetRangeEventID(e.ctx, r.ID, "2026-10-12", "ev-old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Correct(e.ctx, e.people["hr"], r.ID,
+		leave.Input{TypeID: e.typeID(t, "compassionate"), Start: "2026-10-13", End: "2026-10-14", Note: "funeral"}, "It was a bereavement", ""); err != nil {
+		t.Fatal(err)
+	}
+	jobs := e.drain(t)
+	if len(jobs) != 2 || jobs[0].kind != "email" || jobs[1].kind != "calendar_create" {
+		t.Fatalf("jobs=%+v", jobs)
+	}
+	m := email(t, jobs[0])
+	if len(m.To) != 1 || m.To[0] != "staff@x.test" {
+		t.Fatalf("recipients %v", m.To)
+	}
+	if !strings.Contains(m.Text, "The shared calendar will be updated") {
+		t.Errorf("email does not mention the calendar:\n%s", m.Text)
+	}
+	if want := `{"request_id":` + itoa(r.ID) + `,"delete_event_ids":["ev-old"]}`; jobs[1].payload != want {
+		t.Fatalf("payload %s, want %s", jobs[1].payload, want)
+	}
+	if got, _ := json.Marshal(CalendarJob{RequestID: 7}); string(got) != `{"request_id":7}` {
+		t.Fatalf("payload without ids changed: %s", got)
 	}
 }

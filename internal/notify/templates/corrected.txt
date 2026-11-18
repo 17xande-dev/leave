@@ -11,6 +11,8 @@ The note now reads: {{.}}
 The note was removed.
 {{end}}{{end}}
 Reason: {{.Note}}
-{{if .Owner}}
+{{if eq .Request.Status "approved"}}
+The shared calendar will be updated to match, and your balance follows the new figure.
+{{end}}{{if .Owner}}
 If this is not what you expected, talk to {{.Actor}}.{{else}}
 Please decide it as changed.{{end}}{{end}}

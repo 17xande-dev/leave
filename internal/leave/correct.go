@@ -22,15 +22,15 @@ const (
 
 // CanCorrect reports the role and request-state guards for the admin's
 // "correct this request" form: an enabled admin, someone else's leave request
-// that is not shutdown or recorded leave and has not been approved. Correct
-// also looks for approval steps and a pending cancellation inside its
-// transaction (CorrectBlocked, for pages).
+// that is not shutdown or recorded leave and is undecided or approved (not
+// declined, withdrawn or cancelled). Correct also looks for approval steps and
+// a pending cancellation inside its transaction (CorrectBlocked, for pages).
 func CanCorrect(admin users.User, r Request) bool {
 	if !admin.Admin || admin.Disabled || admin.ID == r.UserID || r.Kind != KindLeave || r.IsShutdown() || r.IsRecorded() {
 		return false
 	}
 	switch r.Status {
-	case StatusPending, StatusAwaitingHR, StatusDraft:
+	case StatusPending, StatusAwaitingHR, StatusDraft, StatusApproved:
 		return true
 	}
 	return false
@@ -203,6 +203,11 @@ func correctOpts(r Request) quoteOpts {
 // approver, special-permission flag and place in the queue; its fingerprint
 // changes, so an approver reading the old page gets ErrChanged.
 //
+// Approved leave is changed in place too: it stays approved with the same
+// decision, and because its ranges carry the calendar event ids (which
+// insertRanges would drop), Correct reads them first and hands them to the
+// calendar job on the event (StaleEventIDs), which deletes and recreates.
+//
 // What is relaxed is what quote relaxes for quoteOpts.correct (no coverage
 // check, any balance, admin-only types). The days are recounted, since the
 // type or the dates may have changed. A reason is required, kept with a
@@ -301,6 +306,31 @@ func (s *Service) Correct(ctx context.Context, admin users.User, id int64, in In
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotAllowed
 		}
+		// Approved leave has calendar events, one per range, whose ids live on
+		// the range rows insertRanges is about to delete. Read them first so
+		// the calendar job can delete them; otherwise they would be orphaned
+		// in Outlook. Read in this transaction, so a worker recording an id
+		// cannot slip between the read and the delete.
+		var stale []string
+		if old.Status == StatusApproved {
+			rows, err := tx.QueryContext(ctx, `SELECT calendar_event_id FROM request_ranges
+				WHERE request_id = ? AND calendar_event_id <> '' ORDER BY start_date`, id)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var ev string
+				if err := rows.Scan(&ev); err != nil {
+					return err
+				}
+				stale = append(stale, ev)
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			rows.Close()
+		}
 		if err := insertRanges(tx, id, ranges); err != nil {
 			return err
 		}
@@ -319,7 +349,16 @@ func (s *Service) Correct(ctx context.Context, admin users.User, id int64, in In
 			VALUES (?, ?, ?, ?, ?, ?)`, id, admin.ID, stampNow(s.Now()), reason, string(before), string(after)); err != nil {
 			return err
 		}
-		return s.emit(ctx, tx, Event{Kind: EventCorrected, Request: out, Before: &old, Actor: admin, Note: reason})
+		return s.emit(ctx, tx, Event{Kind: EventCorrected, Request: out, Before: &old, Actor: admin, Note: reason, StaleEventIDs: stale})
 	})
 	return out, err
+}
+
+// CorrectionCount is how many corrections the request has had. The calendar
+// worker puts it in the event keys so a correction's new events are never
+// deduplicated to the ones it deleted.
+func (s *Service) CorrectionCount(ctx context.Context, id int64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM request_corrections WHERE request_id = ?`, id).Scan(&n)
+	return n, err
 }

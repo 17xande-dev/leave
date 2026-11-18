@@ -67,7 +67,28 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 		return svc.Get(ctx, j.RequestID)
 	}
 	create = func(ctx context.Context, payload []byte) error {
-		r, err := load(ctx, payload)
+		var j notify.CalendarJob
+		if err := json.Unmarshal(payload, &j); err != nil {
+			return fmt.Errorf("decode calendar job: %w", err)
+		}
+		// An admin's correction of approved leave replaced its ranges, so the
+		// events they held are listed here. They are deleted first, before the
+		// status check below: a correction followed quickly by a cancellation
+		// must still remove them, because the cancellation's delete job finds
+		// the ranges' ids already blank.
+		//
+		// Retry safety: a retry deletes again (Graph 404 counts as done) and
+		// creates only the ranges still without an id. If a second correction
+		// lands before this job runs, it captured no ids (the first blanked
+		// them) and this job creates events for the newest ranges, so the
+		// second job finds every range done. If this job ran in between, the
+		// second correction captured and deletes those events and recreates.
+		for _, id := range j.DeleteEventIDs {
+			if err := cal.Delete(ctx, id); err != nil {
+				return err
+			}
+		}
+		r, err := svc.Get(ctx, j.RequestID)
 		if err != nil {
 			return err
 		}
@@ -86,11 +107,21 @@ func calendarHandlers(cal calendar.Client, svc *leave.Service) (create, remove o
 				approved = "Recorded by " + r.DecidedBy + "."
 			}
 		}
+		// Each correction of approved leave deletes its events and makes new
+		// ones, so the key carries the correction count: otherwise Graph's
+		// transactionId dedupe could hand back the event just deleted.
+		revision, err := svc.CorrectionCount(ctx, r.ID)
+		if err != nil {
+			return err
+		}
 		for i, rr := range ranges {
 			if rr.EventID != "" {
 				continue
 			}
 			key := fmt.Sprintf("leave-request-%d", r.ID)
+			if revision > 0 {
+				key += fmt.Sprintf("-c%d", revision)
+			}
 			if i > 0 {
 				key += "-" + rr.Start
 			}

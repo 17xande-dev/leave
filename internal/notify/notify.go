@@ -47,6 +47,10 @@ func parseText(names ...string) map[string]*template.Template {
 // CalendarJob is the payload of a calendar create or delete.
 type CalendarJob struct {
 	RequestID int64 `json:"request_id"`
+	// DeleteEventIDs are events a create job removes before creating: those
+	// of the ranges an admin's correction of approved leave replaced. omitempty
+	// keeps every other payload exactly as it was (an old worker ignores it).
+	DeleteEventIDs []string `json:"delete_event_ids,omitempty"`
 }
 
 type Notifier struct {
@@ -101,18 +105,18 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			func(d *msgData) { d.Shortfall = daysOf(e.Shortfall, r.TypeUnit) }); err != nil {
 			return err
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventImported:
 		// A back-filled log: no email (hundreds of messages about leave
 		// payroll already has), but every entry goes on the shared calendar.
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventUnimported:
 		// Correcting the bulk import: the calendar event goes, nobody is told.
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{r.ID}); err != nil {
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventRevoked:
@@ -120,7 +124,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			func(d *msgData) { d.Actor = e.Actor.Name }); err != nil {
 			return err
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{r.ID}); err != nil {
+		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventEdited:
@@ -169,6 +173,14 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		}); err != nil {
 			return err
 		}
+		// Approved leave is on the shared calendar: one job deletes the old
+		// events and creates the corrected ones (the type is in the subject,
+		// so even a type-only change recreates them).
+		if r.Status == leave.StatusApproved {
+			if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID, DeleteEventIDs: e.StaleEventIDs}); err != nil {
+				return err
+			}
+		}
 	case leave.EventWithdrawn:
 		to, err := approvers(ctx, tx, r)
 		if err != nil {
@@ -188,11 +200,11 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		}
 		if r.Status == leave.StatusApproved {
 			if r.IsCancellation() && e.Cancelled != nil {
-				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{e.Cancelled.ID}); err != nil {
+				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: e.Cancelled.ID}); err != nil {
 					return err
 				}
 			} else if !r.IsCancellation() {
-				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{r.ID}); err != nil {
+				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 					return err
 				}
 			}

@@ -86,9 +86,9 @@ const (
 	EventEdited        EventKind = "edited"
 	EventHalvesChanged EventKind = "halves_changed"
 	// EventCorrected: an admin changed the type, dates, half days or note of
-	// someone else's not-yet-approved request. Request is as it is now, Before
-	// as it was, Note the admin's reason; the person and, while it is
-	// pending, the approver are told.
+	// someone else's request that is not decided yet or is approved. Request is
+	// as it is now, Before as it was, Note the admin's reason; the person and,
+	// while it is pending, the approver are told.
 	EventCorrected EventKind = "corrected"
 )
 
@@ -109,6 +109,9 @@ type Event struct {
 	Shortfall Days
 	// Note is what the actor said, where it is not on the request (a grant).
 	Note string
+	// StaleEventIDs, set only by Correct on approved leave, are the calendar
+	// events of the ranges it replaced; the calendar job deletes them.
+	StaleEventIDs []string
 }
 
 // EventHook runs inside the transaction making the change. An error rolls the

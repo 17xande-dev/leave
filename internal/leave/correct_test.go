@@ -83,9 +83,9 @@ func TestCorrectPendingAnnualToCompassionate(t *testing.T) {
 	if _, err := f.svc.DecideSeen(f.ctx, f.people["head"], r.ID, true, "", out.Fingerprint()); err != nil {
 		t.Fatal(err)
 	}
-	// Several corrections are all kept, oldest first.
-	if _, err := f.correct("hr", r.ID, "annual", "2026-10-13", "2026-10-14", "x", "r"); !errors.Is(err, ErrNotAllowed) {
-		t.Fatalf("approved leave is not correctable until 11d: %v", err)
+	// Approved leave is correctable too (Phase 11d): see correct_approved_test.go.
+	if _, err := f.correct("hr", r.ID, "annual", "2026-10-13", "2026-10-14", "x", "r"); err != nil {
+		t.Fatalf("approved leave is correctable: %v", err)
 	}
 }
 
@@ -166,7 +166,6 @@ func TestCorrectRefusals(t *testing.T) {
 			r := f.mustSubmit("staff", "annual", "2026-10-12", "2026-10-14")
 			return r, in(f, "unpaid", "2026-10-12", "2026-10-14"), "why", ""
 		}, func(f *fixture) users.User { u := f.people["hr"]; u.Disabled = true; return u }, notAllowed},
-		{"approved", status(StatusApproved), nil, notAllowed},
 		{"declined", status(StatusDeclined), nil, notAllowed},
 		{"withdrawn", status(StatusWithdrawn), nil, notAllowed},
 		{"cancelled", status(StatusCancelled), nil, notAllowed},
