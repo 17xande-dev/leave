@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 
 # Pinned so a local mail sink does not change under the developer.
-MAILPIT_VERSION ?= v1.33.0
+MAILPIT_VERSION ?= v1.32.0
 
 # govulncheck is pinned here rather than in go.mod: it is a build-time tool.
 # v1.1.x crashes on Go 1.27; v1.9.0 works.
