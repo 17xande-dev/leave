@@ -62,8 +62,10 @@ type Handler struct {
 	pages    map[string]*template.Template
 	partials *template.Template
 
-	// Sign-in is limited per username and per client IP; see middleware.Limiter
-	// for why neither key is a cookie.
+	// Sign-in is limited per username and per client IP. Neither key is
+	// something an attacker can discard for free, unlike a cookie, and AD's
+	// own lockout is behind these limits, so they must be the tighter wall:
+	// a guesser should hit them, not lock a colleague out of Windows.
 	loginByUser *ratelimit.Limiter
 	loginByIP   *ratelimit.Limiter
 }

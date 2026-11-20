@@ -76,7 +76,10 @@ type e2e struct {
 	srv  *httptest.Server
 }
 
-func newE2E(t *testing.T) *e2e {
+func newE2E(t *testing.T) *e2e { return newE2EConfig(t, nil) }
+
+// newE2EConfig is newE2E with a hook to adjust the config (TRUSTED_PROXIES, say) before the app is built.
+func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 	t.Helper()
 	ctx := context.Background()
 	d := dbtest.New(t)
@@ -106,6 +109,9 @@ func newE2E(t *testing.T) *e2e {
 	srv := httptest.NewUnstartedServer(nil)
 	cfg := config.Config{CookieSecure: false, SessionTTL: time.Hour, Location: time.UTC,
 		BaseURL: "http://" + srv.Listener.Addr().String()}
+	if adjust != nil {
+		adjust(&cfg)
+	}
 	svc.OnEvent(notify.New(cfg.BaseURL).Hook) // as main wires it, so actions leave their mail and calendar jobs
 	jobs := outbox.NewStore(d)
 	oa, mcpHandler, err := assistant(cfg, d, us, svc, jobs)
