@@ -565,3 +565,23 @@ func TestLoginIPLimitSharesAnIPv6Prefix(t *testing.T) {
 		t.Error("an address in a different /64 shared the bucket")
 	}
 }
+
+// With no TRUSTED_PROXIES, forwarding headers from an untrusted peer must not buy fresh sign-in IP buckets.
+func TestLoginIPLimitIgnoresSpoofedHeaders(t *testing.T) {
+	hs := newHarness(t)
+	var last int
+	for i := range 21 {
+		form := url.Values{"username": {"nobody" + strconv.Itoa(i)}, "password": {"x"}}
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "192.0.2.1:4000"
+		req.Header.Set("X-Forwarded-For", "198.51.100."+strconv.Itoa(i+1))
+		req.Header.Set("CF-Connecting-IP", "203.0.113."+strconv.Itoa(i+1))
+		rec := httptest.NewRecorder()
+		hs.h.Login(rec, req)
+		last = rec.Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("21st attempt with a fresh spoofed address each time: %d, want 429", last)
+	}
+}

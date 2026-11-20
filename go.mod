@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	github.com/17xande-dev/mailer v0.3.0
+	github.com/17xande-dev/ratelimit v0.1.0
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/jsonschema-go v0.4.3
 	github.com/justinas/nosurf v1.2.0

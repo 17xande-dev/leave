@@ -41,6 +41,11 @@ proxy:
     version: v0.10.3
     publish: false
   ssl: false
+  # Keep kamal-proxy appending the peer to the X-Forwarded-For Cloudflare sent. The app's
+  # TRUSTED_PROXIES mode reads only X-Forwarded-For (rightmost untrusted hop), so without
+  # this the header would not hold the real client address. Kamal documents this as the
+  # default when ssl is false; it is explicit so a later `ssl: true` cannot drop it.
+  forward_headers: true
   host: leave.rivers.tools
   app_port: 8080
   healthcheck:
@@ -59,10 +64,12 @@ env:
     DIRECTORY: ldap
     TZ_NAME: Africa/Johannesburg
     # The `kamal` docker network (fixed subnet 172.30.17.0/24 on sdt-vm-docker02) holds
-    # kamal-proxy and the app. The peer is kamal-proxy, which passes Cloudflare's
-    # CF-Connecting-IP through; trusting the subnet is what makes the app honour it,
-    # so the sign-in rate limit sees real client addresses. Safe only while the
-    # shared tunnel is the sole way in: nothing publishes a port on the host.
+    # kamal-proxy and the app. The peer is kamal-proxy; the X-Forwarded-For chain is
+    # "<client>, <cloudflared>" (Cloudflare appends the client, kamal-proxy appends its peer,
+    # see forward_headers above). Trusting the subnet makes the app take the rightmost hop
+    # outside it, the client, so the rate limits see real client addresses. CF-Connecting-IP
+    # is not read. Safe only while the shared tunnel is the sole way in: nothing publishes
+    # a port on the host.
     TRUSTED_PROXIES: 172.30.17.0/24
   # Everything org-specific or credential-like comes from the gitignored .env
   # through .kamal/secrets, so no value is committed.

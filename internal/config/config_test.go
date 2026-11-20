@@ -55,3 +55,16 @@ func TestPartialConfigRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedProxiesInvalidCIDRRefused(t *testing.T) {
+	t.Setenv("DIRECTORY", "fake")
+	t.Setenv("COOKIE_SECURE", "false")
+	t.Setenv("TRUSTED_PROXIES", "172.30.17.0/24, nonsense")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TRUSTED_PROXIES") {
+		t.Fatalf("err = %v", err)
+	}
+	t.Setenv("TRUSTED_PROXIES", "172.30.17.0/24")
+	if c, err := Load(); err != nil || len(c.TrustedProxies) != 1 {
+		t.Fatalf("valid value: %+v, %v", c.TrustedProxies, err)
+	}
+}

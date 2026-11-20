@@ -1007,10 +1007,11 @@ What has to exist (once): a public hostname `leave.rivers.tools` on the shared t
 service `http://kamal-proxy:80`, in Cloudflare Zero Trust, with its DNS record.
 
 `TRUSTED_PROXIES=172.30.17.0/24` (set in `config/deploy.yml`) is the `kamal` docker
-network's fixed subnet on the host. The peer the app sees is kamal-proxy, which passes
-Cloudflare's `CF-Connecting-IP` through; the app honours forwarding headers only from a
-peer in that subnet, which is how the sign-in rate limit sees real client IPs instead of
-the proxy's. This is safe only while the tunnel is the sole way in: nothing may publish a
+network's fixed subnet on the host. The peer the app sees is kamal-proxy, which (with
+`forward_headers: true` in `config/deploy.yml`) appends its peer to the `X-Forwarded-For`
+Cloudflare sent; the app reads only that header, from the right, and only when the peer is in
+that subnet, which is how the rate limits see real client IPs instead of the proxy's.
+`CF-Connecting-IP` is not read. An invalid CIDR stops startup. This is safe only while the tunnel is the sole way in: nothing may publish a
 port on the host that reaches the app or kamal-proxy. If the subnet changes, change this
 to match.
 
@@ -1027,7 +1028,7 @@ need a bypass rule.
 | Sign-in | LDAP bind against the DC, per request, with no connection pool, so one user's bind can never leak into another's request. People are keyed on `objectGUID`, which survives OU moves and renames. |
 | Database | SQLite: one instance, one file. Switch to Postgres if a second instance or an outside reader is ever needed. |
 | Styling | One plain CSS file. No Web Awesome, because a component framework and a CDN or vendoring step bought nothing here. |
-| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `x/time/rate` (limits), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. `xuri/excelize/v2` v2.11.1 writes payroll `.xlsx` workbooks: chosen by the user over hand-written OOXML, published 2026-11-02 and at least two weeks old on 2026-11-17. We only write workbooks, never open uploaded ones (where its CVE history lies). It brings `richardlehane/mscfb`, `richardlehane/msoleps`, `tiendc/go-deepcopy`, `xuri/efp`, `xuri/nfp` and `golang.org/x/net` (raised to v0.62.0); its graph also includes `x/image` and the already-present `x/crypto` and `x/text`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
+| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `17xande-dev/ratelimit` (client IP and rate limits; uses `x/time/rate`), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. `xuri/excelize/v2` v2.11.1 writes payroll `.xlsx` workbooks: chosen by the user over hand-written OOXML, published 2026-11-02 and at least two weeks old on 2026-11-17. We only write workbooks, never open uploaded ones (where its CVE history lies). It brings `richardlehane/mscfb`, `richardlehane/msoleps`, `tiendc/go-deepcopy`, `xuri/efp`, `xuri/nfp` and `golang.org/x/net` (raised to v0.62.0); its graph also includes `x/image` and the already-present `x/crypto` and `x/text`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
 
 ### Decisions still open
 

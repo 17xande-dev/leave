@@ -651,3 +651,21 @@ func TestSweep(t *testing.T) {
 	}
 	_ = unused
 }
+
+// Forwarding headers from an untrusted peer do not give the token limit fresh buckets; the Retry-After is kept.
+func TestTokenLimitIgnoresSpoofedHeaders(t *testing.T) {
+	e := newEnv(t)
+	var rec *httptest.ResponseRecorder
+	for i := range 61 {
+		req := httptest.NewRequest("POST", "/oauth/token", strings.NewReader("grant_type=nope"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "192.0.2.1:4000"
+		req.Header.Set("X-Forwarded-For", "198.51.100."+strconv.Itoa(i+1))
+		req.Header.Set("CF-Connecting-IP", "203.0.113."+strconv.Itoa(i+1))
+		rec = httptest.NewRecorder()
+		e.s.Token(rec, req)
+	}
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "5" {
+		t.Fatalf("61st spoofed request: %d Retry-After %q, want 429 / 5", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}

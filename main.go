@@ -108,7 +108,10 @@ func run() error {
 	if cfg.BaseURL == "" {
 		slog.Warn("BASE_URL is empty: AI assistants cannot sign in, and emails carry no links")
 	}
-	oauthSrv, mcpHandler := assistant(cfg, database, userStore, leaveSvc, jobs)
+	oauthSrv, mcpHandler, err := assistant(cfg, database, userStore, leaveSvc, jobs)
+	if err != nil {
+		return err
+	}
 	app, err := newApp(cfg, handler.Deps{Users: userStore, Sessions: sessions, Directory: dir, Leave: leaveSvc,
 		Outbox: jobs, Kick: worker.Kick, TeamsEnabled: teamsSource(cfg.Directory) != "", OAuth: oauthSrv, MCP: mcpHandler})
 	if err != nil {
@@ -166,21 +169,28 @@ func run() error {
 
 // assistant builds the AI-assistant side: the OAuth server that signs people
 // in and the MCP endpoint that accepts what it issues.
-func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.Service, jobs *outbox.Store) (*oauth.Server, http.Handler) {
-	o := oauth.New(database, oauth.Config{BaseURL: cfg.BaseURL,
-		TrustedProxies: middleware.ParseTrustedProxies(cfg.TrustedProxies)})
+func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.Service, jobs *outbox.Store) (*oauth.Server, http.Handler, error) {
+	source, err := middleware.ClientIPSource(cfg.TrustedProxies)
+	if err != nil {
+		return nil, nil, err
+	}
+	o := oauth.New(database, oauth.Config{BaseURL: cfg.BaseURL, ClientIP: source})
 	return o, mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: o.Verify,
-		ResourceMetadataURL: o.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})
+		ResourceMetadataURL: o.ResourceMetadataURL(), Scopes: []string{oauth.Scope}}), nil
 }
 
 // newApp is the whole HTTP stack: the routes, then CSRF behind a body cap, then the headers and
 // the log around everything. Tests build it the same way, so what they hit is
 // what is served.
 func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
+	source, err := middleware.ClientIPSource(cfg.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
 	h, err := handler.New(handler.Config{
-		CookieSecure:   cfg.CookieSecure,
-		SessionTTL:     cfg.SessionTTL,
-		TrustedProxies: middleware.ParseTrustedProxies(cfg.TrustedProxies),
+		CookieSecure: cfg.CookieSecure,
+		SessionTTL:   cfg.SessionTTL,
+		ClientIP:     source,
 	}, d)
 	if err != nil {
 		return nil, err

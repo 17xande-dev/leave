@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/17xande-dev/leave/internal/directory"
-	"github.com/17xande-dev/leave/internal/middleware"
+	"github.com/17xande-dev/ratelimit"
 )
 
 // sessionCookie is always SameSite=Lax and HttpOnly. There is no setting to
@@ -55,7 +55,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusUnauthorized, "That username and password did not match. Use your usual Windows sign-in.")
 		return
 	}
-	if !h.loginByIP.AllowIP(middleware.ClientIP(r, h.cfg.TrustedProxies)) || !h.loginByUser.Allow(username) {
+	if !h.loginByIP.Allow(ratelimit.IPKey(h.cfg.ClientIP.Addr(r))) || !h.loginByUser.Allow(username) {
 		fail(http.StatusTooManyRequests, "Too many sign-in attempts. Please wait a few minutes and try again.")
 		return
 	}

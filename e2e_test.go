@@ -108,7 +108,10 @@ func newE2E(t *testing.T) *e2e {
 		BaseURL: "http://" + srv.Listener.Addr().String()}
 	svc.OnEvent(notify.New(cfg.BaseURL).Hook) // as main wires it, so actions leave their mail and calendar jobs
 	jobs := outbox.NewStore(d)
-	oa, mcpHandler := assistant(cfg, d, us, svc, jobs)
+	oa, mcpHandler, err := assistant(cfg, d, us, svc, jobs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	app, err := newApp(cfg, handler.Deps{Users: us, Sessions: auths.NewSessions(d, time.Hour), Directory: dir,
 		Leave: svc, Outbox: jobs, OAuth: oa, MCP: mcpHandler})
 	if err != nil {

@@ -32,6 +32,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/17xande-dev/ratelimit"
+	"github.com/17xande-dev/ratelimit/clientip"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
 	"github.com/17xande-dev/leave/internal/middleware"
@@ -56,8 +58,9 @@ var ErrNotFound = errors.New("oauth: not found")
 type Config struct {
 	// BaseURL is the origin people reach the app at, with no trailing slash. It
 	// is the issuer, and the MCP endpoint is BaseURL + ResourcePath.
-	BaseURL        string
-	TrustedProxies []*net.IPNet
+	BaseURL string
+	// ClientIP decides which address a request came from, for the per-IP limits. The zero value is the peer.
+	ClientIP clientip.Source
 }
 
 type Server struct {
@@ -70,8 +73,8 @@ type Server struct {
 	// loose on purpose: claude.ai calls from a few shared addresses on behalf
 	// of everyone, and the secrets are 256 bits so there is nothing to guess.
 	// They stop a script from filling the database, not a guesser.
-	tokenLimit    *middleware.Limiter
-	registerLimit *middleware.Limiter
+	tokenLimit    *ratelimit.Limiter
+	registerLimit *ratelimit.Limiter
 }
 
 func New(db *sql.DB, cfg Config) *Server {
@@ -421,8 +424,8 @@ func postForm(w http.ResponseWriter, r *http.Request) (url.Values, *oauthError) 
 	return r.PostForm, nil
 }
 
-func (s *Server) limited(w http.ResponseWriter, r *http.Request, l *middleware.Limiter) bool {
-	if l.AllowIP(middleware.ClientIP(r, s.cfg.TrustedProxies)) {
+func (s *Server) limited(w http.ResponseWriter, r *http.Request, l *ratelimit.Limiter) bool {
+	if l.Allow(ratelimit.IPKey(s.cfg.ClientIP.Addr(r))) {
 		return false
 	}
 	w.Header().Set("Retry-After", "5")

@@ -4,11 +4,12 @@ package handler
 import (
 	"context"
 	"html/template"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/17xande-dev/ratelimit"
+	"github.com/17xande-dev/ratelimit/clientip"
 	"github.com/justinas/nosurf"
 
 	"github.com/17xande-dev/leave/internal/auth"
@@ -21,9 +22,10 @@ import (
 )
 
 type Config struct {
-	CookieSecure   bool
-	SessionTTL     time.Duration
-	TrustedProxies []*net.IPNet
+	CookieSecure bool
+	SessionTTL   time.Duration
+	// ClientIP decides which address a request came from, for the sign-in IP limit. The zero value is the peer.
+	ClientIP clientip.Source
 }
 
 // Deps are the stores and services the handlers use.
@@ -62,8 +64,8 @@ type Handler struct {
 
 	// Sign-in is limited per username and per client IP; see middleware.Limiter
 	// for why neither key is a cookie.
-	loginByUser *middleware.Limiter
-	loginByIP   *middleware.Limiter
+	loginByUser *ratelimit.Limiter
+	loginByIP   *ratelimit.Limiter
 }
 
 func New(cfg Config, d Deps) (*Handler, error) {

@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -139,6 +140,11 @@ func Load() (Config, error) {
 	}
 	if c.Directory.SyncInterval, err = duration("DIRECTORY_SYNC_INTERVAL", time.Hour); err != nil {
 		return Config{}, err
+	}
+	for _, cidr := range c.TrustedProxies {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return Config{}, fmt.Errorf("config: TRUSTED_PROXIES: %w", err)
+		}
 	}
 	if c.Location, err = time.LoadLocation(getenv("TZ_NAME", "Africa/Johannesburg")); err != nil {
 		return Config{}, fmt.Errorf("config: TZ_NAME: %w", err)
