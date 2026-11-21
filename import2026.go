@@ -152,7 +152,7 @@ func copyDB(src, dst string) (string, error) {
 		return "", err
 	}
 	u := url.URL{Scheme: "file", Path: abs, RawQuery: "mode=ro"}
-	d, err := sql.Open("sqlite3", u.String())
+	d, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return "", err
 	}

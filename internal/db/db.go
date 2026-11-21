@@ -12,13 +12,22 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/17xande-dev/sqlitekit"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
+	_ "modernc.org/sqlite"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
+
+// dbOptions are the choices sqlitekit leaves to the app: leave deletes nothing
+// that must be scrubbed from free pages, so the defaults stand.
+var dbOptions = sqlitekit.Options{}
+
+// checkSettings is a seam: a test swaps it for a failing function to prove
+// that opening the database runs the check and refuses to start on failure.
+var checkSettings = sqlitekit.Check
 
 // Open opens (creating if needed) the database and applies embedded migrations.
 func Open(path string) (*sql.DB, error) {
@@ -41,19 +50,29 @@ func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 			return nil, nil, fmt.Errorf("create database directory: %w", err)
 		}
 	}
-	// _foreign_keys=on because SQLite enforces no foreign key at all by
-	// default. busy_timeout is left at go-sqlite3's 5s default. _txlock=immediate
-	// makes every transaction take the write lock at BEGIN, so two concurrent
-	// approvals serialise instead of both reading "pending" and one failing
-	// with SQLITE_BUSY at commit.
-	dsn := fmt.Sprintf("file:%s?_foreign_keys=on&_txlock=immediate", path)
-	d, err := sql.Open("sqlite3", dsn)
+	// sqlitekit.DSN turns on foreign keys, WAL, a busy timeout and
+	// _txlock=immediate. The last one is what lets two concurrent approvals
+	// serialise at BEGIN instead of both reading "pending" and one failing with
+	// SQLITE_BUSY at commit; see leave's withTx.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve database path: %w", err)
+	}
+	dsn, err := sqlitekit.DSN(abs, dbOptions)
+	if err != nil {
+		return nil, nil, err
+	}
+	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, nil, err
 	}
 	fail := func(e error) (*sql.DB, *goose.Provider, error) { d.Close(); return nil, nil, e }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	// Both drivers silently ignore a misspelled parameter: verify what took.
+	if err := checkSettings(ctx, d, dbOptions); err != nil {
+		return fail(fmt.Errorf("sqlite settings: %w", err))
+	}
 	var existing, versioned bool
 	if err = d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'goose_db_version'),EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='goose_db_version')`).Scan(&existing, &versioned); err != nil {
 		return fail(err)

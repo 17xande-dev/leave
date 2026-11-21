@@ -6,11 +6,14 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/17xande-dev/sqlitekit"
 )
 
 // Check what SQLite actually recorded, including goose's version table.
@@ -110,7 +113,7 @@ func TestForeignKeysEnforced(t *testing.T) {
 // message, not fail on the first query that touches a new column.
 func TestOldDatabaseRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +127,7 @@ func TestOldDatabaseRefused(t *testing.T) {
 // A partial unversioned requests schema must fail before migration runs.
 func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +141,7 @@ func TestOldDatabaseMissingNewerColumnRefused(t *testing.T) {
 // A users table from before users.sex must not be silently adopted.
 func TestOldDatabaseWithoutUsersSexRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +156,7 @@ func TestOldDatabaseWithoutUsersSexRefused(t *testing.T) {
 // status CHECK, which only the DDL shows.
 func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +173,7 @@ func TestOldDatabaseWithoutAwaitingHRRefused(t *testing.T) {
 // apply the defaults instead of what the operator had configured.
 func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +191,7 @@ func TestOldDatabaseWithoutSettingsRefused(t *testing.T) {
 // fail the first time someone connects an assistant.
 func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +210,7 @@ func TestOldDatabaseWithoutOAuthRefused(t *testing.T) {
 // tables are both caught, rather than failing at the first leave request.
 func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +223,7 @@ func TestOldDatabaseWithoutTeamsRefused(t *testing.T) {
 	}
 
 	path = filepath.Join(t.TempDir(), "old2.db")
-	old, _ = sql.Open("sqlite3", "file:"+path)
+	old, _ = sql.Open("sqlite", "file:"+path)
 	for _, q := range []string{
 		`CREATE TABLE requests (id INTEGER PRIMARY KEY, days_x100 INTEGER, shutdown_part_id INTEGER, escalate INTEGER,
 			allow_negative INTEGER, recorded_by_id INTEGER, half_start INTEGER, half_end INTEGER, status TEXT CHECK (status IN ('draft', 'pending', 'awaiting_hr'))) STRICT`,
@@ -462,7 +465,7 @@ func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 // refused as unversioned rather than failing at the first insert.
 func TestOldDatabaseWithoutHalfDaysRefused(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	old, err := sql.Open("sqlite3", "file:"+path)
+	old, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,5 +537,65 @@ func TestUsersSexColumnChecked(t *testing.T) {
 	var got string
 	if err := d.QueryRow(`SELECT sex FROM users WHERE id = 1`).Scan(&got); err != nil || got != "m" {
 		t.Errorf("stored sex = %q, %v; a refused write must leave the last good value", got, err)
+	}
+}
+
+// Open must run sqlitekit.Check: a driver that silently ignores a DSN
+// parameter would otherwise run for months with foreign keys off or no WAL.
+func TestOpenRunsSettingsCheck(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "check.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open with the real check: %v", err)
+	}
+	var fk int
+	var mode string
+	if err := d.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("foreign_keys = %d, err = %v", fk, err)
+	}
+	if err := d.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("journal_mode = %q, err = %v", mode, err)
+	}
+	d.Close()
+
+	old := checkSettings
+	t.Cleanup(func() { checkSettings = old })
+	called := false
+	checkSettings = func(context.Context, *sql.DB, sqlitekit.Options) error {
+		called = true
+		return errors.New("settings not applied")
+	}
+	if d, err := Open(filepath.Join(t.TempDir(), "bad.db")); err == nil {
+		d.Close()
+		t.Fatal("Open succeeded although the settings check failed")
+	} else if !called || !strings.Contains(err.Error(), "settings not applied") {
+		t.Fatalf("called = %v, err = %v", called, err)
+	}
+}
+
+// Transactions take the write lock at BEGIN (the DSN's _txlock=immediate): a
+// second connection cannot write while one is open, and waits instead of
+// failing later at commit.
+func TestTransactionsAreImmediate(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "tx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	tx, err := d.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	conn, err := d.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), `PRAGMA busy_timeout = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `UPDATE settings SET half_days_enabled = half_days_enabled`); err == nil {
+		t.Fatal("a second connection could write while a transaction was open")
 	}
 }

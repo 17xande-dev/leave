@@ -13,8 +13,7 @@ registry:
   password:
     - KAMAL_REGISTRY_PASSWORD
 
-# The host is linux/amd64 and go-sqlite3 needs cgo, so the image is architecture-
-# specific. Building for it explicitly keeps an arm laptop honest.
+# The host is linux/amd64; building for it explicitly keeps an arm laptop honest.
 builder:
   arch: amd64
 

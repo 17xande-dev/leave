@@ -337,7 +337,7 @@ func TestContract0006OperatorSQL(t *testing.T) {
 	d, p, path := contractFixture(t)
 	pre := filepath.Join(t.TempDir(), "pre.db")
 	contractExec(t, d, `VACUUM INTO ?`, pre)
-	ro, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	ro, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)
 	}

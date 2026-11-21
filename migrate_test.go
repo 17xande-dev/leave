@@ -59,7 +59,7 @@ func TestMigrateCommand(t *testing.T) {
 			if err != nil || !strings.Contains(string(out), "migrating "+path+": 1 -> 9\n") {
 				t.Fatalf("existing DB: err=%v output=%s", err, out)
 			}
-			d, err := sql.Open("sqlite3", path)
+			d, err := sql.Open("sqlite", path)
 			if err != nil {
 				t.Fatal(err)
 			}

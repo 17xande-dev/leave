@@ -948,7 +948,9 @@ ssh sdt-vm-docker02 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/da
 ```
 
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
-torn state.
+torn state. The database runs in WAL mode, so **while the app runs it is three files**
+(`leave.db`, `leave.db-wal`, `leave.db-shm`): never `cp`, `docker cp` or tar the volume of a
+running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first.
 
 To restore or roll the data back, `kamal app stop` first, before copying into or removing
 the `leave-data` volume. A leftover `-journal`/`-wal` file next to a copied database can
@@ -987,7 +989,8 @@ kamal app boot
 ```
 
 `cp -a /from/.` copies a leftover `leave.db-journal` too, which SQLite needs if the old app
-was killed mid-write. The LDAP CA bundle lives in `/home/it_admin/leave/certs`; never
+was killed mid-write. (The old stack's app is stopped first, so its volume is safe to copy;
+the same copy of a running WAL database would not be.) The LDAP CA bundle lives in `/home/it_admin/leave/certs`; never
 delete that directory (it is also the old compose `./certs`).
 
 **Known limitation.** During each deploy the old and new containers briefly overlap. The
@@ -1028,7 +1031,7 @@ need a bypass rule.
 | Sign-in | LDAP bind against the DC, per request, with no connection pool, so one user's bind can never leak into another's request. People are keyed on `objectGUID`, which survives OU moves and renames. |
 | Database | SQLite: one instance, one file. Switch to Postgres if a second instance or an outside reader is ever needed. |
 | Styling | One plain CSS file. No Web Awesome, because a component framework and a CDN or vendoring step bought nothing here. |
-| Dependencies | `go-ldap/ldap` (LDAP), `mattn/go-sqlite3` (cgo), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `17xande-dev/ratelimit` (client IP and rate limits; uses `x/time/rate`), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. `xuri/excelize/v2` v2.11.1 writes payroll `.xlsx` workbooks: chosen by the user over hand-written OOXML, published 2026-11-02 and at least two weeks old on 2026-11-17. We only write workbooks, never open uploaded ones (where its CVE history lies). It brings `richardlehane/mscfb`, `richardlehane/msoleps`, `tiendc/go-deepcopy`, `xuri/efp`, `xuri/nfp` and `golang.org/x/net` (raised to v0.62.0); its graph also includes `x/image` and the already-present `x/crypto` and `x/text`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
+| Dependencies | `go-ldap/ldap` (LDAP), `modernc.org/sqlite` (pure Go: `CGO_ENABLED=0`, no C toolchain in the image; replaced `mattn/go-sqlite3`), `17xande-dev/sqlitekit` (connection settings and startup check, the same for every SQLite app), `pressly/goose/v3` (numbered SQL migrations; v3.29.0 is the newest release at least two weeks old as of 2026-11-12, with a STRICT-safe version store), `justinas/nosurf` (CSRF), `17xande-dev/ratelimit` (client IP and rate limits; uses `x/time/rate`), `17xande-dev/mailer` (Graph mail and tokens), `modelcontextprotocol/go-sdk` (the MCP server: the protocol is still moving and tracking it by hand is a thin reimplementation for one person to maintain). The SDK brings `google/jsonschema-go`, `segmentio/encoding` (with `segmentio/asm`), `yosida95/uritemplate/v3` and `golang.org/x/oauth2`, and raises `x/sync` and `x/sys`. `xuri/excelize/v2` v2.11.1 writes payroll `.xlsx` workbooks: chosen by the user over hand-written OOXML, published 2026-11-02 and at least two weeks old on 2026-11-17. We only write workbooks, never open uploaded ones (where its CVE history lies). It brings `richardlehane/mscfb`, `richardlehane/msoleps`, `tiendc/go-deepcopy`, `xuri/efp`, `xuri/nfp` and `golang.org/x/net` (raised to v0.62.0); its graph also includes `x/image` and the already-present `x/crypto` and `x/text`. The OAuth server is about 600 lines on the standard library, and the Graph calendar client is about 150 lines here rather than the Graph SDK. |
 
 ### Decisions still open
 
