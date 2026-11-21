@@ -952,6 +952,17 @@ torn state. The database runs in WAL mode, so **while the app runs it is three f
 (`leave.db`, `leave.db-wal`, `leave.db-shm`): never `cp`, `docker cp` or tar the volume of a
 running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first.
 
+**Automatic daily backups.** At startup and then daily the app writes a `VACUUM INTO` copy of the
+database to `/data/backups/leave-YYYY-MM-DD.db` (the date is the UTC day), one per day,
+mode 0600 in a 0700 folder, and keeps the newest 14; nothing else in the folder is touched.
+`BACKUP_DIR` (default `backups` beside the database file) and `BACKUP_KEEP` (default 14;
+`0` turns backups off) change this. A copy is a complete, ordinary database file, so
+restoring is `kamal app stop`, replacing `leave.db` with the copy (and removing any
+`leave.db-wal` and `leave.db-shm`), then `kamal app boot`. These copies live in the same
+volume as the database: they cover mistakes and corruption, **not the loss of the disk**,
+so the off-host copy in the procedure above is still needed (an automatic off-site copy is
+an open decision below). Take the pre-deploy `.backup` as before; it is not replaced.
+
 To restore or roll the data back, `kamal app stop` first, before copying into or removing
 the `leave-data` volume. A leftover `-journal`/`-wal` file next to a copied database can
 corrupt it, so copy the database in with no stale sidecar files, then `kamal app boot`.
@@ -1044,5 +1055,6 @@ need a bypass rule.
 | Cancelling leave that has already started | Not possible in-app; an admin adjusts the balance | How often it happens |
 | Work patterns per person | One working week for everyone; a part-timer's non-working days are charged | Part-time staff or a second pattern, which would need a per-person week |
 | Delegating approvals while an approver is on leave | An admin reassigns | Heads asking for it |
+| Off-site database backups | Daily `VACUUM INTO` copies in the data volume (14 kept); copied off the host by hand | Losing the disk is the case they do not cover; decide an off-host destination |
 | Half days | Not supported (by decision) | Revisit on request |
 | Sign-in timing | An unknown username answers slightly faster than a wrong password (no DC bind), which reveals whether a username exists | Usernames are not secret inside the organisation; revisit if that changes |

@@ -68,3 +68,29 @@ func TestTrustedProxiesInvalidCIDRRefused(t *testing.T) {
 		t.Fatalf("valid value: %+v, %v", c.TrustedProxies, err)
 	}
 }
+
+func TestBackupSettings(t *testing.T) {
+	t.Setenv("DIRECTORY", "fake")
+	t.Setenv("COOKIE_SECURE", "false")
+	t.Setenv("DB_PATH", "/srv/leave/leave.db")
+	t.Setenv("BACKUP_DIR", "")
+	t.Setenv("BACKUP_KEEP", "")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BackupDir != "/srv/leave/backups" || c.BackupKeep != 14 {
+		t.Fatalf("defaults: dir = %q keep = %d", c.BackupDir, c.BackupKeep)
+	}
+
+	t.Setenv("BACKUP_DIR", "/mnt/b")
+	t.Setenv("BACKUP_KEEP", "0")
+	if c, err = Load(); err != nil || c.BackupDir != "/mnt/b" || c.BackupKeep != 0 {
+		t.Fatalf("explicit: %+v, err = %v", c, err)
+	}
+
+	t.Setenv("BACKUP_KEEP", "many")
+	if _, err = Load(); err == nil {
+		t.Fatal("BACKUP_KEEP=many accepted")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,12 @@ import (
 type Config struct {
 	ListenAddr string
 	DBPath     string
+
+	// BackupDir holds the daily database backups (BACKUP_DIR; default
+	// "backups" beside the database file). BackupKeep is how many to retain
+	// (BACKUP_KEEP; default 14); 0 turns backups off.
+	BackupDir  string
+	BackupKeep int
 
 	// BaseURL is the origin people reach the app at (https://leave.example.org).
 	// It is used for links in emails, which have no request to derive one from,
@@ -145,6 +152,10 @@ func Load() (Config, error) {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
 			return Config{}, fmt.Errorf("config: TRUSTED_PROXIES: %w", err)
 		}
+	}
+	c.BackupDir = getenv("BACKUP_DIR", filepath.Join(filepath.Dir(c.DBPath), "backups"))
+	if c.BackupKeep, err = integer("BACKUP_KEEP", 14); err != nil {
+		return Config{}, err
 	}
 	if c.Location, err = time.LoadLocation(getenv("TZ_NAME", "Africa/Johannesburg")); err != nil {
 		return Config{}, fmt.Errorf("config: TZ_NAME: %w", err)

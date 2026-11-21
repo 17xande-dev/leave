@@ -62,6 +62,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx, cfg)
+}
+
+// serve is the whole program after configuration: it runs until ctx ends or
+// the listener fails. Tests call it with a temporary database to prove the
+// background jobs, the backup among them, are started.
+func serve(ctx context.Context, cfg config.Config) error {
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		return err
@@ -118,8 +127,7 @@ func run() error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	backup := backupJob(database, cfg)
 
 	go worker.Run(ctx, 30*time.Second)
 	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
@@ -134,6 +142,9 @@ func run() error {
 		} else if n > 0 {
 			slog.Info("swept expired oauth rows", "n", n)
 		}
+		// At startup and then hourly: Run takes at most one backup per day
+		// and prunes, so the hourly call is a cheap no-op after the first.
+		backup(ctx)
 	})
 
 	srv := &http.Server{
