@@ -218,29 +218,44 @@ func TestLoginFlow(t *testing.T) {
 	}
 }
 
+// safeNext and safePath are thin wrappers over websec.SafeRedirect, which owns
+// the algorithm and its own table. This pins the wiring: the options leave
+// passes (Deny "/login" for safeNext only, "/" as the fallback), one hostile
+// row per wrapper, and the value the app's own middleware generates.
 func TestSafeNext(t *testing.T) {
+	const consent = "/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s"
 	for in, want := range map[string]string{
-		"":                     "/",
-		"/team":                "/team",
-		"//evil.example":       "/",
-		`/\evil.example`:       "/",
-		"https://evil.example": "/",
-		"/login?next=/x":       "/",
-		"/\t/evil.example":     "/",
-		"/\v/evil.example":     "/",
-		"/\f/evil.example":     "/",
-		"/\n/evil.example":     "/",
-		"/\r/evil.example":     "/",
-		"/\x7f/evil.example":   "/",
-		"/team\t":              "/",
-		"/team\x00":            "/",
+		"":               "/",
+		"/team":          "/team",
+		"/login?next=/x": "/", // the sign-in page itself is denied
+		"/%6cogin":       "/", // Deny matches the decoded path
+		"/loginhistory":  "/", // plain prefix, as before
+		"/team\t":        "/",
+		// A browser drops a literal tab, so this reads "//evil.example".
+		"/\t/evil.example": "/",
 		// The consent screen is reached through sign-in with its whole query,
-		// so the person lands back on it.
-		"/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s": "/oauth/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A1%2Fcb&state=s",
+		// so the person lands back on it: the middleware's RequestURI.
+		consent: consent,
 	} {
 		if got := safeNext(in); got != want {
 			t.Errorf("safeNext(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSafePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                     "/",
+		"/team":                "/team",
+		"/login":               "/login", // safePath has no Deny: the theme form may return to /login
+		"https://evil.example": "/",
+	} {
+		if got := safePath(in); got != want {
+			t.Errorf("safePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := safePath("/\t/evil.example"); got != "/" {
+		t.Errorf("a literal tab hid a second slash: %q", got)
 	}
 }
 
@@ -323,29 +338,6 @@ func TestNoInlineStyleOrHandlers(t *testing.T) {
 	}
 	if n < 36 { // 33 before the stand-in pages; the count only goes up
 		t.Fatalf("checked only %d templates", n)
-	}
-}
-
-func TestSafePath(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                     "/",
-		"/team":                "/team",
-		"/login":               "/login",
-		"/\t/evil.example":     "/",
-		"/\v/evil.example":     "/",
-		"/\f/evil.example":     "/",
-		"/\n/evil.example":     "/",
-		"/\r/evil.example":     "/",
-		"/\x7f/evil.example":   "/",
-		"/team\t":              "/",
-		"/team\x00":            "/",
-		"//evil.example":       "/",
-		`/\evil.example`:       "/",
-		"https://evil.example": "/",
-	} {
-		if got := safePath(in); got != want {
-			t.Errorf("safePath(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 

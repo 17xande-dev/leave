@@ -5,11 +5,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/ratelimit"
+	"github.com/17xande-dev/websec"
 )
 
 // sessionCookie is always SameSite=Lax and HttpOnly. There is no setting to
@@ -106,28 +106,21 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?notice=signed-out", http.StatusSeeOther)
 }
 
-// safePath keeps a redirect on this site. "//evil.example" and "/\evil.example"
-// are both read by browsers as another host, so a leading slash alone is not
-// enough.
-func safePath(p string) string {
-	// Browsers strip tab and newline from a URL before reading it, so
-	// "/<TAB>/evil.example" is "//evil.example" to them, though it looks fine here.
-	for i := 0; i < len(p); i++ {
-		if p[i] < 0x20 || p[i] == 0x7f {
-			return "/"
-		}
-	}
-	if p == "" || !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.HasPrefix(p, `/\`) {
-		return "/"
-	}
-	return p
-}
+// pathOpts and nextOpts are the redirect policies. Both fall back to "/", the
+// home page, which needs no sign-in decision of its own. The rules themselves
+// (and the browser behaviour behind them) live in websec.SafeRedirect.
+var (
+	// pathOpts has no Prefix and no Deny: any page of this app is a legal
+	// target for the theme form's "back to where you were" redirect.
+	pathOpts = websec.RedirectOptions{Fallback: "/"}
+	// nextOpts is pathOpts plus the sign-in page itself, so nobody is bounced
+	// straight back to it. Deny matches the decoded path by plain prefix, which
+	// also covers "/login?next=..." and "/%6cogin".
+	nextOpts = websec.RedirectOptions{Deny: []string{"/login"}, Fallback: "/"}
+)
 
-// safeNext is safePath for after sign-in, which also refuses the sign-in page
-// itself so nobody is bounced straight back to it.
-func safeNext(next string) string {
-	if p := safePath(next); !strings.HasPrefix(p, "/login") {
-		return p
-	}
-	return "/"
-}
+// safePath keeps a redirect on this site.
+func safePath(p string) string { return websec.SafeRedirect(p, pathOpts) }
+
+// safeNext is safePath for after sign-in, which also refuses the sign-in page.
+func safeNext(next string) string { return websec.SafeRedirect(next, nextOpts) }

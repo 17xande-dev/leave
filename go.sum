@@ -2,6 +2,8 @@ github.com/17xande-dev/mailer v0.3.0 h1:iK9RApl4GNYdhnvWb8af4ZFfWUhIS+YHq7mKR7p1
 github.com/17xande-dev/mailer v0.3.0/go.mod h1:/s+gTKaMVwTz4go4OJLv8K9ApoSgPruzCZ5k8hV3UoA=
 github.com/17xande-dev/ratelimit v0.1.0 h1:JurnVJMt2Fhuhx3i7aihsjx70+uRU5BIQwORIBZmtBg=
 github.com/17xande-dev/ratelimit v0.1.0/go.mod h1:VhjyQPstPYd7MWpbM6MxY6cpdrtU8jFAHnKl474VL8M=
+github.com/17xande-dev/websec v0.1.0 h1:k2mOIYxjBr72nO8wHOu3SqTvyHOmm1ib/Jpi19L9PzU=
+github.com/17xande-dev/websec v0.1.0/go.mod h1:W8LRE9gpve9YHEsW1SJhjghZcp1rJB5FYSwWbDQv2ZE=
 github.com/Azure/go-ntlmssp v0.1.1 h1:l+FM/EEMb0U9QZE7mKNEDw5Mu3mFiaa2GKOoTSsNDPw=
 github.com/Azure/go-ntlmssp v0.1.1/go.mod h1:NYqdhxd/8aAct/s4qSYZEerdPuH1liG2/X9DiVTbhpk=
 github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e h1:4dAU9FXIyQktpoUAgOJK3OTFc/xug0PCXYCqU0FgDKI=

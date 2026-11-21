@@ -100,19 +100,6 @@ func TestCSVEscapesInvisiblePrefixes(t *testing.T) {
 	}
 }
 
-func TestCSVText(t *testing.T) {
-	for _, c := range []struct{ in, want string }{
-		{"=1+1", "'=1+1"}, {"+27821234567", "'+27821234567"}, {"-5", "'-5"}, {"@cmd", "'@cmd"},
-		{"\t=1", "'=1"}, {"\r=1", "'=1"}, {"\ufeff=1", "'=1"}, {"\x00\u200b+27", "'+27"}, {" =1", "'=1"},
-		{"\tplain", "'plain"}, {"\ufeffplain", "'plain"},
-		{`"quotes"`, `"quotes"`}, {"a,b", "a,b"}, {"a\nb", "a\nb"}, {"你好", "你好"}, {"", ""}, {"ordinary", "ordinary"},
-	} {
-		if got := csvText(c.in); got != c.want {
-			t.Errorf("csvText(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestOverrideRoutesNewRequests(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")

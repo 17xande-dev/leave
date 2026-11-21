@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
+	"github.com/17xande-dev/websec"
 )
 
 func (h *Handler) adminRoutes() []route {
@@ -179,10 +179,10 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 	cw.Write([]string{"id", "name", "department", "type", "kind", "start", "end", "ranges", "days", "half_day", "status",
 		"approver", "decided_by", "decided_at", "note", "decision_note", "submitted_at", "recorded_by"})
 	for _, q := range rs {
-		cw.Write([]string{strconv.FormatInt(q.ID, 10), csvText(q.UserName), csvText(q.Department),
-			csvText(q.TypeName), q.Kind, q.Start, q.End, rangeValue(q.Ranges), q.Days.String(), q.HalfNote(), q.Status,
-			csvText(q.ApproverName), csvText(q.DecidedBy), q.DecidedAt, csvText(q.Note),
-			csvText(q.DecisionNote), q.CreatedAt, csvText(q.RecordedBy)})
+		cw.Write([]string{strconv.FormatInt(q.ID, 10), websec.CSVCell(q.UserName), websec.CSVCell(q.Department),
+			websec.CSVCell(q.TypeName), q.Kind, q.Start, q.End, rangeValue(q.Ranges), q.Days.String(), q.HalfNote(), q.Status,
+			websec.CSVCell(q.ApproverName), websec.CSVCell(q.DecidedBy), q.DecidedAt, websec.CSVCell(q.Note),
+			websec.CSVCell(q.DecisionNote), q.CreatedAt, websec.CSVCell(q.RecordedBy)})
 	}
 	cw.Flush()
 	if err := cw.Error(); err != nil {
@@ -193,23 +193,6 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="leave-%s.csv"`, time.Now().Format("2006-01-02")))
 	w.Header().Set("Cache-Control", "no-store")
 	buf.WriteTo(w)
-}
-
-// csvText neutralises a cell a spreadsheet would evaluate. Excel and Sheets
-// treat a leading =, +, - or @ as a formula, so a leave note reading
-// "=HYPERLINK(...)" would become live on an admin's machine.
-//
-// Leading control, format (BOM, zero-width space) and space characters are
-// stripped before the check, because spreadsheet importers can discard them
-// before they detect a formula, so " =1" would still run. Anything stripped
-// is dropped and the cell gains the apostrophe whatever follows.
-func csvText(s string) string {
-	clean := strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) })
-	prefix := len(clean) != len(s)
-	if prefix || (len(clean) > 0 && strings.ContainsRune("=+-@", rune(clean[0]))) {
-		return "'" + clean
-	}
-	return s
 }
 
 func (h *Handler) AdminReassign(w http.ResponseWriter, r *http.Request) {
