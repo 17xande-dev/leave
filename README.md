@@ -634,6 +634,9 @@ gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
 `ghcr.io/17xande-dev/leave`, and swap it in behind kamal-proxy once `GET /healthz`
 answers. It refuses to run with uncommitted changes, because Kamal builds from `HEAD`.
 
+**First deploy after the move to WAL:** `kamal app stop` first, then `kamal deploy` (see
+"Known limitation" below). Later deploys need no stop.
+
 One-time setup, on your workstation:
 
 1. **`sdt-vm-docker02` in `~/.ssh/config`**, with user `it_admin` (config/deploy.yml sets the
@@ -662,7 +665,7 @@ a newer build"; images before the sqlitekit move said "newer than this binary");
 Numbered SQL migrations in `internal/db/migrations` are embedded and applied at startup
 by goose. Add each schema change as a new migration; never edit an applied migration.
 `go run . -migrate-status` reports applied/pending migrations without applying them or
-starting the server. `go run . -migrate` applies pending migrations, prints status and
+starting the server (opening the file still switches it to WAL, which is harmless). `go run . -migrate` applies pending migrations, prints status and
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
@@ -1007,6 +1010,13 @@ delete that directory (it is also the old compose `./certs`).
 **Known limitation.** During each deploy the old and new containers briefly overlap. The
 outbox worker in both may rarely run the same job twice (a duplicate email, for
 example). It is low risk and accepted.
+
+**The first deploy after the move to WAL must stop the old container first**: run
+`kamal app stop`, then `kamal deploy`. Switching the database file to WAL needs an exclusive
+lock, and while the old container is still writing, the new one can exit at startup with
+`sqlite settings not in effect ... database is locked (SQLITE_BUSY)`. It fails safe (the old
+container keeps serving and the file is untouched) but the deploy fails. Once the file is in
+WAL mode, later deploys need no stop and overlap as described above.
 
 ### 4. Public access: the shared Cloudflare Tunnel
 
