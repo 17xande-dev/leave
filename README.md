@@ -656,8 +656,8 @@ Then `make deploy`. Logs: `make logs-prod`. Other commands (`kamal app details`,
 `kamal rollback <version>`, `kamal app exec --reuse -i sh`) work as usual; `kamal config` shows
 what would be deployed.
 After later migrations ship, rolling back to a goose-enabled image older than the
-last-applied migration deliberately refuses to boot with the "newer than this binary"
-guard; this is expected protection against running code on an incompatible schema.
+last-applied migration deliberately refuses to boot with the newer-schema guard ("written by
+a newer build"; images before the sqlitekit move said "newer than this binary"); this is expected protection against running code on an incompatible schema.
 
 Numbered SQL migrations in `internal/db/migrations` are embedded and applied at startup
 by goose. Add each schema change as a new migration; never edit an applied migration.

@@ -86,10 +86,10 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if d, err := Open(path); err == nil {
 		d.Close()
 		t.Fatal("newer schema accepted")
-	} else if !strings.Contains(err.Error(), "newer than this binary") {
+	} else if !strings.Contains(err.Error(), "written by a newer build") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := Status(context.Background(), path, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "newer than this binary") {
+	if err := Status(context.Background(), path, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "written by a newer build") {
 		t.Fatalf("status on newer schema: %v", err)
 	}
 }
@@ -597,5 +597,54 @@ func TestTransactionsAreImmediate(t *testing.T) {
 	}
 	if _, err := conn.ExecContext(context.Background(), `UPDATE settings SET half_days_enabled = half_days_enabled`); err == nil {
 		t.Fatal("a second connection could write while a transaction was open")
+	}
+}
+
+// A production database was versioned by the previous build's own STRICT
+// store. goosestrict must read that table as it is (same columns, the same
+// "2006-01-02 15:04:05" stamps), apply nothing, and leave every row alone.
+func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prev.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The table exactly as the previous build created it, with its history.
+	for _, q := range []string{
+		`DROP TABLE goose_db_version`,
+		`CREATE TABLE goose_db_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version_id INTEGER NOT NULL,is_applied INTEGER NOT NULL,tstamp TEXT NOT NULL DEFAULT (datetime('now'))) STRICT`,
+		`INSERT INTO goose_db_version(version_id,is_applied,tstamp) VALUES (0,1,'2026-11-12 08:00:00')`,
+		`INSERT INTO goose_db_version(version_id,is_applied,tstamp) VALUES (1,1,'2026-11-13 08:00:00')`,
+	} {
+		if _, err := d.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for v := 2; v <= 9; v++ {
+		if _, err := d.Exec(`INSERT INTO goose_db_version(version_id,is_applied,tstamp) VALUES (?,1,'2026-11-14 08:00:00')`, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Exec(`INSERT INTO users(id,ext_id,dn,username,name,synced_at) VALUES (7,'a','a','a','A','kept')`); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+
+	d, err = Open(path)
+	if err != nil {
+		t.Fatalf("database versioned by the previous build refused: %v", err)
+	}
+	defer d.Close()
+	var rows, applied int
+	if err := d.QueryRow(`SELECT count(*), sum(is_applied) FROM goose_db_version`).Scan(&rows, &applied); err != nil || rows != 10 || applied != 10 {
+		t.Fatalf("version rows = %d applied = %d, err = %v", rows, applied, err)
+	}
+	var synced string
+	if err := d.QueryRow(`SELECT synced_at FROM users WHERE id = 7`).Scan(&synced); err != nil || synced != "kept" {
+		t.Fatalf("user row = %q, err = %v", synced, err)
+	}
+	var out bytes.Buffer
+	if err := Status(context.Background(), path, &out); err != nil || strings.Contains(out.String(), "pending") {
+		t.Fatalf("status = %q, err = %v", out.String(), err)
 	}
 }

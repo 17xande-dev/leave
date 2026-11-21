@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/17xande-dev/sqlitekit"
+	"github.com/17xande-dev/sqlitekit/goosestrict"
 	"github.com/pressly/goose/v3"
-	"github.com/pressly/goose/v3/database"
 	_ "modernc.org/sqlite"
 )
 
@@ -84,55 +84,13 @@ func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 	if err != nil {
 		return fail(err)
 	}
-	base, err := database.NewStore(database.DialectSQLite3, goose.DefaultTablename)
+	// goosestrict is goose on a STRICT version table. It also refuses a
+	// database whose version is newer than this build's last migration.
+	p, err := goosestrict.NewProvider(d, source)
 	if err != nil {
 		return fail(err)
-	}
-	// Goose's SQLite store uses a TIMESTAMP column, which SQLite STRICT rejects.
-	// Retain its version operations and adapt metadata creation/discovery/date decoding.
-	p, err := goose.NewProvider(goose.DialectCustom, d, source, goose.WithStore(strictVersionStore{base}))
-	if err != nil {
-		return fail(err)
-	}
-	current, target, err := p.GetVersions(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	if current > target {
-		return fail(fmt.Errorf("database migration version %d is newer than this binary's latest migration %d; use a newer binary", current, target))
 	}
 	return d, p, nil
-}
-
-type strictVersionStore struct{ database.Store }
-
-// Table existence must not depend on version 0 being present: adopted or
-// repaired databases can have an applied baseline without that sentinel row.
-func (s strictVersionStore) TableExists(ctx context.Context, d database.DBTxConn) (bool, error) {
-	var exists bool
-	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, s.Tablename()).Scan(&exists)
-	return exists, err
-}
-
-func (s strictVersionStore) CreateVersionTable(ctx context.Context, d database.DBTxConn) error {
-	_, err := d.ExecContext(ctx, `CREATE TABLE goose_db_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version_id INTEGER NOT NULL,is_applied INTEGER NOT NULL,tstamp TEXT NOT NULL DEFAULT (datetime('now'))) STRICT`)
-	return err
-}
-func (s strictVersionStore) GetMigration(ctx context.Context, d database.DBTxConn, version int64) (*database.GetMigrationResult, error) {
-	var timestamp string
-	var result database.GetMigrationResult
-	err := d.QueryRowContext(ctx, `SELECT tstamp,is_applied FROM goose_db_version WHERE version_id=? ORDER BY id DESC LIMIT 1`, version).Scan(&timestamp, &result.IsApplied)
-	if err == sql.ErrNoRows {
-		return nil, database.ErrVersionNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	result.Timestamp, err = time.Parse("2006-01-02 15:04:05", timestamp)
-	if err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 // Status reports pending/applied migrations without applying pending migrations.

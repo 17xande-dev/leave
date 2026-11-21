@@ -130,7 +130,7 @@ func TestMigrateUsesOpenSafeguards(t *testing.T) {
 		}
 		query, want := `DROP TABLE goose_db_version`, "predates migrations"
 		if future {
-			query, want = `INSERT INTO goose_db_version(version_id,is_applied) VALUES(10,1)`, "newer than this binary"
+			query, want = `INSERT INTO goose_db_version(version_id,is_applied) VALUES(10,1)`, "written by a newer build"
 		}
 		if _, err := d.Exec(query); err != nil {
 			t.Fatal(err)
