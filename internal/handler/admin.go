@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/outbox"
@@ -195,11 +196,18 @@ func (h *Handler) AdminRequestsCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 // csvText neutralises a cell a spreadsheet would evaluate. Excel and Sheets
-// treat a leading =, +, -, @ (and tab/CR) as a formula, so a leave note
-// reading "=HYPERLINK(...)" would become live on an admin's machine.
+// treat a leading =, +, - or @ as a formula, so a leave note reading
+// "=HYPERLINK(...)" would become live on an admin's machine.
+//
+// Leading control, format (BOM, zero-width space) and space characters are
+// stripped before the check, because spreadsheet importers can discard them
+// before they detect a formula, so " =1" would still run. Anything stripped
+// is dropped and the cell gains the apostrophe whatever follows.
 func csvText(s string) string {
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
-		return "'" + s
+	clean := strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) })
+	prefix := len(clean) != len(s)
+	if prefix || (len(clean) > 0 && strings.ContainsRune("=+-@", rune(clean[0]))) {
+		return "'" + clean
 	}
 	return s
 }

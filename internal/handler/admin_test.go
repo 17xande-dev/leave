@@ -71,6 +71,48 @@ func TestCSVEscapesFormulas(t *testing.T) {
 	}
 }
 
+// The first-byte check missed a formula hidden behind a leading space or a BOM,
+// which spreadsheet importers discard before they look for one. The handler
+// trims a submitted note but not a BOM, so a stored leading space is set
+// directly, as an older row or another writer could leave it.
+func TestCSVEscapesInvisiblePrefixes(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
+		"end": {"2026-10-12"}, "note": {"\ufeff=HYPERLINK(1)"}})
+	if _, err := hs.db.Exec(`UPDATE requests SET decision_note = ?`, " =1"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := hs.signIn("hr").Get(hs.srv.URL + "/admin/requests.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	recs, err := csv.NewReader(res.Body).ReadAll()
+	if err != nil || len(recs) != 2 {
+		t.Fatalf("csv = %d records, %v", len(recs), err)
+	}
+	row := strings.Join(recs[1], "|")
+	for _, want := range []string{"|'=HYPERLINK(1)|", "|'=1|"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("row is missing escaped %q: %s", want, row)
+		}
+	}
+}
+
+func TestCSVText(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"=1+1", "'=1+1"}, {"+27821234567", "'+27821234567"}, {"-5", "'-5"}, {"@cmd", "'@cmd"},
+		{"\t=1", "'=1"}, {"\r=1", "'=1"}, {"\ufeff=1", "'=1"}, {"\x00\u200b+27", "'+27"}, {" =1", "'=1"},
+		{"\tplain", "'plain"}, {"\ufeffplain", "'plain"},
+		{`"quotes"`, `"quotes"`}, {"a,b", "a,b"}, {"a\nb", "a\nb"}, {"你好", "你好"}, {"", ""}, {"ordinary", "ordinary"},
+	} {
+		if got := csvText(c.in); got != c.want {
+			t.Errorf("csvText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestOverrideRoutesNewRequests(t *testing.T) {
 	hs := newHarness(t)
 	hr := hs.signIn("hr")
