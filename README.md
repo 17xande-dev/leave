@@ -1020,7 +1020,7 @@ example). It is low risk and accepted.
 **The first deploy after the move to WAL must stop the old container first**: run
 `kamal app stop`, then `kamal deploy`. Switching the database file to WAL needs an exclusive
 lock, and while the old container is still writing, the new one can exit at startup with
-`sqlite settings not in effect ... database is locked (SQLITE_BUSY)`. It fails safe (the old
+`sqlite settings: sqlitekit: check: database is locked (5) (SQLITE_BUSY)`. It fails safe (the old
 container keeps serving and the file is untouched) but the deploy fails. Once the file is in
 WAL mode, later deploys need no stop and overlap as described above.
 
