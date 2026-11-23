@@ -31,6 +31,11 @@ var checkSettings = sqlitekit.Check
 
 // Open opens (creating if needed) the database and applies embedded migrations.
 func Open(path string) (*sql.DB, error) {
+	release, err := lockDatabase(path)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	d, p, err := openProvider(path)
 	if err != nil {
 		return nil, err
@@ -44,6 +49,37 @@ func Open(path string) (*sql.DB, error) {
 	return d, nil
 }
 
+// lockMigrations is a seam only so a test can prove the race the lock closes.
+var lockMigrations = func(ctx context.Context, path string) (func() error, error) {
+	return sqlitekit.MigrationLock(ctx, path)
+}
+
+// lockDatabase takes sqlitekit's cross-process migration lock for the database at
+// path. Every caller of openProvider takes it first and holds it until it has
+// finished with the schema: the lock must precede the first query (the first
+// connection of a fresh file is not covered by busy_timeout), and even Status
+// writes, since Check switches the file to WAL.
+func lockDatabase(path string) (release func() error, err error) {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve database path: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	release, err = lockMigrations(ctx, abs)
+	if err != nil {
+		return nil, fmt.Errorf("lock database for migration: %w", err)
+	}
+	return release, nil
+}
+
+// openProvider opens the database and builds the migration provider. The caller
+// holds the lock from lockDatabase.
 func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -95,6 +131,11 @@ func openProvider(path string) (*sql.DB, *goose.Provider, error) {
 
 // Status reports pending/applied migrations without applying pending migrations.
 func Status(ctx context.Context, path string, w io.Writer) error {
+	release, err := lockDatabase(path)
+	if err != nil {
+		return err
+	}
+	defer release()
 	d, p, err := openProvider(path)
 	if err != nil {
 		return err
@@ -115,6 +156,11 @@ func Migrate(ctx context.Context, path string, w io.Writer) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("refusing to migrate database %s: file must already exist: %w", path, err)
 	}
+	release, err := lockDatabase(path)
+	if err != nil {
+		return err
+	}
+	defer release()
 	d, p, err := openProvider(path)
 	if err != nil {
 		return err

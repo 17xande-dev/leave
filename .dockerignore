@@ -3,6 +3,7 @@
 *.db
 *.db-wal
 *.db-shm
+*.migrate-lock
 .env
 /bin/
 .git

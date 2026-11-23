@@ -953,7 +953,10 @@ ssh sdt-vm-docker02 'docker cp "$(docker ps -q -f name=leave-web | head -n1):/da
 `.backup` uses SQLite's backup API, because a plain `cp` of a live database can capture a
 torn state. The database runs in WAL mode, so **while the app runs it is three files**
 (`leave.db`, `leave.db-wal`, `leave.db-shm`): never `cp`, `docker cp` or tar the volume of a
-running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first.
+running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first. A fourth file,
+`leave.db.migrate-lock`, sits beside them: startup, `-migrate` and `-migrate-status` take an
+exclusive lock on it so two processes opening the database together cannot both migrate it.
+It is empty; do not delete it while the app runs.
 
 **Automatic daily backups.** At startup and then daily the app writes a `VACUUM INTO` copy of the
 database to `/data/backups/leave-YYYY-MM-DD.db` (the date is the UTC day), one per day,

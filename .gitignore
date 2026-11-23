@@ -4,6 +4,7 @@
 *.db
 *.db-wal
 *.db-shm
+*.migrate-lock
 
 # Secrets
 .env
