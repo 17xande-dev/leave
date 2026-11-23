@@ -680,3 +680,49 @@ func TestCSVHasHalfDayColumn(t *testing.T) {
 		t.Fatalf("half_day column = %v", got)
 	}
 }
+
+// Each text column of the export that can carry a person's name, department or
+// the recorder's name has its own websec.CSVCell call; a note-only test would stay
+// green if one of them were dropped. Directory-sourced values are as hostile as
+// anything typed, so each column gets a formula of its own, checked by header name.
+func TestCSVEscapesNameDepartmentAndRecordedBy(t *testing.T) {
+	hs := newHarness(t)
+	staff := hs.signIn("staff1")
+	hr := hs.signIn("hr")
+	hs.post(staff, "/leave", url.Values{"type": {hs.typeID("annual")}, "start": {"2026-10-12"},
+		"end": {"2026-10-12"}, "note": {"plain"}})
+	// Set directly, after both have signed in (sign-in refreshes a user from the
+	// directory): the person's name and department, and a different user as the
+	// admin who recorded the leave.
+	for _, q := range []string{
+		`UPDATE users SET name = '=cmd|name', department = '@dept' WHERE username LIKE '%staff1'`,
+		`UPDATE users SET name = '+recorder' WHERE username LIKE '%hr'`,
+		`UPDATE requests SET recorded_by_id = (SELECT id FROM users WHERE username LIKE '%hr')`,
+	} {
+		if _, err := hs.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	res, err := hr.Get(hs.srv.URL + "/admin/requests.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	rows, err := csv.NewReader(res.Body).ReadAll()
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("csv = %d rows, %v", len(rows), err)
+	}
+	col := map[string]string{}
+	for i, h := range rows[0] {
+		col[h] = rows[1][i]
+	}
+	for header, want := range map[string]string{
+		"name":        "'=cmd|name",
+		"department":  "'@dept",
+		"recorded_by": "'+recorder",
+	} {
+		if col[header] != want {
+			t.Errorf("column %s = %q, want %q", header, col[header], want)
+		}
+	}
+}

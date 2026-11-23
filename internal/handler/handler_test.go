@@ -218,6 +218,24 @@ func TestLoginFlow(t *testing.T) {
 	}
 }
 
+// The helper tests above call safeNext directly; this goes through POST /login, so
+// a handler that redirected to the raw next field (or to something other than
+// safeNext's answer) fails. A successful sign-in with a hostile next must land on
+// the fallback, never on another host and never back on the sign-in page.
+func TestLoginRefusesHostileNext(t *testing.T) {
+	for _, next := range []string{"/\t/evil.example", "//evil.example", "/%6cogin", "https://evil.example/", "/login"} {
+		hs := newHarness(t)
+		r, _ := hs.post(hs.client(), "/login", url.Values{"username": {`EXAMPLE\Staff1`}, "password": {"x"}, "next": {next}})
+		if r.StatusCode != http.StatusSeeOther {
+			t.Errorf("next %q: sign-in answered %d, want 303", next, r.StatusCode)
+			continue
+		}
+		if loc := r.Header.Get("Location"); loc != "/" {
+			t.Errorf("next %q: redirected to %q, want the fallback %q", next, loc, "/")
+		}
+	}
+}
+
 // safeNext and safePath are thin wrappers over websec.SafeRedirect, which owns
 // the algorithm and its own table. This pins the wiring: the options leave
 // passes (Deny "/login" for safeNext only, "/" as the fallback), one hostile
