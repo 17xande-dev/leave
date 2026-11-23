@@ -67,6 +67,65 @@ func TestMalformedLeaveFormRejectedBeforeCSRFParse(t *testing.T) {
 	}
 }
 
+func TestAuthCookieAttributesThroughRoutes(t *testing.T) {
+	for _, secure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("secure=%t", secure), func(t *testing.T) {
+			e := newE2EConfig(t, func(cfg *config.Config) { cfg.CookieSecure = secure })
+			b := e.browser()
+			cookie := func(res *http.Response, name string) *http.Cookie {
+				t.Helper()
+				var found *http.Cookie
+				for _, c := range res.Cookies() {
+					if c.Name == name {
+						if found != nil {
+							t.Fatalf("%s %s sets %s more than once", res.Request.Method, res.Request.URL.Path, name)
+						}
+						found = c
+					}
+				}
+				if found == nil {
+					t.Fatalf("%s %s did not set %s", res.Request.Method, res.Request.URL.Path, name)
+				}
+				if found.Path != "/" || !found.HttpOnly || found.SameSite != http.SameSiteLaxMode || found.Secure != secure {
+					t.Fatalf("%s %s %s attributes: Path=%q HttpOnly=%t SameSite=%d Secure=%t; want /, true, Lax, %t",
+						res.Request.Method, res.Request.URL.Path, name, found.Path, found.HttpOnly, found.SameSite, found.Secure, secure)
+				}
+				return found
+			}
+
+			res, page := b.get("/login")
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("GET /login: %d, want 200", res.StatusCode)
+			}
+			if c := cookie(res, "csrf_token"); c.Value == "" {
+				t.Fatal("GET /login set an empty CSRF cookie")
+			}
+			f := fields(page)
+			f.Set("username", "staff1")
+			f.Set("password", "anything")
+			res, _ = b.post("/login", f)
+			if res.StatusCode != http.StatusSeeOther {
+				t.Fatalf("POST /login: %d, want 303", res.StatusCode)
+			}
+			if c := cookie(res, "leave_session"); c.Value == "" || c.MaxAge != 0 || !c.Expires.IsZero() || c.RawExpires != "" {
+				t.Fatalf("login must set a nonempty browser-session cookie: MaxAge=%d Expires=%q", c.MaxAge, c.RawExpires)
+			}
+
+			res, page = b.get("/")
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("signed-in GET /: %d, want 200", res.StatusCode)
+			}
+			res, _ = b.post("/logout", url.Values{"csrf_token": {fields(page).Get("csrf_token")}})
+			if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/login?notice=signed-out" {
+				t.Fatalf("POST /logout: status=%d location=%q", res.StatusCode, res.Header.Get("Location"))
+			}
+			if c := cookie(res, "leave_session"); c.Value != "" || c.MaxAge >= 0 || !c.Expires.IsZero() || c.RawExpires != "" {
+				t.Fatalf("logout must clear the cookie using Max-Age: empty=%t MaxAge=%d Expires=%q", c.Value == "", c.MaxAge, c.RawExpires)
+			}
+		})
+	}
+}
+
 // e2e is the whole app: the real mux and middleware stack (CSRF, security
 // headers) over a real database and the fake directory, served by httptest.
 type e2e struct {
@@ -112,6 +171,10 @@ func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 	if adjust != nil {
 		adjust(&cfg)
 	}
+	if cfg.CookieSecure {
+		// Use TLS so the cookie jar can send Secure cookies on the return trip.
+		cfg.BaseURL = "https://" + srv.Listener.Addr().String()
+	}
 	svc.OnEvent(notify.New(cfg.BaseURL).Hook) // as main wires it, so actions leave their mail and calendar jobs
 	jobs := outbox.NewStore(d)
 	oa, mcpHandler, err := assistant(cfg, d, us, svc, jobs)
@@ -124,7 +187,11 @@ func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 		t.Fatal(err)
 	}
 	srv.Config.Handler = app
-	srv.Start()
+	if cfg.CookieSecure {
+		srv.StartTLS()
+	} else {
+		srv.Start()
+	}
 	t.Cleanup(srv.Close)
 	return &e2e{t: t, base: cfg.BaseURL, db: d, srv: srv}
 }
@@ -141,7 +208,7 @@ type browser struct {
 
 func (e *e2e) browser() *browser {
 	jar, _ := cookiejar.New(nil)
-	return &browser{t: e.t, base: e.base, c: &http.Client{Jar: jar,
+	return &browser{t: e.t, base: e.base, c: &http.Client{Jar: jar, Transport: e.srv.Client().Transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 
