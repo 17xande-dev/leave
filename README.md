@@ -956,7 +956,10 @@ torn state. The database runs in WAL mode, so **while the app runs it is three f
 running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first. A fourth file,
 `leave.db.migrate-lock`, sits beside them: startup, `-migrate` and `-migrate-status` take an
 exclusive lock on it so two processes opening the database together cannot both migrate it.
-It is empty; do not delete it while the app runs. Run migrating commands as the image user (e.g. through `kamal app exec`), never as root: a root-created `leave.db.migrate-lock` (0600) blocks the app user from migrating.
+It is empty; do not delete it while the app runs. Run migrating commands as the image user (e.g.
+through `kamal app exec`), never as root: every open takes `leave.db.migrate-lock` read-write, so a
+root-created (0600) lock file stops the app starting on its next restart, and makes the status
+command and the cmd tools fail with permission denied.
 
 **Automatic daily backups.** At startup and then daily the app writes a `VACUUM INTO` copy of the
 database to `/data/backups/leave-YYYY-MM-DD.db` (the date is the UTC day), one per day,
