@@ -35,8 +35,7 @@ type Config struct {
 	// CSRF is the policy the app's mux is wrapped in. It is required, and
 	// passed in rather than set later: a handler that never got it would sign
 	// people in without renewing their token, silently.
-	CSRF       tokenRenewer
-	SessionTTL time.Duration
+	CSRF tokenRenewer
 	// ClientIP decides which address a request came from, for the sign-in IP limit. The zero value is the peer.
 	ClientIP clientip.Source
 }

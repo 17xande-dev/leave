@@ -34,7 +34,6 @@ type Config struct {
 	// CookieSecure is true unless the app is served over plain http, which is
 	// only ever local development.
 	CookieSecure bool
-	SessionTTL   time.Duration
 
 	// TrustedProxies are the CIDRs allowed to set X-Forwarded-For, so the login
 	// rate limit keys on the real client rather than the proxy.
@@ -111,6 +110,8 @@ func DatabasePath() string {
 	return getenv("DB_PATH", "data/leave.db")
 }
 
+// Load reads the environment. SESSION_TTL is retired: session lifetime comes
+// from websec's session.Default, and a leftover SESSION_TTL is ignored.
 func Load() (Config, error) {
 	c := Config{
 		ListenAddr:     getenv("LISTEN_ADDR", ":8080"),
@@ -142,9 +143,6 @@ func Load() (Config, error) {
 	}
 
 	var err error
-	if c.SessionTTL, err = duration("SESSION_TTL", 8*time.Hour); err != nil {
-		return Config{}, err
-	}
 	if c.Directory.SyncInterval, err = duration("DIRECTORY_SYNC_INTERVAL", time.Hour); err != nil {
 		return Config{}, err
 	}

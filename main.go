@@ -207,7 +207,6 @@ func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
 	h, err := handler.New(handler.Config{
 		CSRF:         protect,
 		CookieSecure: cfg.CookieSecure,
-		SessionTTL:   cfg.SessionTTL,
 		ClientIP:     source,
 	}, d)
 	if err != nil {

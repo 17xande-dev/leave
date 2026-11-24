@@ -94,3 +94,17 @@ func TestBackupSettings(t *testing.T) {
 		t.Fatal("BACKUP_KEEP=many accepted")
 	}
 }
+
+// SESSION_TTL was a setting until session lifetime moved into websec
+// (2 h idle, 12 h absolute). An old .env or deploy file may still carry it,
+// so it must be ignored whatever it holds: failing startup over a setting that
+// does nothing would turn a harmless leftover into an outage.
+func TestRetiredSessionTTLIgnored(t *testing.T) {
+	setenv(t, map[string]string{"DIRECTORY": "fake", "COOKIE_SECURE": "false"})
+	for _, v := range []string{"8h", "not-a-duration", "-5m", "0"} {
+		t.Setenv("SESSION_TTL", v)
+		if _, err := Load(); err != nil {
+			t.Fatalf("SESSION_TTL=%q must be ignored, Load failed: %v", v, err)
+		}
+	}
+}

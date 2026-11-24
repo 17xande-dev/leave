@@ -174,7 +174,7 @@ func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 
 	// The base URL is the listener's address, so it has to exist first.
 	srv := httptest.NewUnstartedServer(nil)
-	cfg := config.Config{CookieSecure: false, SessionTTL: time.Hour, Location: time.UTC,
+	cfg := config.Config{CookieSecure: false, Location: time.UTC,
 		BaseURL: "http://" + srv.Listener.Addr().String()}
 	if adjust != nil {
 		adjust(&cfg)

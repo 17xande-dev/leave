@@ -79,7 +79,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := New(Config{SessionTTL: time.Hour, CSRF: noRenew{}}, Deps{Users: us, Sessions: sessions, Directory: dir,
+	h, err := New(Config{CSRF: noRenew{}}, Deps{Users: us, Sessions: sessions, Directory: dir,
 		Leave: svc, Outbox: jobs, TeamsEnabled: true, OAuth: oa,
 		MCP: mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: oa.Verify,
 			ResourceMetadataURL: oa.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})})
