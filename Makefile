@@ -40,7 +40,8 @@ test:
 
 ## check: the gate before a commit (tests with -race, then the vulnerability scan)
 # The skip count is printed because the live LDAP/Graph tests are opt-in and
-# skip silently otherwise; three skips are expected (two opt-in live tests, and the session suite's password-change case, which a directory app opts out of).
+# skip silently otherwise; two skips are expected. The session suite's
+# password-change case passes with a logged reason because LDAP handles it.
 check: fmt-check
 	go vet ./...
 	@out="$$(mktemp)"; trap 'rm -f "$$out"' EXIT; \
