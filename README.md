@@ -681,7 +681,8 @@ One-time setup, on your workstation:
 3. **A local `.env`** (git-ignored) copied from `.env.example` and filled in. `.kamal/secrets`
    reads the LDAP and Graph values from it with `grep`, so run `make` / `kamal` from the repo
    root. The non-secret settings (`BASE_URL`, `COOKIE_SECURE`, `TRUSTED_PROXIES`, `TZ_NAME`)
-   are in `config/deploy.yml`. Values must be unquoted, with no inline `# comment`, no
+   are in `config/deploy.yml`. Session lifetime (2 h idle, 12 h absolute) is not configurable; a
+   leftover `SESSION_TTL` from an older `.env` is ignored. Values must be unquoted, with no inline `# comment`, no
    trailing spaces, no duplicate keys and no `$`: Kamal's secrets parser would otherwise
    rewrite them silently. `bin/check-env` checks this (and that required keys are set); it
    runs from `make deploy` and from the `.kamal/hooks/pre-connect` hook, so a raw
