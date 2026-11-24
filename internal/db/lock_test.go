@@ -46,8 +46,8 @@ func TestConcurrentOpensOfAFreshDatabase(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), count(DISTINCT version_id) FROM goose_db_version`).Scan(&rows, &distinct); err != nil {
 		t.Fatal(err)
 	}
-	// Version 0 and migrations 1..9, each recorded once.
-	if rows != distinct || rows != 10 {
-		t.Errorf("goose_db_version has %d rows, %d distinct versions; want 10, each once", rows, distinct)
+	// Version 0 and migrations 1..10, each recorded once.
+	if rows != distinct || rows != 11 {
+		t.Errorf("goose_db_version has %d rows, %d distinct versions; want 11, each once", rows, distinct)
 	}
 }

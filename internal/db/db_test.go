@@ -56,7 +56,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n0010 pending 0010_session_last_seen.sql\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -68,7 +68,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -79,7 +79,7 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (10, 1)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (11, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -290,7 +290,7 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
 			t.Fatal(err)
 		}
-		if version != 9 || applied != 1 || rows != 10 {
+		if version != 10 || applied != 1 || rows != 11 {
 			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
 		}
 		d.Close()
@@ -316,7 +316,7 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
 		t.Fatal(err)
 	}
-	if count != 9 || version != 9 || applied != 9 {
+	if count != 10 || version != 10 || applied != 10 {
 		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
 	}
 }
@@ -385,7 +385,7 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }
@@ -422,6 +422,10 @@ func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 		if name == "requests" {
 			// Audit additions and the retired legacy id are checked by their migrations.
 			columnsSQL = "id,user_id,type_id,kind,cancels_request_id,start_date,end_date,days_x100,half_start,half_end,cycle_start,note,status,approver_id,decided_by_id,decided_at,decision_note,created_at,shutdown_part_id,escalate,allow_negative,recorded_by_id,removed_by_id,removed_at"
+		}
+		if name == "sessions" {
+			// last_seen is an additive column, checked by its migration test.
+			columnsSQL = "token_hash,user_id,created_at,expires_at"
 		}
 		if name == "settings" {
 			// Compare every baseline field across adoption plus the v2 ADD COLUMN;
@@ -620,6 +624,10 @@ func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The previous build's schema has no sessions.last_seen: this boot applies 0010 on top of it.
+	if _, err := d.Exec(`ALTER TABLE sessions DROP COLUMN last_seen`); err != nil {
+		t.Fatal(err)
+	}
 	for v := 2; v <= 9; v++ {
 		if _, err := d.Exec(`INSERT INTO goose_db_version(version_id,is_applied,tstamp) VALUES (?,1,'2026-11-14 08:00:00')`, v); err != nil {
 			t.Fatal(err)
@@ -636,7 +644,7 @@ func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
 	}
 	defer d.Close()
 	var rows, applied int
-	if err := d.QueryRow(`SELECT count(*), sum(is_applied) FROM goose_db_version`).Scan(&rows, &applied); err != nil || rows != 10 || applied != 10 {
+	if err := d.QueryRow(`SELECT count(*), sum(is_applied) FROM goose_db_version`).Scan(&rows, &applied); err != nil || rows != 11 || applied != 11 {
 		t.Fatalf("version rows = %d applied = %d, err = %v", rows, applied, err)
 	}
 	var synced string

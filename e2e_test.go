@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/17xande-dev/websec/session"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
@@ -188,7 +189,11 @@ func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := newApp(cfg, handler.Deps{Users: us, Sessions: auths.NewSessions(d, time.Hour), Directory: dir,
+	sessions, err := auths.NewSessions(d, session.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := newApp(cfg, handler.Deps{Users: us, Sessions: sessions, Directory: dir,
 		Leave: svc, Outbox: jobs, OAuth: oa, MCP: mcpHandler})
 	if err != nil {
 		t.Fatal(err)

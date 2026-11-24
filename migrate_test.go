@@ -33,7 +33,7 @@ func TestMigrateCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 				// Recreate the pre-0002 schema to exercise a real upgrade.
-				if _, err := d.Exec(`BEGIN; DROP TABLE approval_delegations; ALTER TABLE requests DROP COLUMN decided_for_id; ALTER TABLE request_steps DROP COLUMN on_behalf_of_id; DROP TABLE request_corrections; DROP TABLE request_ranges; ALTER TABLE requests ADD COLUMN calendar_event_id TEXT NOT NULL DEFAULT ''; ALTER TABLE requests DROP COLUMN halves_set_at; ALTER TABLE requests DROP COLUMN halves_set_by_id; ALTER TABLE settings DROP COLUMN half_days_enabled; ALTER TABLE leave_types DROP COLUMN show_balance; ALTER TABLE leave_types DROP COLUMN staff_can_apply; DELETE FROM goose_db_version WHERE version_id>=2; COMMIT;`); err != nil {
+				if _, err := d.Exec(`BEGIN; ALTER TABLE sessions DROP COLUMN last_seen; DROP TABLE approval_delegations; ALTER TABLE requests DROP COLUMN decided_for_id; ALTER TABLE request_steps DROP COLUMN on_behalf_of_id; DROP TABLE request_corrections; DROP TABLE request_ranges; ALTER TABLE requests ADD COLUMN calendar_event_id TEXT NOT NULL DEFAULT ''; ALTER TABLE requests DROP COLUMN halves_set_at; ALTER TABLE requests DROP COLUMN halves_set_by_id; ALTER TABLE settings DROP COLUMN half_days_enabled; ALTER TABLE leave_types DROP COLUMN show_balance; ALTER TABLE leave_types DROP COLUMN staff_can_apply; DELETE FROM goose_db_version WHERE version_id>=2; COMMIT;`); err != nil {
 					d.Close()
 					t.Fatal(err)
 				}
@@ -56,7 +56,7 @@ func TestMigrateCommand(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.Contains(string(out), "migrating "+path+": 1 -> 9\n") {
+			if err != nil || !strings.Contains(string(out), "migrating "+path+": 1 -> 10\n") {
 				t.Fatalf("existing DB: err=%v output=%s", err, out)
 			}
 			d, err := sql.Open("sqlite", path)
@@ -65,7 +65,7 @@ func TestMigrateCommand(t *testing.T) {
 			}
 			defer d.Close()
 			var version, enabled int
-			if err := d.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil || version != 9 {
+			if err := d.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version); err != nil || version != 10 {
 				t.Fatalf("version=%d err=%v", version, err)
 			}
 			if err := d.QueryRow(`SELECT half_days_enabled FROM settings WHERE id=1`).Scan(&enabled); err != nil || enabled != 0 {

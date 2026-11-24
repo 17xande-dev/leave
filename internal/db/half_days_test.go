@@ -59,12 +59,12 @@ func TestHalfDaysMigration(t *testing.T) {
 			if err := Migrate(ctx, path, &out); err != nil {
 				t.Fatal(err)
 			}
-			const applied = "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n"
+			const applied = "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n"
 			beforeVersion := 0
 			if fromV1 {
 				beforeVersion = 1
 			}
-			if out.String() != fmt.Sprintf("migrating %s: %d -> 9\n", path, beforeVersion)+applied {
+			if out.String() != fmt.Sprintf("migrating %s: %d -> 10\n", path, beforeVersion)+applied {
 				t.Fatalf("migrate status: %q", out.String())
 			}
 			assertHalfDaysOff(t, d)
@@ -78,6 +78,9 @@ func TestHalfDaysMigration(t *testing.T) {
 				t.Fatal(err)
 			}
 			before = applicationRows(t, d)
+			if _, err := p.Down(ctx); err != nil {
+				t.Fatal(err)
+			} // v10 session last_seen
 			if _, err := p.Down(ctx); err != nil {
 				t.Fatal(err)
 			} // v9 approval delegations
@@ -114,7 +117,7 @@ func TestHalfDaysMigration(t *testing.T) {
 				t.Fatal("Down/Up changed existing application data")
 			}
 			out.Reset()
-			if err := Migrate(ctx, path, &out); err != nil || out.String() != fmt.Sprintf("migrating %s: 9 -> 9\n", path)+applied {
+			if err := Migrate(ctx, path, &out); err != nil || out.String() != fmt.Sprintf("migrating %s: 10 -> 10\n", path)+applied {
 				t.Fatalf("repeated migrate: %q, err=%v", out.String(), err)
 			}
 		})
@@ -130,7 +133,7 @@ func TestMigrateUsesOpenSafeguards(t *testing.T) {
 		}
 		query, want := `DROP TABLE goose_db_version`, "predates migrations"
 		if future {
-			query, want = `INSERT INTO goose_db_version(version_id,is_applied) VALUES(10,1)`, "written by a newer build"
+			query, want = `INSERT INTO goose_db_version(version_id,is_applied) VALUES(11,1)`, "written by a newer build"
 		}
 		if _, err := d.Exec(query); err != nil {
 			t.Fatal(err)

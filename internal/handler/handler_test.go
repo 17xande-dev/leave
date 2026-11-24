@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/17xande-dev/websec/session"
+
 	"github.com/17xande-dev/leave/internal/auth"
 	"github.com/17xande-dev/leave/internal/dbtest"
 	"github.com/17xande-dev/leave/internal/directory"
@@ -73,7 +75,11 @@ func newHarness(t *testing.T) *harness {
 	}
 	jobs := outbox.NewStore(d)
 	oa := oauth.New(d, oauth.Config{BaseURL: "http://leave.test"})
-	h, err := New(Config{SessionTTL: time.Hour, CSRF: noRenew{}}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir,
+	sessions, err := auth.NewSessions(d, session.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := New(Config{SessionTTL: time.Hour, CSRF: noRenew{}}, Deps{Users: us, Sessions: sessions, Directory: dir,
 		Leave: svc, Outbox: jobs, TeamsEnabled: true, OAuth: oa,
 		MCP: mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: oa.Verify,
 			ResourceMetadataURL: oa.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})})

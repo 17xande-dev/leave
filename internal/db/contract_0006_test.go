@@ -424,7 +424,7 @@ func TestContract0006MigrateCommand(t *testing.T) {
 	cmd.Env = append(os.Environ(), "DB_PATH="+path)
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
-	if err != nil || !strings.Contains(string(out), "migrating "+path+": 5 -> 9\n") ||
+	if err != nil || !strings.Contains(string(out), "migrating "+path+": 5 -> 10\n") ||
 		!strings.Contains(string(out), "0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n") {
 		t.Fatalf("v5 rehearsal: %v\n%s", err, out)
 	}

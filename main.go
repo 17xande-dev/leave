@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/17xande-dev/websec/csrf"
+	"github.com/17xande-dev/websec/session"
 
 	"github.com/17xande-dev/leave/internal/auth"
 	"github.com/17xande-dev/leave/internal/config"
@@ -82,7 +83,11 @@ func serve(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	userStore := users.NewStore(database)
-	sessions := auth.NewSessions(database, cfg.SessionTTL)
+	// Sessions end after 2 hours unused or 12 hours in all, whichever comes first.
+	sessions, err := auth.NewSessions(database, session.Default)
+	if err != nil {
+		return err
+	}
 	leaveSvc := leave.New(database, userStore, leave.Config{
 		Location: cfg.Location,
 	})
