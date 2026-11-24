@@ -8,13 +8,13 @@ import (
 	"flag"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
-	"github.com/justinas/nosurf"
+	"github.com/17xande-dev/websec/csrf"
 
 	"github.com/17xande-dev/leave/internal/auth"
 	"github.com/17xande-dev/leave/internal/config"
@@ -114,9 +114,6 @@ func serve(ctx context.Context, cfg config.Config) error {
 	leaveSvc.OnEvent(notify.New(cfg.BaseURL).Hook)
 	leaveSvc.OnCommit(worker.Kick)
 
-	if cfg.BaseURL == "" {
-		slog.Warn("BASE_URL is empty: AI assistants cannot sign in, and emails carry no links")
-	}
 	oauthSrv, mcpHandler, err := assistant(cfg, database, userStore, leaveSvc, jobs)
 	if err != nil {
 		return err
@@ -198,7 +195,12 @@ func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	protect, err := newCSRF(cfg)
+	if err != nil {
+		return nil, err
+	}
 	h, err := handler.New(handler.Config{
+		CSRF:         protect,
 		CookieSecure: cfg.CookieSecure,
 		SessionTTL:   cfg.SessionTTL,
 		ClientIP:     source,
@@ -208,7 +210,7 @@ func newApp(cfg config.Config, d handler.Deps) (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	h.Routes(mux)
-	return middleware.Logging(middleware.SecurityHeaders(middleware.MaxBody(csrf(mux, cfg)))), nil
+	return middleware.Logging(middleware.SecurityHeaders(protect.Handler(mux))), nil
 }
 
 func newDirectory(c config.Directory) (directory.Directory, error) {
@@ -288,7 +290,7 @@ func every(ctx context.Context, d time.Duration, f func()) {
 	}
 }
 
-// csrfExempt are the endpoints that skip the token check, because their
+// csrfExemptPaths are the endpoints that skip the token check, because their
 // callers are programs with no cookie to ride: /mcp takes a bearer token, the
 // OAuth endpoints take their own secrets (a code with its PKCE verifier, a
 // refresh token) or nothing at all (registration), and the metadata is public.
@@ -296,7 +298,10 @@ func every(ctx context.Context, d time.Duration, f func()) {
 // code verifier it does not have, which is all the token check defends against.
 // /oauth/authorize is deliberately absent: it is a form in a signed-in browser
 // and keeps its CSRF token. TestCSRFExemptions pins this list.
-var csrfExempt = []string{
+//
+// The match is on the exact path, so any other spelling of one of these is not
+// exempt: it fails closed, into the token check.
+var csrfExemptPaths = []string{
 	"/mcp",
 	"/oauth/token",
 	"/oauth/register",
@@ -306,22 +311,16 @@ var csrfExempt = []string{
 	"/.well-known/oauth-protected-resource/mcp",
 }
 
-// csrf wraps the mux in nosurf's token check plus its same-origin check.
-func csrf(next http.Handler, cfg config.Config) http.Handler {
-	n := nosurf.New(next)
-	n.SetBaseCookie(http.Cookie{Path: "/", HttpOnly: true, Secure: cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
-	n.SetFailureHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slog.Warn("csrf refused", "path", r.URL.Path, "reason", nosurf.Reason(r))
-		http.Error(w, "This form has expired. Go back, reload the page and try again.", http.StatusForbidden)
-	}))
-	// nosurf compares Origin with the request's Host assuming https. Behind a
-	// TLS-terminating proxy r.TLS is nil, so CookieSecure is the honest signal
-	// for "the browser is on https".
-	n.ExemptPaths(csrfExempt...)
-	n.SetIsTLSFunc(func(*http.Request) bool { return cfg.CookieSecure })
-	if u, err := url.Parse(cfg.BaseURL); err == nil && u.Host != "" {
-		own := u.Scheme + "://" + u.Host
-		n.SetIsAllowedOriginFunc(func(o *url.URL) bool { return o.Scheme+"://"+o.Host == own })
-	}
-	return n
+// newCSRF builds the CSRF policy: the token and same-origin check, with the
+// body cap in front of it (nosurf parses the form to find the token, so the cap
+// has to come first). BASE_URL is the app's own origin; an empty or malformed
+// one is a startup error. Behind a TLS-terminating proxy r.TLS is nil, so
+// COOKIE_SECURE is the honest signal for "the browser is on https".
+func newCSRF(cfg config.Config) (*csrf.Protect, error) {
+	return csrf.New(csrf.Config{
+		Origin:   cfg.BaseURL,
+		Insecure: !cfg.CookieSecure,
+		MaxBody:  middleware.MaxFormBytes,
+		Exempt:   func(r *http.Request) bool { return slices.Contains(csrfExemptPaths, r.URL.Path) },
+	})
 }

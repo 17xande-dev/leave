@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,15 +13,34 @@ import (
 	"github.com/17xande-dev/leave/internal/middleware"
 )
 
+// csrfWrap is the CSRF layer as main builds it (newCSRF), around a stub.
+func csrfWrap(t *testing.T, next http.Handler) http.Handler {
+	t.Helper()
+	p, err := newCSRF(config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p.Handler(next)
+}
+
 func TestTokenUnreadableBodyReturnsOAuthError(t *testing.T) {
 	e := newE2E(t)
 	for _, tc := range []struct{ name, body string }{
 		{"malformed", "grant_type=refresh_token&bad=%ZZ"},
 		{"token cap", "padding=" + strings.Repeat("x", 64<<10)},
-		{"outer cap", "padding=" + strings.Repeat("x", 2*middleware.MaxFormBytes)},
+		// Streamed (no declared length): the kit's reader cap is not reached
+		// before the token endpoint's own tighter cap, so OAuth still answers.
+		// A declared over-cap body is refused by the kit first, see
+		// TestExemptDeclaredOversizeIsRefusedByKit.
+		{"outer cap streamed", "padding=" + strings.Repeat("x", 2*middleware.MaxFormBytes)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := http.Post(e.base+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(tc.body))
+			req, err := http.NewRequest("POST", e.base+"/oauth/token", io.NopCloser(strings.NewReader(tc.body)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			res, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +73,7 @@ func TestTokenUnreadableBodyReturnsOAuthError(t *testing.T) {
 // or a cross-site page could sign a visitor in as someone else.
 func TestCSRFRefusesTokenlessPost(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	h := csrfWrap(t, ok)
 
 	req := httptest.NewRequest("POST", "http://leave.test/login", strings.NewReader(url.Values{"username": {"a"}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -76,7 +96,7 @@ func TestCSRFRefusesTokenlessPost(t *testing.T) {
 // cross-site page could flip a visitor's theme.
 func TestCSRFRefusesTokenlessThemePost(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusSeeOther) })
-	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	h := csrfWrap(t, ok)
 
 	req := httptest.NewRequest("POST", "http://leave.test/theme", strings.NewReader(url.Values{"theme": {"dark"}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -95,12 +115,12 @@ func TestCSRFExemptions(t *testing.T) {
 	want := []string{"/mcp", "/oauth/token", "/oauth/register", "/oauth/revoke",
 		"/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource",
 		"/.well-known/oauth-protected-resource/mcp"}
-	if strings.Join(csrfExempt, ",") != strings.Join(want, ",") {
-		t.Fatalf("csrfExempt = %v, want %v", csrfExempt, want)
+	if strings.Join(csrfExemptPaths, ",") != strings.Join(want, ",") {
+		t.Fatalf("csrfExemptPaths = %v, want %v", csrfExemptPaths, want)
 	}
 
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	h := csrfWrap(t, ok)
 	post := func(path string) int {
 		req := httptest.NewRequest("POST", "http://leave.test"+path, strings.NewReader("x=1"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -109,7 +129,7 @@ func TestCSRFExemptions(t *testing.T) {
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
-	for _, p := range csrfExempt {
+	for _, p := range csrfExemptPaths {
 		if code := post(p); code != http.StatusOK {
 			t.Errorf("POST %s without a token: %d, want it exempt", p, code)
 		}
@@ -127,7 +147,7 @@ func TestCSRFExemptions(t *testing.T) {
 // Bulk approval is a state change in one post: it needs the token like any form.
 func TestCSRFRefusesTokenlessBulkApprove(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := csrf(ok, config.Config{CookieSecure: false, BaseURL: "http://leave.test"})
+	h := csrfWrap(t, ok)
 	req := httptest.NewRequest("POST", "http://leave.test/approvals/approve", strings.NewReader(url.Values{"id": {"1"}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "http://leave.test")
@@ -158,5 +178,20 @@ func TestOversizeLoginWithValidCSRFTokenIsRejected(t *testing.T) {
 	f.Del("pad")
 	if res, _ := b.post("/login", f); res.StatusCode != http.StatusSeeOther {
 		t.Fatalf("normal login: %d, want 303", res.StatusCode)
+	}
+}
+
+// An exempt endpoint is still capped: the kit refuses a declared body over the
+// cap with 413 before the handler sees it (plain text, not OAuth JSON).
+func TestExemptDeclaredOversizeIsRefusedByKit(t *testing.T) {
+	e := newE2E(t)
+	body := "padding=" + strings.Repeat("x", 2*middleware.MaxFormBytes)
+	res, err := http.Post(e.base+"/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("declared over-cap exempt body: %d, want 413", res.StatusCode)
 	}
 }

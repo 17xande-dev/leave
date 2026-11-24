@@ -73,7 +73,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	jobs := outbox.NewStore(d)
 	oa := oauth.New(d, oauth.Config{BaseURL: "http://leave.test"})
-	h, err := New(Config{SessionTTL: time.Hour}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir,
+	h, err := New(Config{SessionTTL: time.Hour, CSRF: noRenew{}}, Deps{Users: us, Sessions: auth.NewSessions(d, time.Hour), Directory: dir,
 		Leave: svc, Outbox: jobs, TeamsEnabled: true, OAuth: oa,
 		MCP: mcpserver.New(mcpserver.Config{Leave: svc, Users: us, Outbox: jobs, Verifier: oa.Verify,
 			ResourceMetadataURL: oa.ResourceMetadataURL(), Scopes: []string{oauth.Scope}})})
@@ -86,6 +86,13 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(srv.Close)
 	return &harness{t: t, h: h, srv: srv, dir: dir, svc: svc, us: us, oauth: oa, db: d}
 }
+
+// noRenew stands in for the CSRF policy: these tests serve the mux without the
+// CSRF layer (the real stack is exercised by the e2e tests in package main,
+// which assert the token is renewed at sign-in and sign-out).
+type noRenew struct{}
+
+func (noRenew) Renew(http.ResponseWriter, *http.Request) (string, error) { return "", nil }
 
 func mustAll(t *testing.T, dir *directory.Fake) []directory.User {
 	all, err := dir.AllUsers(context.Background())

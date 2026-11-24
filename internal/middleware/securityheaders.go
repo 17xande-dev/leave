@@ -2,8 +2,6 @@
 package middleware
 
 import (
-	"errors"
-	"mime"
 	"net/http"
 	"strings"
 )
@@ -50,34 +48,6 @@ func CSPWithFormAction(source string) string {
 }
 
 // MaxFormBytes is the most any request body may be. Nothing here posts more:
-// forms are a few fields, the OAuth and MCP bodies are small JSON. net/http's
-// own form parsing allows 10 MB, and CSRF middleware parses the form before any
-// handler runs, so the limit has to sit in front of it.
+// forms are a few fields, the OAuth and MCP bodies are small JSON. It is the
+// default cap the CSRF layer applies in front of form parsing.
 const MaxFormBytes = 256 << 10
-
-// MaxBody caps every request body at MaxFormBytes. An over-long body makes the
-// reader fail, which form parsing reports as an error the handler refuses.
-func MaxBody(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
-		// nosurf reads PostFormValue before the handler. ParseForm is
-		// idempotent, so its first error would otherwise be lost, allowing
-		// a malformed body to act on the fields that were parsed successfully.
-		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		// The CSRF-exempt token endpoint parses its own body with a tighter
-		// cap and must answer parse failures using OAuth's JSON error format.
-		token := r.Method == http.MethodPost && r.URL.Path == "/oauth/token"
-		if mediaType == "application/x-www-form-urlencoded" && !token {
-			if err := r.ParseForm(); err != nil {
-				status := http.StatusBadRequest
-				var tooLarge *http.MaxBytesError
-				if errors.As(err, &tooLarge) {
-					status = http.StatusRequestEntityTooLarge
-				}
-				http.Error(w, "That form could not be read.", status)
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}

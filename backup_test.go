@@ -45,6 +45,8 @@ func TestServeStartsBackups(t *testing.T) {
 	t.Setenv("DIRECTORY", "fake")
 	t.Setenv("COOKIE_SECURE", "false")
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
+	// The CSRF layer needs the app's own origin, so serve refuses to start without one.
+	t.Setenv("BASE_URL", "http://localhost:8082")
 	t.Setenv("DB_PATH", filepath.Join(root, "leave.db"))
 	t.Setenv("BACKUP_DIR", filepath.Join(root, "bk"))
 	t.Setenv("BACKUP_KEEP", "5")

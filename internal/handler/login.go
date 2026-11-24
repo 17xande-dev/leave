@@ -12,10 +12,11 @@ import (
 	"github.com/17xande-dev/websec"
 )
 
-// sessionCookie is always SameSite=Lax and HttpOnly. There is no setting to
-// loosen it: the app is never embedded cross-site, and a None cookie would let
-// any site make a signed-in browser send it.
-const sessionCookie = "leave_session"
+// sessionCookieName is the bare name; cookie.New derives the wire name
+// (__Host-leave_session over https). The kit fixes SameSite=Lax and HttpOnly:
+// the app is never embedded cross-site, and a None cookie would let any site
+// make a signed-in browser send it.
+const sessionCookieName = "leave_session"
 
 type loginData struct {
 	Username string
@@ -84,25 +85,31 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/",
-		HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode,
-		// No Max-Age: a browser session cookie, with the real expiry held
-		// server-side where it slides with use.
-	})
+	// A token issued before sign-in (a page opened earlier, or one planted by
+	// a sibling site) must not survive into the signed-in session.
+	if _, err := h.cfg.CSRF.Renew(w, r); err != nil {
+		h.serverError(w, r, err)
+		return
+	}
+	// Browser-session cookie: the kit ignores the expiry argument.
+	h.cookie.Set(w, token, time.Time{})
 	slog.Info("signed in", "user", u.Username)
 	http.Redirect(w, r, data.Next, http.StatusSeeOther)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		if err := h.sessions.Delete(r.Context(), c.Value); err != nil {
+	if token, ok := h.cookie.Value(r); ok {
+		if err := h.sessions.Delete(r.Context(), token); err != nil {
 			h.serverError(w, r, err)
 			return
 		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode})
+	h.cookie.Clear(w)
+	// The next person at this browser starts with a fresh token too.
+	if _, err := h.cfg.CSRF.Renew(w, r); err != nil {
+		h.serverError(w, r, err)
+		return
+	}
 	http.Redirect(w, r, "/login?notice=signed-out", http.StatusSeeOther)
 }
 

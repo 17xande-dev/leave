@@ -97,7 +97,13 @@ func TestAuthCookieAttributesThroughRoutes(t *testing.T) {
 			if res.StatusCode != http.StatusOK {
 				t.Fatalf("GET /login: %d, want 200", res.StatusCode)
 			}
-			if c := cookie(res, "csrf_token"); c.Value == "" {
+			// Over https the names carry __Host-; plain-http development keeps
+			// the bare ones, since browsers refuse __Host- without Secure.
+			prefix := ""
+			if secure {
+				prefix = "__Host-"
+			}
+			if c := cookie(res, prefix+"csrf_token"); c.Value == "" {
 				t.Fatal("GET /login set an empty CSRF cookie")
 			}
 			f := fields(page)
@@ -107,7 +113,7 @@ func TestAuthCookieAttributesThroughRoutes(t *testing.T) {
 			if res.StatusCode != http.StatusSeeOther {
 				t.Fatalf("POST /login: %d, want 303", res.StatusCode)
 			}
-			if c := cookie(res, "leave_session"); c.Value == "" || c.MaxAge != 0 || !c.Expires.IsZero() || c.RawExpires != "" {
+			if c := cookie(res, prefix+"leave_session"); c.Value == "" || c.MaxAge != 0 || !c.Expires.IsZero() || c.RawExpires != "" {
 				t.Fatalf("login must set a nonempty browser-session cookie: MaxAge=%d Expires=%q", c.MaxAge, c.RawExpires)
 			}
 
@@ -119,7 +125,8 @@ func TestAuthCookieAttributesThroughRoutes(t *testing.T) {
 			if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/login?notice=signed-out" {
 				t.Fatalf("POST /logout: status=%d location=%q", res.StatusCode, res.Header.Get("Location"))
 			}
-			if c := cookie(res, "leave_session"); c.Value != "" || c.MaxAge >= 0 || !c.Expires.IsZero() || c.RawExpires != "" {
+			// The kit also writes an epoch Expires for clients that ignore Max-Age.
+			if c := cookie(res, prefix+"leave_session"); c.Value != "" || c.MaxAge >= 0 || (!c.Expires.IsZero() && !c.Expires.Equal(time.Unix(0, 0))) {
 				t.Fatalf("logout must clear the cookie using Max-Age: empty=%t MaxAge=%d Expires=%q", c.Value == "", c.MaxAge, c.RawExpires)
 			}
 		})
@@ -614,7 +621,7 @@ func TestEndToEndDenyConnectsNothing(t *testing.T) {
 // The OAuth and metadata endpoints are reachable by programs: no cookie, no CSRF token.
 func TestOAuthEndpointsRespondToPrograms(t *testing.T) {
 	e := newE2E(t)
-	for _, p := range csrfExempt {
+	for _, p := range csrfExemptPaths {
 		req, _ := http.NewRequest("POST", e.base+p, strings.NewReader("{}"))
 		req.Header.Set("Content-Type", "application/json")
 		res, err := http.DefaultClient.Do(req)

@@ -3,6 +3,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -10,7 +11,8 @@ import (
 
 	"github.com/17xande-dev/ratelimit"
 	"github.com/17xande-dev/ratelimit/clientip"
-	"github.com/justinas/nosurf"
+	"github.com/17xande-dev/websec/cookie"
+	"github.com/17xande-dev/websec/csrf"
 
 	"github.com/17xande-dev/leave/internal/auth"
 	"github.com/17xande-dev/leave/internal/directory"
@@ -21,9 +23,20 @@ import (
 	"github.com/17xande-dev/leave/internal/users"
 )
 
+// tokenRenewer is what the handlers need of the CSRF policy: a fresh token when
+// the credential changes. *csrf.Protect satisfies it; handler tests, which run
+// without the CSRF layer, substitute a stub.
+type tokenRenewer interface {
+	Renew(w http.ResponseWriter, r *http.Request) (string, error)
+}
+
 type Config struct {
 	CookieSecure bool
-	SessionTTL   time.Duration
+	// CSRF is the policy the app's mux is wrapped in. It is required, and
+	// passed in rather than set later: a handler that never got it would sign
+	// people in without renewing their token, silently.
+	CSRF       tokenRenewer
+	SessionTTL time.Duration
 	// ClientIP decides which address a request came from, for the sign-in IP limit. The zero value is the peer.
 	ClientIP clientip.Source
 }
@@ -49,6 +62,7 @@ type Deps struct {
 
 type Handler struct {
 	cfg       Config
+	cookie    *cookie.Cookie
 	users     *users.Store
 	sessions  *auth.Sessions
 	directory directory.Directory
@@ -71,6 +85,15 @@ type Handler struct {
 }
 
 func New(cfg Config, d Deps) (*Handler, error) {
+	if cfg.CSRF == nil {
+		return nil, errors.New("handler: Config.CSRF is required")
+	}
+	// A browser-session cookie: the real limits are held server-side, and a
+	// directory sign-in should not outlive the browser.
+	sessionCookie, err := cookie.New(cookie.Config{Name: sessionCookieName, Insecure: !cfg.CookieSecure, BrowserSession: true})
+	if err != nil {
+		return nil, err
+	}
 	if d.Kick == nil {
 		d.Kick = func() {}
 	}
@@ -84,7 +107,7 @@ func New(cfg Config, d Deps) (*Handler, error) {
 		return nil, err
 	}
 	return &Handler{
-		cfg: cfg, users: d.Users, sessions: d.Sessions, directory: d.Directory, leave: d.Leave,
+		cfg: cfg, cookie: sessionCookie, users: d.Users, sessions: d.Sessions, directory: d.Directory, leave: d.Leave,
 		outbox: d.Outbox, teamsOn: d.TeamsEnabled, oauth: d.OAuth, mcp: d.MCP, kick: d.Kick,
 		pages: pages, partials: partials,
 		// Five tries per username per 15 minutes -- below AD's usual lockout
@@ -160,8 +183,8 @@ func (h *Handler) protectedRoutes() []route {
 	return append(routes, h.adminRoutes()...)
 }
 
-// csrfToken is the token forms embed, from nosurf's middleware.
-func csrfToken(r *http.Request) string { return nosurf.Token(r) }
+// csrfToken is the token forms embed, from the CSRF middleware.
+func csrfToken(r *http.Request) string { return csrf.Token(r) }
 
 type ctxKey int
 
@@ -176,10 +199,7 @@ const maxFormBytes = middleware.MaxFormBytes
 // POST after sign-in would act on a form the person never saw submitted.
 func (h *Handler) signedIn(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var token string
-		if c, err := r.Cookie(sessionCookie); err == nil {
-			token = c.Value
-		}
+		token, _ := h.cookie.Value(r)
 		u, err := h.sessions.Lookup(r.Context(), token)
 		if err != nil {
 			if err != auth.ErrNoSession {
