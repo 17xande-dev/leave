@@ -249,6 +249,41 @@ kamal rollback
 page that reads a request (`no such column: r.decided_for_id`) for those few seconds. Do
 not restart it in between: it would reapply 0009.
 
+**0010 rehearsal and rollback (operator).** `0010_session_last_seen.sql` adds
+`sessions.last_seen` and backfills existing sessions to the migration time.
+Take a fresh backup, copy it off-host, and rehearse on a separate copy:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0010.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0010.db ".backup /data/leave-rehearsal-0010.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal-0010.db "SELECT count(*) FROM sessions;"'
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal-0010.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+kamal app exec --reuse 'sqlite3 -bail /data/leave-rehearsal-0010.db "SELECT count(*), min(last_seen), max(last_seen) FROM sessions; PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh sdt-vm-docker02 "docker run --rm --env DB_PATH=/data/leave-rehearsal-0010.db -v leave-data:/data ghcr.io/17xande-dev/leave:$VERSION -migrate"
+```
+
+Expect `9 -> 10`, the same number of sessions (all marked seen at migration
+time), integrity `ok` and no foreign-key rows, then `10 -> 10`.
+
+The version-9 image refuses a version-10 database, and the binary cannot run
+the Down migration. Fix forward by default. To roll back, run from the repo
+root: take a safety backup, then drop `sessions.last_seen` and remove the
+version-10 goose row together using the undo script.
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-before-undo-0010.db"'
+kamal app exec --reuse "sqlite3 -bail -cmd '.timeout 10000' /data/leave.db \"$(cat internal/db/testdata/undo_0010.sql)\""
+kamal rollback <version>
+```
+
+**Warning:** session reads and writes can fail between the undo and the image
+swap; do not restart the new image in between, or it will reapply 0010.
+Alternatively, restore the version-9 pre-deploy backup using the restore
+procedure below (including Outlook event cleanup), then use
+`kamal rollback <version>` instead of `kamal app boot`. A restore loses writes
+since the backup. Either rollback signs everyone out again because the old image
+uses a different session cookie name.
+
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
 Applicants' working-day leave must fit within 31 days from its first to last day,
