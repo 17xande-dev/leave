@@ -63,6 +63,17 @@ func TestCSRFTokenRenewedAtSignInAndSignOut(t *testing.T) {
 	}
 }
 
+func TestMCPTrailingSlashIsNotCSRFExempt(t *testing.T) {
+	b := newE2E(t).browser()
+	// Only the exact URL reaches MCP's bearer check without a CSRF token.
+	if res, _ := b.post("/mcp", nil); res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("tokenless POST /mcp: %d, want bearer challenge (401)", res.StatusCode)
+	}
+	if res, _ := b.post("/mcp/", nil); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("tokenless POST /mcp/: %d, want CSRF refusal (403)", res.StatusCode)
+	}
+}
+
 // A session cookie under the old bare name (a pre-migration browser, or one set
 // from a sibling subdomain) is not a credential any more.
 func TestBareNamedSessionCookieIsIgnored(t *testing.T) {
