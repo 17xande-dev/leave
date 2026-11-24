@@ -70,6 +70,33 @@ func TestSessionLastSeenMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The operator's undo script (README rollback) must leave what Down leaves:
+	// the v9 schema, the old columns' rows and goose at version 9.
+	script, err := os.ReadFile("testdata/undo_0010.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractExec(t, d, string(script))
+	if version, err := p.GetDBVersion(ctx); err != nil || version != 9 {
+		t.Fatalf("undo_0010 version = %d (%v), want 9", version, err)
+	}
+	if !reflect.DeepEqual(schema, contractSchema(t, d)) || !reflect.DeepEqual(before, hashes()) || !reflect.DeepEqual(beforeSessions, contractRows(t, d, oldSessions)) {
+		t.Fatal("undo_0010 did not restore the v9 schema and data")
+	}
+	// And it is Down, statement for statement, plus the version row.
+	src, err := migrations.ReadFile("migrations/0010_session_last_seen.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, down, _ := strings.Cut(string(src), "-- +goose Down\n")
+	body := strings.TrimSuffix(strings.TrimPrefix(string(script), "BEGIN IMMEDIATE;\n"), "DELETE FROM goose_db_version WHERE version_id = 10;\nCOMMIT;\n")
+	if strings.TrimSpace(body) != strings.TrimSpace(down) {
+		t.Fatalf("undo_0010 differs from Down:\n%s\nvs\n%s", body, down)
+	}
+	if _, err := p.UpTo(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+
 	// The real command, twice, on the v9 copy: 9 -> 10, then nothing to do.
 	binary := filepath.Join(t.TempDir(), "leave")
 	if out, err := exec.Command("go", "build", "-o", binary, "../..").CombinedOutput(); err != nil {
