@@ -54,8 +54,7 @@ func TestRetriesThenFails(t *testing.T) {
 	}
 }
 
-// Jobs run in the order written: a calendar delete must not overtake the
-// create it undoes.
+// A single worker prefers the oldest eligible job when both are due.
 func TestRunsInOrder(t *testing.T) {
 	ctx := context.Background()
 	d := dbtest.New(t)
@@ -84,7 +83,14 @@ func TestKickRunsPromptly(t *testing.T) {
 		ran <- struct{}{}
 		return nil
 	}})
-	go w.Run(ctx, time.Hour)
+	stop := w.Start(ctx, time.Hour)
+	defer func() {
+		wait, end := context.WithTimeout(context.Background(), time.Second)
+		defer end()
+		if err := stop(wait); err != nil {
+			t.Error(err)
+		}
+	}()
 	time.Sleep(50 * time.Millisecond) // let the first, empty pass finish
 	Enqueue(ctx, d, KindEmail, 1)
 	w.Kick()

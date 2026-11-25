@@ -47,7 +47,7 @@ func TestConcurrentOpensOfAFreshDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Version 0 and migrations 1..10, each recorded once.
-	if rows != distinct || rows != 11 {
-		t.Errorf("goose_db_version has %d rows, %d distinct versions; want 11, each once", rows, distinct)
+	if rows != distinct || rows != 12 {
+		t.Errorf("goose_db_version has %d rows, %d distinct versions; want 12, each once", rows, distinct)
 	}
 }

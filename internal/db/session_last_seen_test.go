@@ -97,12 +97,12 @@ func TestSessionLastSeenMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The real command, twice, on the v9 copy: 9 -> 10, then nothing to do.
+	// The real command, twice, on the v9 copy: 9 -> 11, then nothing to do.
 	binary := filepath.Join(t.TempDir(), "leave")
 	if out, err := exec.Command("go", "build", "-o", binary, "../..").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, want := range []string{"9 -> 10", "10 -> 10"} {
+	for _, want := range []string{"9 -> 11", "11 -> 11"} {
 		cmd := exec.Command(binary, "-migrate")
 		cmd.Env = append(os.Environ(), "DB_PATH="+path)
 		out, err := cmd.CombinedOutput()

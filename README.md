@@ -284,6 +284,40 @@ procedure below (including Outlook event cleanup), then use
 since the backup. Either rollback signs everyone out again because the old image
 uses a different session cookie name.
 
+**0011 outbox lease rehearsal, deploy and rollback (operator).** The migration
+adds two nullable columns to `outbox`; existing jobs, attempts and schedules
+are unchanged. Take a fresh SQLite `.backup`, copy it off-host, and rehearse on
+a separate copy. Run the new image with
+`DB_PATH=/data/leave-rehearsal-0011.db -migrate` against that copy. Expect
+`10 -> 11`, the same outbox row count, `PRAGMA integrity_check` returning `ok`,
+no `PRAGMA foreign_key_check` rows, and `11 -> 11` on a second run.
+
+**Stop first:** run `kamal app stop` and verify the old container is stopped
+before `kamal deploy`. An already running old worker ignores leases even
+though its SQL still works against the additive schema; it could send the same
+job as the new worker. A fresh start of the old binary refuses schema 11.
+New workers can overlap with each other, but delivery is still at least once:
+a crash after a remote service accepts an effect and before it is recorded can
+repeat it.
+
+To roll back, stop the new container first and take a safety backup. With the
+app stopped, use a maintenance SQLite client on the same data volume, as the
+database owner. Apply the following in one transaction (`sqlite3 -bail`), check
+integrity and foreign keys again, then run `kamal rollback <version>` for the
+schema-10 image. Do not restart the new image after Down; it reapplies 0011.
+
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE outbox DROP COLUMN claim_token;
+ALTER TABLE outbox DROP COLUMN lease_until;
+DELETE FROM goose_db_version WHERE version_id = 11;
+COMMIT;
+```
+
+Down restores the old schema without rewinding job attempts or delivery
+history. Any unfinished job loses its lease and goes back to the old worker's
+scheduling rules.
+
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
 Applicants' working-day leave must fit within 31 days from its first to last day,
@@ -669,8 +703,9 @@ gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
 `ghcr.io/17xande-dev/leave`, and swap it in behind kamal-proxy once `GET /healthz`
 answers. It refuses to run with uncommitted changes, because Kamal builds from `HEAD`.
 
-**First deploy after the move to WAL:** `kamal app stop` first, then `kamal deploy` (see
-"Known limitation" below). Later deploys need no stop.
+**Deploys requiring a stop:** `kamal app stop` first, then `kamal deploy` for
+the move to WAL (see "Known limitation" below) and for the first deploy with
+outbox leases (see the 0011 rehearsal and rollback instructions above).
 
 One-time setup, on your workstation:
 
@@ -705,7 +740,7 @@ starting the server (opening the file still switches it to WAL, which is harmles
 exits, without loading LDAP/Graph configuration or starting the server. Both use
 `DB_PATH` (default `data/leave.db`). `-migrate` requires an existing database file;
 a missing path exits with code 1 without creating it. An existing empty database
-reports all nine migrations pending until startup or `-migrate`. A database newer than
+reports all eleven migrations pending until startup or `-migrate`. A database newer than
 the binary is refused by both.
 
 **Rehearse 0005 balance visibility from schema 0004.** These are operator instructions;

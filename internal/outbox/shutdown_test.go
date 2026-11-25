@@ -65,3 +65,42 @@ func TestShutdownWaitsForInFlightJob(t *testing.T) {
 		t.Fatalf("shutdown returned before recording success: done=%t, err=%v", done, err)
 	}
 }
+
+func TestShutdownRefundsOnlyCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"canceled", context.Canceled, 0},
+		{"unrelated failure", errors.New("fixture failure"), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, s, now := dueJob(t)
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			started := make(chan struct{})
+			w := NewWorker(s, map[string]Handler{KindEmail: func(ctx context.Context, _ []byte) error {
+				close(started)
+				<-ctx.Done()
+				return tc.err
+			}})
+			w.now = func() time.Time { return now }
+			stop := w.Start(ctx, time.Hour)
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal("job did not start")
+			}
+			if err := stop(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var attempts int
+			var unlocked bool
+			err := s.db.QueryRowContext(ctx, `SELECT attempts, claim_token IS NULL FROM outbox`).Scan(&attempts, &unlocked)
+			if err != nil || attempts != tc.want || !unlocked {
+				t.Fatalf("after shutdown: attempts=%d, want %d; lease cleared=%t; err=%v", attempts, tc.want, unlocked, err)
+			}
+		})
+	}
+}

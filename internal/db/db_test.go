@@ -56,7 +56,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n0010 pending 0010_session_last_seen.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n0010 pending 0010_session_last_seen.sql\n0011 pending 0011_outbox_lease.sql\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -68,7 +68,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -79,7 +79,7 @@ func TestNewerMigrationVersionRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (11, 1)`); err != nil {
+	if _, err := d.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (12, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	d.Close()
@@ -290,7 +290,7 @@ func TestFreshDatabaseOpensTwice(t *testing.T) {
 		if err := d.QueryRow(`SELECT max(version_id), sum(CASE WHEN version_id=1 AND is_applied=1 THEN 1 ELSE 0 END), count(*) FROM goose_db_version`).Scan(&version, &applied, &rows); err != nil {
 			t.Fatal(err)
 		}
-		if version != 10 || applied != 1 || rows != 11 {
+		if version != 11 || applied != 1 || rows != 12 {
 			t.Fatalf("version=%d applied=%d rows=%d", version, applied, rows)
 		}
 		d.Close()
@@ -316,7 +316,7 @@ func TestVersionTableWithoutZeroRowOpens(t *testing.T) {
 	if err := d.QueryRow(`SELECT count(*), max(version_id), sum(is_applied) FROM goose_db_version`).Scan(&count, &version, &applied); err != nil {
 		t.Fatal(err)
 	}
-	if count != 10 || version != 10 || applied != 10 {
+	if count != 11 || version != 11 || applied != 11 {
 		t.Fatalf("version table changed: count=%d version=%d applied=%d", count, version, applied)
 	}
 }
@@ -385,7 +385,7 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }
@@ -426,6 +426,10 @@ func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 		if name == "sessions" {
 			// last_seen is an additive column, checked by its migration test.
 			columnsSQL = "token_hash,user_id,created_at,expires_at"
+		}
+		if name == "outbox" {
+			// Compare the baseline data; the 0011 round trip checks the new columns.
+			columnsSQL = "id,kind,payload,attempts,next_attempt_at,last_error,done_at,failed_at,created_at"
 		}
 		if name == "settings" {
 			// Compare every baseline field across adoption plus the v2 ADD COLUMN;
@@ -606,7 +610,7 @@ func TestTransactionsAreImmediate(t *testing.T) {
 
 // A production database was versioned by the previous build's own STRICT
 // store. goosestrict must read that table as it is (same columns, the same
-// "2006-01-02 15:04:05" stamps), apply nothing, and leave every row alone.
+// "2006-01-02 15:04:05" stamps), apply the outstanding migrations, and keep existing data.
 func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prev.db")
 	d, err := Open(path)
@@ -624,8 +628,8 @@ func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The previous build's schema has no sessions.last_seen: this boot applies 0010 on top of it.
-	if _, err := d.Exec(`ALTER TABLE sessions DROP COLUMN last_seen`); err != nil {
+	// Recreate the v9 schema so this boot applies 0010 and 0011 on top of it.
+	if _, err := d.Exec(`ALTER TABLE sessions DROP COLUMN last_seen; ALTER TABLE outbox DROP COLUMN claim_token; ALTER TABLE outbox DROP COLUMN lease_until;`); err != nil {
 		t.Fatal(err)
 	}
 	for v := 2; v <= 9; v++ {
@@ -644,7 +648,7 @@ func TestDatabaseVersionedByPreviousBuildIsAccepted(t *testing.T) {
 	}
 	defer d.Close()
 	var rows, applied int
-	if err := d.QueryRow(`SELECT count(*), sum(is_applied) FROM goose_db_version`).Scan(&rows, &applied); err != nil || rows != 11 || applied != 11 {
+	if err := d.QueryRow(`SELECT count(*), sum(is_applied) FROM goose_db_version`).Scan(&rows, &applied); err != nil || rows != 12 || applied != 12 {
 		t.Fatalf("version rows = %d applied = %d, err = %v", rows, applied, err)
 	}
 	var synced string

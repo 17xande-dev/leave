@@ -106,7 +106,7 @@ func TestTypeStaffCanApplyMigration(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", binary, "../..").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
-	for _, want := range []string{"6 -> 10", "10 -> 10"} {
+	for _, want := range []string{"6 -> 11", "11 -> 11"} {
 		cmd := exec.Command(binary, "-migrate")
 		cmd.Env = append(os.Environ(), "DB_PATH="+path)
 		out, err := cmd.CombinedOutput()

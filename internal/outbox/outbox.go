@@ -73,45 +73,66 @@ var backoff = []time.Duration{
 // maxAttempts after which a job is marked failed and waits for a person.
 var maxAttempts = len(backoff) + 1
 
-func (s *Store) due(ctx context.Context, now time.Time, limit int) ([]Job, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, kind, payload, attempts FROM outbox
-		WHERE done_at IS NULL AND failed_at IS NULL AND next_attempt_at <= ?
-		ORDER BY id LIMIT ?`, now.UTC().Format(time.RFC3339), limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Job
-	for rows.Next() {
-		var j Job
-		var p string
-		if err := rows.Scan(&j.ID, &j.Kind, &p, &j.Attempts); err != nil {
-			return nil, err
-		}
-		j.Payload = []byte(p)
-		out = append(out, j)
-	}
-	return out, rows.Err()
+const (
+	jobTimeout = time.Minute
+	// Allow a bounded handler and its result write to finish without needing
+	// lease renewal. A runner that ignores cancellation can still overlap.
+	jobLease = 2 * time.Minute
+)
+
+type heldJob struct {
+	ID       int64
+	Kind     string
+	Payload  []byte
+	Attempts int
+	token    []byte
 }
 
-func (s *Store) record(ctx context.Context, j Job, runErr error, now time.Time) error {
+func (s *Store) claim(ctx context.Context, now time.Time) (heldJob, error) {
+	var j heldJob
+	// Choosing and updating the row under the same SQLite write lock lets
+	// separate processes compete without holding a transaction during delivery.
+	// Charge the attempt now, because a crash cannot charge it afterwards.
+	err := s.db.QueryRowContext(ctx, `UPDATE outbox
+		SET lease_until = ?, claim_token = randomblob(16), attempts = min(attempts + 1, ?)
+		WHERE id = (
+			SELECT id FROM outbox
+			WHERE done_at IS NULL AND failed_at IS NULL AND next_attempt_at <= ?
+				AND (lease_until IS NULL OR lease_until <= ?)
+			ORDER BY id LIMIT 1
+		)
+		RETURNING id, kind, payload, attempts, claim_token`,
+		now.Add(jobLease).UnixNano(), maxAttempts+1, now.UTC().Format(time.RFC3339), now.UnixNano(),
+	).Scan(&j.ID, &j.Kind, &j.Payload, &j.Attempts, &j.token)
+	return j, err
+}
+
+func (s *Store) record(ctx context.Context, j heldJob, runErr error, interrupted bool, now time.Time) (bool, error) {
 	stamp := now.UTC().Format(time.RFC3339)
-	if runErr == nil {
-		_, err := s.db.ExecContext(ctx, `UPDATE outbox SET done_at = ?, attempts = attempts + 1, last_error = ''
-			WHERE id = ?`, stamp, j.ID)
-		return err
+	// Clearing the lease and settling must be one fenced write: a resumed
+	// worker must not change the result of a later owner, even after admin retry.
+	const held = `, lease_until = NULL, claim_token = NULL
+		WHERE id = ? AND claim_token = ? AND done_at IS NULL AND failed_at IS NULL`
+	var res sql.Result
+	var err error
+	switch {
+	case interrupted:
+		res, err = s.db.ExecContext(ctx, `UPDATE outbox SET attempts = attempts - 1`+held, j.ID, j.token)
+	case runErr == nil:
+		res, err = s.db.ExecContext(ctx, `UPDATE outbox SET done_at = ?, last_error = ''`+held, stamp, j.ID, j.token)
+	case j.Attempts >= maxAttempts:
+		res, err = s.db.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, failed_at = ?`+held,
+			maxAttempts, describeError(runErr), stamp, j.ID, j.token)
+	default:
+		next := now.Add(backoff[j.Attempts-1]).UTC().Format(time.RFC3339)
+		res, err = s.db.ExecContext(ctx, `UPDATE outbox SET last_error = ?, next_attempt_at = ?`+held,
+			describeError(runErr), next, j.ID, j.token)
 	}
-	attempts := j.Attempts + 1
-	detail := describeError(runErr)
-	if attempts >= maxAttempts {
-		_, err := s.db.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, failed_at = ?
-			WHERE id = ?`, attempts, detail, stamp, j.ID)
-		return err
+	if err != nil {
+		return false, err
 	}
-	next := now.Add(backoff[attempts-1]).UTC().Format(time.RFC3339)
-	_, err := s.db.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ?
-		WHERE id = ?`, attempts, detail, next, j.ID)
-	return err
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // Keep the detail available to admins without letting a remote service supply
@@ -134,9 +155,11 @@ func describeError(err error) string {
 // Problems lists jobs that have failed for good or are failing now, newest
 // first, for the admin page.
 func (s *Store) Problems(ctx context.Context) ([]Job, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, kind, payload, attempts, last_error, created_at,
+	// The claim charges an attempt before delivery. Keep the admin count and
+	// problem list about past attempts, not the handler currently running.
+	rows, err := s.db.QueryContext(ctx, `SELECT id, kind, payload, attempts - (claim_token IS NOT NULL), last_error, created_at,
 		COALESCE(failed_at, ''), next_attempt_at FROM outbox
-		WHERE done_at IS NULL AND (failed_at IS NOT NULL OR attempts > 0)
+		WHERE done_at IS NULL AND (failed_at IS NOT NULL OR attempts > (claim_token IS NOT NULL))
 		ORDER BY id DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
@@ -189,15 +212,17 @@ func Summary(j Job) string {
 	return j.Kind
 }
 
-// Retry puts a failed job back in the queue with a fresh set of attempts.
+// Retry puts a dead job back in the queue with a fresh set of attempts.
+// Leave active jobs and their backoff schedules under the worker's control.
 func (s *Store) Retry(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE outbox SET failed_at = NULL, attempts = 0, next_attempt_at = ?
-		WHERE id = ? AND done_at IS NULL`, time.Now().UTC().Format(time.RFC3339), id)
+		WHERE id = ? AND done_at IS NULL AND failed_at IS NOT NULL AND claim_token IS NULL`,
+		time.Now().UTC().Format(time.RFC3339), id)
 	return err
 }
 
-// Worker runs due jobs one at a time, in the order they were written. One at a
-// time is deliberate: a calendar delete must not overtake the create it undoes.
+// Worker runs due jobs one at a time, preferring the oldest eligible job.
+// Backoff and other workers can reorder effects, so handlers cannot rely on FIFO.
 type Worker struct {
 	store    *Store
 	handlers map[string]Handler
@@ -261,42 +286,59 @@ func (w *Worker) Run(ctx context.Context, every time.Duration) {
 // RunDue runs every job that is due now. Exported for tests.
 func (w *Worker) RunDue(ctx context.Context) {
 	for ctx.Err() == nil {
-		jobs, err := w.store.due(ctx, w.now(), 20)
+		j, err := w.store.claim(ctx, w.now())
+		if errors.Is(err, sql.ErrNoRows) || (err != nil && ctx.Err() != nil) {
+			return
+		}
 		if err != nil {
-			slog.Error("outbox: list due jobs", "error_class", fmt.Sprintf("%T", err))
+			slog.Error("outbox: claim due job", "error_class", fmt.Sprintf("%T", err))
 			return
 		}
-		if len(jobs) == 0 {
-			return
-		}
-		for _, j := range jobs {
-			if ctx.Err() != nil {
-				return
-			}
+		var runErr error
+		if j.Attempts > maxAttempts {
+			// A process may have died after claiming the final attempt.
+			// Reclaim to settle, not to perform another delivery.
+			runErr = errors.New("final attempt lease expired")
+		} else if runErr = ctx.Err(); runErr == nil {
 			h, ok := w.handlers[j.Kind]
-			var runErr error
 			if !ok {
 				runErr = fmt.Errorf("no handler for %q", j.Kind)
 			} else {
-				jctx, cancel := context.WithTimeout(ctx, time.Minute)
-				runErr = h(jctx, j.Payload)
+				jctx, cancel := context.WithTimeout(ctx, jobTimeout)
+				runErr = runHandler(jctx, h, j.Payload)
 				cancel()
 			}
-			// Shutdown itself is not a delivery failure. A successful or
-			// unrelated failed run still needs to be recorded after cancellation.
-			if ctx.Err() != nil && errors.Is(runErr, ctx.Err()) {
-				return
-			}
-			if runErr != nil {
-				slog.Warn("outbox: job failed", "id", j.ID, "kind", j.Kind, "attempt", j.Attempts+1, "error_class", fmt.Sprintf("%T", runErr))
-			}
-			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			err := w.store.record(recordCtx, j, runErr, w.now())
-			cancel()
-			if err != nil {
-				slog.Error("outbox: record result", "id", j.ID, "error_class", fmt.Sprintf("%T", err))
-				return
-			}
+		}
+		// Shutdown itself is not a delivery failure. Settle with a fresh
+		// context so a racing success or unrelated error can still be saved.
+		interrupted := ctx.Err() != nil && errors.Is(runErr, ctx.Err())
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		written, err := w.store.record(recordCtx, j, runErr, interrupted, w.now())
+		cancel()
+		switch {
+		case err != nil:
+			slog.Error("outbox: record result", "id", j.ID, "error_class", fmt.Sprintf("%T", err))
+			return
+		case !written:
+			slog.Warn("outbox: lease lost", "id", j.ID, "kind", j.Kind, "attempt", min(j.Attempts, maxAttempts))
+		case runErr != nil && !interrupted:
+			slog.Warn("outbox: job failed", "id", j.ID, "kind", j.Kind, "attempt", min(j.Attempts, maxAttempts),
+				"error_class", fmt.Sprintf("%T", runErr))
 		}
 	}
+}
+
+func runHandler(ctx context.Context, h Handler, payload []byte) (err error) {
+	returned := false
+	defer func() {
+		if !returned {
+			// A poison job must use the normal attempt budget, and panic
+			// values can contain details that must not reach logs or admins.
+			recover()
+			err = errors.New("handler panicked")
+		}
+	}()
+	err = h(ctx, payload)
+	returned = true
+	return err
 }
