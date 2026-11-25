@@ -28,6 +28,7 @@ func newImpEnv(t *testing.T) *impEnv {
 	t.Setenv("DB_PATH", path)
 	t.Setenv("DIRECTORY", "fake")
 	t.Setenv("COOKIE_SECURE", "false")
+	t.Setenv("BASE_URL", "http://localhost:8082")
 	d, err := db.Open(path)
 	if err != nil {
 		t.Fatal(err)

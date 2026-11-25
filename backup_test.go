@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,5 +80,26 @@ func TestServeStartsBackups(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("serve after cancel: %v", err)
+	}
+}
+
+// A BASE_URL the CSRF layer would refuse must stop the program in
+// config.Load, before the database is opened: db.Open creates and migrates the
+// file, and a typo should not leave a migrated database behind.
+func TestBadBaseURLStopsBeforeDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "leave.db")
+	t.Setenv("DIRECTORY", "fake")
+	t.Setenv("COOKIE_SECURE", "false")
+	t.Setenv("LISTEN_ADDR", "127.0.0.1:0")
+	t.Setenv("BASE_URL", "http://localhost:08082")
+	t.Setenv("DB_PATH", path)
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "BASE_URL") {
+		t.Fatalf("run() = %v, want a BASE_URL error", err)
+	}
+	for _, f := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(f); err == nil {
+			t.Fatalf("%s exists: the database was opened before BASE_URL was checked", f)
+		}
 	}
 }
