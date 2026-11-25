@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -237,16 +238,15 @@ func TestLoginFlow(t *testing.T) {
 // safeNext's answer) fails. A successful sign-in with a hostile next must land on
 // the fallback, never on another host and never back on the sign-in page.
 func TestLoginRefusesHostileNext(t *testing.T) {
-	for _, next := range []string{"/\t/evil.example", "//evil.example", "/%6cogin", "https://evil.example/", "/login"} {
-		hs := newHarness(t)
-		r, _ := hs.post(hs.client(), "/login", url.Values{"username": {`EXAMPLE\Staff1`}, "password": {"x"}, "next": {next}})
-		if r.StatusCode != http.StatusSeeOther {
-			t.Errorf("next %q: sign-in answered %d, want 303", next, r.StatusCode)
-			continue
-		}
-		if loc := r.Header.Get("Location"); loc != "/" {
-			t.Errorf("next %q: redirected to %q, want the fallback %q", next, loc, "/")
-		}
+	// webtest's client reads the raw Location, so a spelling Go's own client
+	// refuses to parse (a tab inside the path) is asserted on, not a transport error.
+	nexts := append([]string{"/\t/evil.example", "//evil.example", "/%6cogin", "https://evil.example/", "/login"}, webtest.HostileRedirects()...)
+	for i, next := range nexts {
+		t.Run(fmt.Sprintf("%d/%.30q", i, next), func(t *testing.T) {
+			hs := newHarness(t)
+			webtest.NewServer(t, hs.srv).PostForm("/login", url.Values{"username": {`EXAMPLE\Staff1`}, "password": {"x"}, "next": {next}}).
+				WantRedirect(http.StatusSeeOther, "/")
+		})
 	}
 }
 
