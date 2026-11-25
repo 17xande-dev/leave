@@ -286,11 +286,33 @@ uses a different session cookie name.
 
 **0011 outbox lease rehearsal, deploy and rollback (operator).** The migration
 adds two nullable columns to `outbox`; existing jobs, attempts and schedules
-are unchanged. Take a fresh SQLite `.backup`, copy it off-host, and rehearse on
-a separate copy. Run the new image with
-`DB_PATH=/data/leave-rehearsal-0011.db -migrate` against that copy. Expect
-`10 -> 11`, the same outbox row count, `PRAGMA integrity_check` returning `ok`,
-no `PRAGMA foreign_key_check` rows, and `11 -> 11` on a second run.
+are unchanged. Run from the repo root. Set `VERSION` to the new image tag and
+`OLD` to the currently running schema-10 tag (`kamal app version`). Once the
+new image is available on the Docker host, back up the running app, copy the
+backup off-host (see the backup procedure below), and rehearse on a separate copy:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0011.db"'
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-0011.db ".backup /data/leave-rehearsal-0011.db"'
+CHECK='SELECT count(*), coalesce(sum(done_at IS NULL AND failed_at IS NULL),0), coalesce(sum(failed_at IS NOT NULL),0) FROM outbox; PRAGMA integrity_check; PRAGMA foreign_key_check;'
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-0011.db '$CHECK'"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$VERSION -migrate-status"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$VERSION -migrate-status"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-0011.db '$CHECK SELECT count(*) FROM outbox WHERE lease_until IS NOT NULL OR claim_token IS NOT NULL;'"
+ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-0011.db" < internal/db/testdata/undo_0011.sql
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$OLD -migrate-status"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 -e DB_PATH=/data/leave-rehearsal-0011.db ghcr.io/17xande-dev/leave:$OLD -migrate"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-0011.db '$CHECK'"
+```
+
+Expect `0011 pending`, `10 -> 11`, `11 -> 11`, `0011 applied`, then only
+versions through 0010 and `10 -> 10` with the old image after undo. The total,
+pending and dead counts must stay unchanged; after Up the lease count must be
+zero. Every integrity check must return `ok` and every foreign-key check must
+return no rows. Never start the server against the rehearsal copy: it would
+run copies of live jobs.
 
 **Stop first:** run `kamal app stop` and verify the old container is stopped
 before `kamal deploy`. An already running old worker ignores leases even
@@ -300,23 +322,33 @@ New workers can overlap with each other, but delivery is still at least once:
 a crash after a remote service accepts an effect and before it is recorded can
 repeat it.
 
-To roll back, stop the new container first and take a safety backup. With the
-app stopped, use a maintenance SQLite client on the same data volume, as the
-database owner. Apply the following in one transaction (`sqlite3 -bail`), check
-integrity and foreign keys again, then run `kamal rollback <version>` for the
-schema-10 image. Do not restart the new image after Down; it reapplies 0011.
+To roll back, keep the app stopped for the backup, undo and checks. Run these
+steps in order, stopping if any command fails or a check gives the wrong result:
 
-```sql
-BEGIN IMMEDIATE;
-ALTER TABLE outbox DROP COLUMN claim_token;
-ALTER TABLE outbox DROP COLUMN lease_until;
-DELETE FROM goose_db_version WHERE version_id = 11;
-COMMIT;
+```sh
+kamal app stop
+kamal app details  # verify no leave-web container is running before continuing
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-before-undo-0011.db'"
+ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db" < internal/db/testdata/undo_0011.sql
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$OLD -migrate-status"
+kamal rollback "$OLD"
 ```
 
-Down restores the old schema without rewinding job attempts or delivery
-history. Any unfinished job loses its lease and goes back to the old worker's
-scheduling rules.
+Before `kamal rollback`, require `ok` and no foreign-key rows, and require the
+old image to report 0010 as the newest applied migration. The undo script
+drops the two lease columns and deletes only the `version_id = 11` row from
+`goose_db_version`, in one transaction. It leaves earlier rows intact and does
+not rewind the table's `sqlite_sequence` counter. The old image sees version
+10 and can start. Job attempts and delivery history are unchanged; unfinished
+jobs lose their leases and return to the old scheduling rules.
+
+**Never use `kamal app exec` without `--reuse` for this rollback.** It keeps
+the image's `leave` entrypoint and would start the real server and its worker,
+not `sqlite3`. The explicit `--entrypoint sqlite3` runs only the SQLite client;
+UID 10001 is the database owner. Do not restart the new server after undo:
+it would reapply 0011. Restoring the pre-deploy backup instead loses later
+writes and requires the Outlook-event cleanup in the restore procedure below.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
