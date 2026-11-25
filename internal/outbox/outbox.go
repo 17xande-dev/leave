@@ -14,6 +14,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -198,6 +199,31 @@ func (w *Worker) Kick() {
 	}
 }
 
+// Start starts polling and returns a function that cancels the worker and
+// waits for it to finish. On a wait error the worker may still be using its DB.
+func (w *Worker) Start(ctx context.Context, every time.Duration) func(context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(ctx, every)
+	}()
+	return func(wait context.Context) error {
+		cancel()
+		select {
+		case <-done:
+			return nil
+		default:
+		}
+		select {
+		case <-done:
+			return nil
+		case <-wait.Done():
+			return wait.Err()
+		}
+	}
+}
+
 // Run polls until ctx ends.
 func (w *Worker) Run(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
@@ -215,7 +241,7 @@ func (w *Worker) Run(ctx context.Context, every time.Duration) {
 
 // RunDue runs every job that is due now. Exported for tests.
 func (w *Worker) RunDue(ctx context.Context) {
-	for {
+	for ctx.Err() == nil {
 		jobs, err := w.store.due(ctx, w.now(), 20)
 		if err != nil {
 			slog.Error("outbox: list due jobs", "err", err)
@@ -237,10 +263,18 @@ func (w *Worker) RunDue(ctx context.Context) {
 				runErr = h(jctx, j.Payload)
 				cancel()
 			}
+			// Shutdown itself is not a delivery failure. A successful or
+			// unrelated failed run still needs to be recorded after cancellation.
+			if ctx.Err() != nil && errors.Is(runErr, ctx.Err()) {
+				return
+			}
 			if runErr != nil {
 				slog.Warn("outbox: job failed", "id", j.ID, "kind", j.Kind, "attempt", j.Attempts+1, "err", runErr)
 			}
-			if err := w.store.record(ctx, j, runErr, w.now()); err != nil {
+			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			err := w.store.record(recordCtx, j, runErr, w.now())
+			cancel()
+			if err != nil {
 				slog.Error("outbox: record result", "id", j.ID, "err", err)
 				return
 			}

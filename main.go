@@ -71,12 +71,17 @@ func run() error {
 // serve is the whole program after configuration: it runs until ctx ends or
 // the listener fails. Tests call it with a temporary database to prove the
 // background jobs, the backup among them, are started.
-func serve(ctx context.Context, cfg config.Config) error {
+func serve(ctx context.Context, cfg config.Config) (err error) {
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		return err
 	}
-	defer database.Close()
+	closeDatabase := true
+	defer func() {
+		if closeDatabase {
+			database.Close()
+		}
+	}()
 
 	dir, err := newDirectory(cfg.Directory)
 	if err != nil {
@@ -131,7 +136,17 @@ func serve(ctx context.Context, cfg config.Config) error {
 
 	backup := backupJob(database, cfg)
 
-	go worker.Run(ctx, 30*time.Second)
+	stopWorker := worker.Start(ctx, 30*time.Second)
+	defer func() {
+		wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if stopErr := stopWorker(wait); stopErr != nil {
+			// A handler that ignores cancellation may still need the database.
+			// Return an error so main exits instead of closing it underneath it.
+			closeDatabase = false
+			err = errors.Join(err, errors.New("outbox worker did not stop before shutdown deadline"))
+		}
+	}()
 	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
 	go every(ctx, time.Hour, func() {
 		if n, err := sessions.DeleteExpired(ctx); err != nil {
