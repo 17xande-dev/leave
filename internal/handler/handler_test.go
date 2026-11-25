@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/17xande-dev/websec/session"
+	"github.com/17xande-dev/websec/webtest"
 
 	"github.com/17xande-dev/leave/internal/auth"
 	"github.com/17xande-dev/leave/internal/dbtest"
@@ -307,28 +308,27 @@ func TestLoginRateLimitedPerUsername(t *testing.T) {
 
 // Every protected route must refuse an anonymous request, by its own method:
 // a POST route answers a GET with 405 before any middleware runs, so a
-// GET-only sweep would prove nothing.
+// GET-only sweep would prove nothing. The refusal is the real one per method:
+// a GET is sent to the sign-in page, anything else gets 401 (a form post has
+// no page to go back to). The mux is served without the CSRF layer (see
+// newHarness), so no token is sent. The floor is the count of protected
+// patterns today (68) minus a small margin; it was 2 and accepted any 303 or
+// 401, so a route answering the wrong way for its method passed.
 func TestProtectedRoutes(t *testing.T) {
 	hs := newHarness(t)
-	routes := hs.h.protectedRoutes()
-	if len(routes) < 2 {
-		t.Fatalf("only %d protected routes; the list stopped loading?", len(routes))
+	var patterns []string
+	for _, rt := range hs.h.protectedRoutes() {
+		patterns = append(patterns, rt.pattern)
 	}
-	c := hs.client()
-	for _, rt := range routes {
-		method, path, _ := strings.Cut(rt.pattern, " ")
-		path = strings.ReplaceAll(strings.ReplaceAll(path, "{$}", ""), "{id}", "1")
-		path = regexp.MustCompile(`\{[a-z]+\}`).ReplaceAllString(path, "x")
-		req, _ := http.NewRequest(method, hs.srv.URL+path, nil)
-		res, err := c.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res.Body.Close()
-		if res.StatusCode != http.StatusSeeOther && res.StatusCode != http.StatusUnauthorized {
-			t.Errorf("%s anonymous: %d, want 303 or 401", rt.pattern, res.StatusCode)
-		}
-	}
+	webtest.Sweep{
+		Routes:  webtest.Routes(t, patterns, map[string]string{"id": "1"}),
+		Min:     64,
+		Client:  func() *webtest.Client { return webtest.NewServer(t, hs.srv) },
+		NoToken: true,
+		Refused: webtest.ByMethod(
+			webtest.RedirectsTo("/login?next="),
+			webtest.Status(http.StatusUnauthorized)),
+	}.Run(t)
 
 	// The public lines are pinned by source text, so a new route mounted
 	// outside protectedRoutes fails here and has to be looked at.
