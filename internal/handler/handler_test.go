@@ -233,6 +233,35 @@ func TestLoginFlow(t *testing.T) {
 	}
 }
 
+// Logout must end the session on the server, not only clear the browser's cookie:
+// a copy of the cookie (a shared machine, a log, a proxy) must stop working. The
+// replay goes through a fresh client, so nothing but the cookie value carries over.
+func TestLogoutEndsTheServerSession(t *testing.T) {
+	hs := newHarness(t)
+	c := webtest.NewServer(t, hs.srv)
+	c.PostForm("/login", url.Values{"username": {`EXAMPLE\Staff1`}, "password": {"x"}}).WantRedirect(http.StatusSeeOther, "/")
+	token, ok := c.Cookie(sessionCookieName)
+	if !ok || token == "" {
+		t.Fatal("no session cookie after sign-in")
+	}
+	c.Get("/").WantStatus(http.StatusOK)
+
+	replay := func(want string) {
+		t.Helper()
+		other := webtest.NewServer(t, hs.srv)
+		other.SetCookie(&http.Cookie{Name: sessionCookieName, Value: token, Path: "/"})
+		if want == "" {
+			other.Get("/").WantStatus(http.StatusOK)
+			return
+		}
+		other.Get("/").WantRedirect(http.StatusSeeOther, want)
+	}
+	replay("") // the copy works while the session lives
+
+	c.PostForm("/logout", nil).WantStatus(http.StatusSeeOther)
+	replay("/login?next=%2F")
+}
+
 // The helper tests above call safeNext directly; this goes through POST /login, so
 // a handler that redirected to the raw next field (or to something other than
 // safeNext's answer) fails. A successful sign-in with a hostile next must land on
