@@ -4,8 +4,8 @@ github.com/17xande-dev/ratelimit v0.2.0 h1:IK2xC0BwoYhZiQMQpUhmgAuRDwO/Apc8zDZ1l
 github.com/17xande-dev/ratelimit v0.2.0/go.mod h1:VhjyQPstPYd7MWpbM6MxY6cpdrtU8jFAHnKl474VL8M=
 github.com/17xande-dev/sqlitekit v0.2.0 h1:6bDXT1TLOfMs56W6eX5Z8nwjdqxElpY9RWFKOCnWxV8=
 github.com/17xande-dev/sqlitekit v0.2.0/go.mod h1:bk4WqIVNV2LxdkoQ0PwmmHqcM1d09zEBWsvl8FxjtP8=
-github.com/17xande-dev/websec v0.5.0 h1:UCqeqkJo5+jPkICmkSzCs/jtaiP5OWjnQvRoTZBsjV4=
-github.com/17xande-dev/websec v0.5.0/go.mod h1:WJAnIMeYoB8AZTErQf6hwd+O9hsmTxtY+jLvesBAkY8=
+github.com/17xande-dev/websec v0.5.1 h1:t7y5Fqr+/NCOvULWaj5Xjntg2bG4Xhx5MHQAvYvcWCA=
+github.com/17xande-dev/websec v0.5.1/go.mod h1:WJAnIMeYoB8AZTErQf6hwd+O9hsmTxtY+jLvesBAkY8=
 github.com/Azure/go-ntlmssp v0.1.1 h1:l+FM/EEMb0U9QZE7mKNEDw5Mu3mFiaa2GKOoTSsNDPw=
 github.com/Azure/go-ntlmssp v0.1.1/go.mod h1:NYqdhxd/8aAct/s4qSYZEerdPuH1liG2/X9DiVTbhpk=
 github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e h1:4dAU9FXIyQktpoUAgOJK3OTFc/xug0PCXYCqU0FgDKI=
