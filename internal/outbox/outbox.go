@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -101,15 +102,33 @@ func (s *Store) record(ctx context.Context, j Job, runErr error, now time.Time) 
 		return err
 	}
 	attempts := j.Attempts + 1
+	detail := describeError(runErr)
 	if attempts >= maxAttempts {
 		_, err := s.db.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, failed_at = ?
-			WHERE id = ?`, attempts, runErr.Error(), stamp, j.ID)
+			WHERE id = ?`, attempts, detail, stamp, j.ID)
 		return err
 	}
 	next := now.Add(backoff[attempts-1]).UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx, `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ?
-		WHERE id = ?`, attempts, runErr.Error(), next, j.ID)
+		WHERE id = ?`, attempts, detail, next, j.ID)
 	return err
+}
+
+// Keep the detail available to admins without letting a remote service supply
+// a multiline or unbounded message. The queue logs only the error class.
+func describeError(err error) string {
+	detail := strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r):
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		default:
+			return r
+		}
+	}, err.Error())
+	runes := []rune(strings.Join(strings.Fields(detail), " "))
+	return string(runes[:min(len(runes), 300)])
 }
 
 // Problems lists jobs that have failed for good or are failing now, newest
@@ -244,7 +263,7 @@ func (w *Worker) RunDue(ctx context.Context) {
 	for ctx.Err() == nil {
 		jobs, err := w.store.due(ctx, w.now(), 20)
 		if err != nil {
-			slog.Error("outbox: list due jobs", "err", err)
+			slog.Error("outbox: list due jobs", "error_class", fmt.Sprintf("%T", err))
 			return
 		}
 		if len(jobs) == 0 {
@@ -269,13 +288,13 @@ func (w *Worker) RunDue(ctx context.Context) {
 				return
 			}
 			if runErr != nil {
-				slog.Warn("outbox: job failed", "id", j.ID, "kind", j.Kind, "attempt", j.Attempts+1, "err", runErr)
+				slog.Warn("outbox: job failed", "id", j.ID, "kind", j.Kind, "attempt", j.Attempts+1, "error_class", fmt.Sprintf("%T", runErr))
 			}
 			recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			err := w.store.record(recordCtx, j, runErr, w.now())
 			cancel()
 			if err != nil {
-				slog.Error("outbox: record result", "id", j.ID, "err", err)
+				slog.Error("outbox: record result", "id", j.ID, "error_class", fmt.Sprintf("%T", err))
 				return
 			}
 		}
