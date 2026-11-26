@@ -2,8 +2,11 @@ package outbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +104,12 @@ func TestFinalAllowedAttemptCanSucceed(t *testing.T) {
 	}
 }
 
+const panicMarker = "fixture_panic_marker"
+
+func panicFixtureJob(context.Context, []byte) error {
+	panic(panicMarker)
+}
+
 func TestHandlerPanicCountsAsFailedAttemptAndWorkerContinues(t *testing.T) {
 	defer func() {
 		if recover() != nil {
@@ -115,7 +124,6 @@ func TestHandlerPanicCountsAsFailedAttemptAndWorkerContinues(t *testing.T) {
 	ctx := context.Background()
 	d := dbtest.New(t)
 	s := NewStore(d)
-	const panicMarker = "fixture_panic_marker"
 	if err := Enqueue(ctx, d, KindEmail, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +132,7 @@ func TestHandlerPanicCountsAsFailedAttemptAndWorkerContinues(t *testing.T) {
 	}
 	followingRan := false
 	w := NewWorker(s, map[string]Handler{
-		KindEmail: func(context.Context, []byte) error {
-			panic(panicMarker)
-		},
+		KindEmail: panicFixtureJob,
 		KindCalendarCreate: func(context.Context, []byte) error {
 			followingRan = true
 			return nil
@@ -143,5 +149,22 @@ func TestHandlerPanicCountsAsFailedAttemptAndWorkerContinues(t *testing.T) {
 	if len(ps) != 1 || ps[0].Kind != KindEmail || ps[0].Attempts != 1 || ps[0].LastError != "handler panicked" {
 		t.Fatal("panic was not saved as one failed attempt with a fixed reason")
 	}
-	webtest.NoSecrets(t, logs.String(), "outbox: job failed", panicMarker)
+	logText := logs.String()
+	webtest.NoSecrets(t, logText, "outbox: handler panicked", panicMarker)
+	origin := regexp.MustCompile(`^recovery_test\.go:[1-9][0-9]*$`)
+	for line := range strings.SplitSeq(logText, "\n") {
+		var entry struct {
+			Message  string `json:"msg"`
+			ID       int64  `json:"id"`
+			Kind     string `json:"kind"`
+			Function string `json:"function"`
+			Source   string `json:"source"`
+		}
+		if json.Unmarshal([]byte(line), &entry) == nil && entry.Message == "outbox: handler panicked" &&
+			entry.ID == 1 && entry.Kind == KindEmail && strings.HasSuffix(entry.Function, ".panicFixtureJob") &&
+			origin.MatchString(entry.Source) {
+			return
+		}
+	}
+	t.Error("panic log did not identify the job and the panic's function and source line")
 }

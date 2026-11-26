@@ -17,6 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -305,7 +307,7 @@ func (w *Worker) RunDue(ctx context.Context) {
 				runErr = fmt.Errorf("no handler for %q", j.Kind)
 			} else {
 				jctx, cancel := context.WithTimeout(ctx, jobTimeout)
-				runErr = runHandler(jctx, h, j.Payload)
+				runErr = runHandler(jctx, h, j)
 				cancel()
 			}
 		}
@@ -328,17 +330,31 @@ func (w *Worker) RunDue(ctx context.Context) {
 	}
 }
 
-func runHandler(ctx context.Context, h Handler, payload []byte) (err error) {
+func runHandler(ctx context.Context, h Handler, j heldJob) (err error) {
 	returned := false
 	defer func() {
 		if !returned {
 			// A poison job must use the normal attempt budget, and panic
 			// values can contain details that must not reach logs or admins.
 			recover()
+			var pcs [16]uintptr
+			n := runtime.Callers(2, pcs[:]) // skip Callers and this deferred function
+			frames := runtime.CallersFrames(pcs[:n])
+			for frame, more := frames.Next(); ; frame, more = frames.Next() {
+				if frame.Function != "" && !strings.HasPrefix(frame.Function, "runtime.") {
+					// Only symbols and source locations, never stack arguments.
+					slog.Error("outbox: handler panicked", "id", j.ID, "kind", j.Kind,
+						"function", frame.Function, "source", fmt.Sprintf("%s:%d", filepath.Base(frame.File), frame.Line))
+					break
+				}
+				if !more {
+					break
+				}
+			}
 			err = errors.New("handler panicked")
 		}
 	}()
-	err = h(ctx, payload)
+	err = h(ctx, j.Payload)
 	returned = true
 	return err
 }
