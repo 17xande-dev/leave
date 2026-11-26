@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -136,17 +137,9 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 
 	backup := backupJob(database, cfg)
 
-	stopWorker := worker.Start(ctx, 30*time.Second)
-	defer func() {
-		wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if stopErr := stopWorker(wait); stopErr != nil {
-			// A handler that ignores cancellation may still need the database.
-			// Return an error so main exits instead of closing it underneath it.
-			closeDatabase = false
-			err = errors.Join(err, errors.New("outbox worker did not stop before shutdown deadline"))
-		}
-	}()
+	shutdown := startOutbox(ctx, worker, database.Close)
+	// The shutdown path owns Close after the worker starts.
+	closeDatabase = false
 	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
 	go every(ctx, time.Hour, func() {
 		if n, err := sessions.DeleteExpired(ctx); err != nil {
@@ -175,6 +168,7 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 		MaxHeaderBytes: 64 << 10,
 		IdleTimeout:    2 * time.Minute,
 	}
+	defer func() { err = errors.Join(err, shutdown(srv.Shutdown)) }()
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", cfg.ListenAddr, "directory", cfg.Directory.Kind)
@@ -187,12 +181,43 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 	case <-ctx.Done():
 	}
 	slog.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
 	return nil
+}
+
+func startOutbox(ctx context.Context, worker *outbox.Worker, closeDB func() error) func(func(context.Context) error) error {
+	stop := worker.Start(ctx, 30*time.Second)
+	return func(shutdownHTTP func(context.Context) error) error {
+		return shutdownService(shutdownHTTP, stop, closeDB)
+	}
+}
+
+func shutdownService(shutdownHTTP, stopWorker func(context.Context) error, closeDB func() error) error {
+	// Drain HTTP and join the worker concurrently on a fresh budget: the
+	// signal has already canceled the service context. Leave time for Close
+	// and for the process to exit before Kamal's 20-second stop timeout.
+	wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- stopWorker(wait) }()
+	httpErr := shutdownHTTP(wait)
+	if errors.Is(httpErr, http.ErrServerClosed) {
+		httpErr = nil
+	}
+	if err := <-stopped; err != nil {
+		// An unjoined handler may still need the database.
+		return errors.Join(httpErr, fmt.Errorf("stop outbox worker: %w", err))
+	}
+
+	waitClose, cancelClose := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelClose()
+	closed := make(chan error, 1)
+	go func() { closed <- closeDB() }()
+	select {
+	case err := <-closed:
+		return errors.Join(httpErr, err)
+	case <-waitClose.Done():
+		return errors.Join(httpErr, fmt.Errorf("close database: %w", waitClose.Err()))
+	}
 }
 
 // assistant builds the AI-assistant side: the OAuth server that signs people
