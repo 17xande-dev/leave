@@ -286,10 +286,26 @@ uses a different session cookie name.
 
 **0011 outbox lease rehearsal, deploy and rollback (operator).** The migration
 adds two nullable columns to `outbox`; existing jobs, attempts and schedules
-are unchanged. Run from the repo root. Set `VERSION` to the new image tag and
-`OLD` to the currently running schema-10 tag (`kamal app version`). Once the
-new image is available on the Docker host, back up the running app, copy the
-backup off-host (see the backup procedure below), and rehearse on a separate copy:
+are unchanged. An already running old worker ignores leases even though its
+SQL still works against the additive schema; it could send the same job as
+the new worker. A fresh start of the old binary refuses schema 11.
+
+**Before downtime**, run from the repo root while the old app is serving.
+Stop if any step fails:
+
+```sh
+VERSION=$(git rev-parse HEAD)
+git diff --quiet HEAD -- &&  # Kamal builds from HEAD, not uncommitted changes
+  make check &&
+  bin/check-env &&
+  kamal build push --version "$VERSION" &&
+  kamal build pull --version "$VERSION" &&
+  kamal app version          # record the currently running schema-10 tag as OLD
+```
+
+Set `OLD` to the running tag you just recorded. Back up the running app, copy
+the backup off-host (see the backup procedure below), and rehearse on a separate
+copy:
 
 ```sh
 kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-0011.db"'
@@ -312,43 +328,72 @@ versions through 0010 and `10 -> 10` with the old image after undo. The total,
 pending and dead counts must stay unchanged; after Up the lease count must be
 zero. Every integrity check must return `ok` and every foreign-key check must
 return no rows. Never start the server against the rehearsal copy: it would
-run copies of live jobs.
+run copies of live jobs. Remove the rehearsal database and its sidecars once
+the checks pass, keeping the pre-deploy backup.
 
-**Stop first:** run `kamal app stop` and verify the old container is stopped
-before `kamal deploy`. An already running old worker ignores leases even
-though its SQL still works against the additive schema; it could send the same
-job as the new worker. A fresh start of the old binary refuses schema 11.
-New workers can overlap with each other, but delivery is still at least once:
-a crash after a remote service accepts an effect and before it is recorded can
-repeat it.
+**Maintenance window:** only after the backup and rehearsal pass, stop the
+old app. Make a final backup, migrate, and start the already-built image. Do
+not use `make deploy` here: it would rerun the gate and build during downtime.
+
+```sh
+kamal app stop && kamal app details
+```
+
+Verify no `leave-web` container is running, then run:
+
+```sh
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-stop-0011.db'" &&
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$VERSION -migrate"
+```
+
+Require `10 -> 11` and `0011 applied` before starting the app:
+
+```sh
+kamal deploy --skip-push --version "$VERSION"
+```
+
+After the app is healthy, check `kamal app exec --reuse 'leave -migrate-status'`
+reports `0011 applied`. New workers can overlap with each other, but delivery
+is still at least once: a crash after a remote service accepts an effect and
+before the result is recorded can repeat it.
 
 To roll back, keep the app stopped for the backup, undo and checks. Run these
 steps in order, stopping if any command fails or a check gives the wrong result:
 
 ```sh
-kamal app stop
-kamal app details  # verify no leave-web container is running before continuing
-ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-before-undo-0011.db'"
-ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db" < internal/db/testdata/undo_0011.sql
-ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'"
-ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$OLD -migrate-status"
+kamal app stop && kamal app details
+```
+
+Verify no `leave-web` container is running before touching SQLite:
+
+```sh
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-before-undo-0011.db'" &&
+  ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db" < internal/db/testdata/undo_0011.sql &&
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'" &&
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$OLD -migrate-status"
+```
+
+Require `ok`, no foreign-key rows, and 0010 as the newest applied migration
+in the old image's output. Only then restart the old app:
+
+```sh
 kamal rollback "$OLD"
 ```
 
-Before `kamal rollback`, require `ok` and no foreign-key rows, and require the
-old image to report 0010 as the newest applied migration. The undo script
-drops the two lease columns and deletes only the `version_id = 11` row from
-`goose_db_version`, in one transaction. It leaves earlier rows intact and does
-not rewind the table's `sqlite_sequence` counter. The old image sees version
-10 and can start. Job attempts and delivery history are unchanged; unfinished
-jobs lose their leases and return to the old scheduling rules.
+The undo script drops the two lease columns and deletes only the
+`version_id = 11` row from `goose_db_version`, in one transaction. It leaves
+earlier rows intact and does not rewind the table's `sqlite_sequence` counter.
+The old image sees version 10 and can start. Job attempts and delivery
+history are unchanged; unfinished jobs lose their leases and return to the
+old scheduling rules.
 
 **Never use `kamal app exec` without `--reuse` for this rollback.** It keeps
 the image's `leave` entrypoint and would start the real server and its worker,
-not `sqlite3`. The explicit `--entrypoint sqlite3` runs only the SQLite client;
-UID 10001 is the database owner. Do not restart the new server after undo:
-it would reapply 0011. Restoring the pre-deploy backup instead loses later
-writes and requires the Outlook-event cleanup in the restore procedure below.
+not `sqlite3`. `--reuse` needs a running app, so it cannot be used here either.
+The explicit `--entrypoint sqlite3` runs only the SQLite client; UID 10001 is
+the database owner. Do not restart the new server after undo: it would reapply
+0011. Restoring the pre-deploy backup instead loses later writes and requires
+the Outlook-event cleanup in the restore procedure below.
 
 **Several stretches in one request.** Apply, edit and admin Record leave accept up to
 3 separate date ranges for working-day leave. Touching or overlapping ranges merge.
@@ -735,9 +780,11 @@ gate, then `kamal deploy`: build the image locally (`linux/amd64`), push it to
 `ghcr.io/17xande-dev/leave`, and swap it in behind kamal-proxy once `GET /healthz`
 answers. It refuses to run with uncommitted changes, because Kamal builds from `HEAD`.
 
-**Deploys requiring a stop:** `kamal app stop` first, then `kamal deploy` for
-the move to WAL (see "Known limitation" below) and for the first deploy with
-outbox leases (see the 0011 rehearsal and rollback instructions above).
+**Deploys requiring a stop:** do not use `make deploy` after stopping the
+app. Run the gate and `kamal build push` while the old app is still serving.
+Then stop it before deploying with `kamal deploy --skip-push`. See the 0011
+runbook above for the full outbox rollout, and the WAL instructions below
+if moving from a pre-WAL image.
 
 One-time setup, on your workstation:
 
@@ -1059,10 +1106,11 @@ torn state. The database runs in WAL mode, so **while the app runs it is three f
 running app; use `.backup` (or `VACUUM INTO`) as above, or stop the app first. A fourth file,
 `leave.db.migrate-lock`, sits beside them: startup, `-migrate` and `-migrate-status` take an
 exclusive lock on it so two processes opening the database together cannot both migrate it.
-It is empty; do not delete it while the app runs. Run migrating commands as the image user (e.g.
-through `kamal app exec`), never as root: every open takes `leave.db.migrate-lock` read-write, so a
-root-created (0600) lock file stops the app starting on its next restart, and makes the status
-command and the cmd tools fail with permission denied.
+It is empty; do not delete it while the app runs. Run migrating commands as the image user (see
+the explicit `docker run --user 10001` commands above), never as root: every open takes
+`leave.db.migrate-lock` read-write. A root-created (0600) lock file stops the app
+starting on its next restart and makes the status command and the cmd tools
+fail with permission denied.
 
 **Automatic daily backups.** At startup and then daily the app writes a `VACUUM INTO` copy of the
 database to `/data/backups/leave-YYYY-MM-DD.db` (the date is the UTC day), one per day,
@@ -1116,16 +1164,20 @@ was killed mid-write. (The old stack's app is stopped first, so its volume is sa
 the same copy of a running WAL database would not be.) The LDAP CA bundle lives in `/home/it_admin/leave/certs`; never
 delete that directory (it is also the old compose `./certs`).
 
-**Known limitation.** During each deploy the old and new containers briefly overlap. The
-outbox worker in both may rarely run the same job twice (a duplicate email, for
-example). It is low risk and accepted.
+**Known limitation.** With schema 11 and the new worker, overlapping containers
+claim distinct jobs while their leases hold. Delivery is still at least once:
+for example, a crash after a remote send but before recording it may cause a
+duplicate email. The schema-10 worker does not use leases and must not overlap
+the new worker.
 
-**The first deploy after the move to WAL must stop the old container first**: run
-`kamal app stop`, then `kamal deploy`. Switching the database file to WAL needs an exclusive
+**The first deploy after the move to WAL must stop the old container first**: once
+the gate and image push are complete, run `kamal app stop`, then
+`kamal deploy --skip-push`. Switching the database file to WAL needs an exclusive
 lock, and while the old container is still writing, the new one can exit at startup with
 `sqlite settings: sqlitekit: check: database is locked (5) (SQLITE_BUSY)`. It fails safe (the old
 container keeps serving and the file is untouched) but the deploy fails. Once the file is in
-WAL mode, later deploys need no stop and overlap as described above.
+WAL mode, the WAL change does not require further stops; follow the separate
+stop-first instructions for the outbox lease migration above.
 
 ### 4. Public access: the shared Cloudflare Tunnel
 
