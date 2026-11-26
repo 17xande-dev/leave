@@ -77,12 +77,8 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 	if err != nil {
 		return err
 	}
-	closeDatabase := true
-	defer func() {
-		if closeDatabase {
-			database.Close()
-		}
-	}()
+	shutdown := database.Close
+	defer func() { err = errors.Join(err, shutdown()) }()
 
 	dir, err := newDirectory(cfg.Directory)
 	if err != nil {
@@ -135,11 +131,22 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 		return err
 	}
 
-	backup := backupJob(database, cfg)
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           app,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		// The default is 1 MB per request, and some limiter keys come from a
+		// header. Nothing this app sends or sets comes near 64 KiB.
+		MaxHeaderBytes: 64 << 10,
+		IdleTimeout:    2 * time.Minute,
+	}
+	// Replace startup-only cleanup. There must not be a fallback Close
+	// after the worker starts, since it might not join by the deadline.
+	shutdown = startOutbox(ctx, worker, srv.Shutdown, database.Close)
 
-	shutdown := startOutbox(ctx, worker, database.Close)
-	// The shutdown path owns Close after the worker starts.
-	closeDatabase = false
+	backup := backupJob(database, cfg)
 	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
 	go every(ctx, time.Hour, func() {
 		if n, err := sessions.DeleteExpired(ctx); err != nil {
@@ -157,18 +164,6 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 		backup(ctx)
 	})
 
-	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           app,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		// The default is 1 MB per request, and some limiter keys come from a
-		// header. Nothing this app sends or sets comes near 64 KiB.
-		MaxHeaderBytes: 64 << 10,
-		IdleTimeout:    2 * time.Minute,
-	}
-	defer func() { err = errors.Join(err, shutdown(srv.Shutdown)) }()
 	errc := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", cfg.ListenAddr, "directory", cfg.Directory.Kind)
@@ -184,9 +179,9 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 	return nil
 }
 
-func startOutbox(ctx context.Context, worker *outbox.Worker, closeDB func() error) func(func(context.Context) error) error {
+func startOutbox(ctx context.Context, worker *outbox.Worker, shutdownHTTP func(context.Context) error, closeDB func() error) func() error {
 	stop := worker.Start(ctx, 30*time.Second)
-	return func(shutdownHTTP func(context.Context) error) error {
+	return func() error {
 		return shutdownService(shutdownHTTP, stop, closeDB)
 	}
 }

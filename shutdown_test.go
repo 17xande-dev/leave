@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -13,28 +15,12 @@ import (
 )
 
 func TestOutboxShutdownJoinsBeforeDatabaseClose(t *testing.T) {
-	d := dbtest.New(t)
-	if err := outbox.Enqueue(t.Context(), d, outbox.KindEmail, "fixture"); err != nil {
-		t.Fatal(err)
-	}
 	synctest.Test(t, func(t *testing.T) {
+		d, w, started, finish := heldOutbox(t)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		// The job's timestamp came from the real clock, not the bubble's.
-		if _, err := d.ExecContext(ctx, `UPDATE outbox SET next_attempt_at = '2000-01-01T00:00:00Z'`); err != nil {
-			t.Fatal(err)
-		}
-		started, finish := make(chan struct{}), make(chan struct{})
-		w := outbox.NewWorker(outbox.NewStore(d), map[string]outbox.Handler{
-			outbox.KindEmail: func(ctx context.Context, _ []byte) error {
-				close(started)
-				<-ctx.Done()
-				<-finish
-				return nil
-			},
-		})
 		closed := make(chan struct{})
-		shutdown := startOutbox(ctx, w, func() error {
+		shutdown := startOutbox(ctx, w, func(context.Context) error { return nil }, func() error {
 			defer close(closed)
 			var done bool
 			err := d.QueryRow(`SELECT done_at IS NOT NULL FROM outbox`).Scan(&done)
@@ -46,14 +32,14 @@ func TestOutboxShutdownJoinsBeforeDatabaseClose(t *testing.T) {
 		<-started
 		cancel()
 		done := make(chan error, 1)
-		go func() { done <- shutdown(func(context.Context) error { return nil }) }()
+		go func() { done <- shutdown() }()
 		synctest.Wait()
 		select {
 		case <-closed:
 			t.Error("database closed while the worker was still running")
 		default:
 		}
-		close(finish)
+		finish()
 		if err := <-done; err != nil {
 			t.Fatal(err)
 		}
@@ -67,18 +53,47 @@ func TestOutboxShutdownJoinsBeforeDatabaseClose(t *testing.T) {
 
 func TestShutdownLeavesDatabaseOpenAfterWorkerStopTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		d, w, started, finish := heldOutbox(t)
+		shutdown := startOutbox(t.Context(), w, waitForShutdownDeadline, d.Close)
+		<-started
 		begin := time.Now()
-		err := shutdownService(waitForShutdownDeadline, waitForShutdownDeadline, func() error {
-			t.Error("database close called even though the worker did not join")
-			return nil
-		})
+		err := shutdown()
 		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "stop outbox worker") {
 			t.Fatalf("shutdown error = %v, want worker deadline exceeded", err)
 		}
 		if elapsed := time.Since(begin); elapsed != 10*time.Second {
 			t.Fatalf("shutdown waited %s, want the shared 10s deadline", elapsed)
 		}
+		if err := d.PingContext(t.Context()); err != nil {
+			t.Fatalf("database closed while the handler was still running: %v", err)
+		}
+		finish()
+		synctest.Wait()
+		var done bool
+		if err := d.QueryRow(`SELECT done_at IS NOT NULL FROM outbox`).Scan(&done); err != nil || !done {
+			t.Fatalf("late worker could not record success: done=%t err=%v", done, err)
+		}
 	})
+}
+
+func heldOutbox(t *testing.T) (*sql.DB, *outbox.Worker, <-chan struct{}, func()) {
+	t.Helper()
+	d := dbtest.New(t)
+	if err := outbox.Enqueue(t.Context(), d, outbox.KindEmail, "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	started, finish := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(finish) })
+	t.Cleanup(release)
+	w := outbox.NewWorker(outbox.NewStore(d), map[string]outbox.Handler{
+		outbox.KindEmail: func(ctx context.Context, _ []byte) error {
+			close(started)
+			<-ctx.Done()
+			<-finish
+			return nil
+		},
+	})
+	return d, w, started, release
 }
 
 func TestShutdownWaitBudget(t *testing.T) {
