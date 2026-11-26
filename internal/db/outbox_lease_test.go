@@ -52,6 +52,22 @@ func TestOutboxLeaseMigrationRoundTrip(t *testing.T) {
 		if _, err := goosestrict.NewProvider(d, oldMigrations); err == nil || !strings.Contains(err.Error(), "written by a newer build") {
 			t.Fatalf("old migration provider against v11: %v, want newer-build refusal", err)
 		}
+		if pass == 0 {
+			for _, tc := range []struct {
+				name, update string
+			}{
+				{"lease without token", "lease_until = 123"},
+				{"token without lease", "claim_token = randomblob(16)"},
+				{"short token", "lease_until = 123, claim_token = randomblob(15)"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					_, err := d.ExecContext(ctx, `UPDATE outbox SET `+tc.update+` WHERE id = 1`)
+					if err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+						t.Errorf("invalid lease update: %v, want CHECK constraint failure", err)
+					}
+				})
+			}
+		}
 		contractExec(t, d, oldInsert, 2)
 		if got := contractRows(t, d, `SELECT id, lease_until, claim_token FROM outbox ORDER BY id`); !reflect.DeepEqual(got, [][]any{
 			{int64(1), nil, nil}, {int64(2), nil, nil},

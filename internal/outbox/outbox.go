@@ -95,6 +95,7 @@ func (s *Store) claim(ctx context.Context, now time.Time) (heldJob, error) {
 	// Choosing and updating the row under the same SQLite write lock lets
 	// separate processes compete without holding a transaction during delivery.
 	// Charge the attempt now, because a crash cannot charge it afterwards.
+	// The random token fences writers: it needs uniqueness, not secrecy.
 	err := s.db.QueryRowContext(ctx, `UPDATE outbox
 		SET lease_until = ?, claim_token = randomblob(16), attempts = min(attempts + 1, ?)
 		WHERE id = (
