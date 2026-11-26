@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/17xande-dev/websec/csrf"
 )
 
 // Config is deployment wiring and secrets only. Policy an admin would change
@@ -113,11 +115,23 @@ func DatabasePath() string {
 // Load reads the environment. SESSION_TTL is retired: session lifetime comes
 // from websec's session.Default, and a leftover SESSION_TTL is ignored.
 func Load() (Config, error) {
+	// Booleans are exactly true or false. A typo must stop start-up: read as
+	// "anything but true is false", COOKIE_SECURE=ture served non-Secure
+	// cookies and turned off the DIRECTORY=fake guard below.
+	cookieSecure, err := boolean("COOKIE_SECURE", true)
+	if err != nil {
+		return Config{}, err
+	}
+	skipVerify, err := boolean("LDAP_INSECURE_SKIP_VERIFY", false)
+	if err != nil {
+		return Config{}, err
+	}
+
 	c := Config{
 		ListenAddr:     getenv("LISTEN_ADDR", ":8080"),
 		DBPath:         DatabasePath(),
 		BaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/"),
-		CookieSecure:   getenv("COOKIE_SECURE", "true") == "true",
+		CookieSecure:   cookieSecure,
 		TrustedProxies: parseList(os.Getenv("TRUSTED_PROXIES")),
 		Directory: Directory{
 			Kind:               getenv("DIRECTORY", "ldap"),
@@ -130,7 +144,7 @@ func Load() (Config, error) {
 			AdminGroup:         strings.TrimSpace(os.Getenv("LDAP_ADMIN_GROUP")),
 			TeamsBaseDN:        strings.TrimSpace(os.Getenv("LDAP_TEAMS_BASE_DN")),
 			CAFile:             strings.TrimSpace(os.Getenv("LDAP_CA_FILE")),
-			InsecureSkipVerify: os.Getenv("LDAP_INSECURE_SKIP_VERIFY") == "true",
+			InsecureSkipVerify: skipVerify,
 		},
 		Graph: Graph{
 			TenantID:        strings.TrimSpace(os.Getenv("GRAPH_TENANT_ID")),
@@ -142,7 +156,12 @@ func Load() (Config, error) {
 		},
 	}
 
-	var err error
+	// The same rules csrf.New applies, checked here so a bad BASE_URL stops
+	// start-up before db.Open creates and migrates the database. The error
+	// names the key and never repeats the value.
+	if err := csrf.ValidateOrigin(c.BaseURL, !c.CookieSecure); err != nil {
+		return Config{}, fmt.Errorf("config: BASE_URL: %w", err)
+	}
 	if c.Directory.SyncInterval, err = duration("DIRECTORY_SYNC_INTERVAL", time.Hour); err != nil {
 		return Config{}, err
 	}
@@ -205,6 +224,21 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// boolean reads a setting that is exactly "true" or "false". Unset or empty
+// means fallback; no trimming and no case folding. The error names the key
+// only: a typo may be another setting's value pasted into the wrong line.
+func boolean(key string, fallback bool) (bool, error) {
+	switch v := os.Getenv(key); v {
+	case "":
+		return fallback, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("config: %s must be exactly true or false", key)
 }
 
 func duration(key string, fallback time.Duration) (time.Duration, error) {
