@@ -852,8 +852,13 @@ func (h *Handler) AdminRetry(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := h.outbox.Retry(r.Context(), id); err != nil {
+	retried, err := h.outbox.Retry(r.Context(), id)
+	if err != nil {
 		h.serverError(w, r, err)
+		return
+	}
+	if !retried {
+		http.Redirect(w, r, "/admin/outbox?notice=retry-stale", http.StatusSeeOther)
 		return
 	}
 	h.kick()

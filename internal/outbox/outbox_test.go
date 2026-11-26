@@ -46,7 +46,9 @@ func TestRetriesThenFails(t *testing.T) {
 	}
 
 	// A person retries it, and this time it works.
-	s.Retry(ctx, ps[0].ID)
+	if retried, err := s.Retry(ctx, ps[0].ID); err != nil || !retried {
+		t.Fatalf("retry dead job: retried=%t err=%v", retried, err)
+	}
 	w.handlers[KindEmail] = func(context.Context, []byte) error { calls++; return nil }
 	w.RunDue(ctx)
 	if ps, _ := s.Problems(ctx); len(ps) != 0 {

@@ -139,8 +139,8 @@ func TestAdminRetryCannotReuseAnOldFence(t *testing.T) {
 	if written, err := s.record(ctx, final, errors.New("fixture failure"), false, now); err != nil || !written {
 		t.Fatalf("dead-letter final attempt: written=%t err=%v", written, err)
 	}
-	if err := s.Retry(ctx, first.ID); err != nil {
-		t.Fatal(err)
+	if retried, err := s.Retry(ctx, first.ID); err != nil || !retried {
+		t.Fatalf("retry dead job: retried=%t err=%v", retried, err)
 	}
 	retried := mustClaim(t, ctx, s, now)
 	if retried.Attempts != first.Attempts || bytes.Equal(retried.token, first.token) {

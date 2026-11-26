@@ -215,12 +215,16 @@ func Summary(j Job) string {
 }
 
 // Retry puts a dead job back in the queue with a fresh set of attempts.
-// Leave active jobs and their backoff schedules under the worker's control.
-func (s *Store) Retry(ctx context.Context, id int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE outbox SET failed_at = NULL, attempts = 0, next_attempt_at = ?
+// It reports whether a job was requeued, leaving active schedules alone.
+func (s *Store) Retry(ctx context.Context, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE outbox SET failed_at = NULL, attempts = 0, next_attempt_at = ?
 		WHERE id = ? AND done_at IS NULL AND failed_at IS NOT NULL AND claim_token IS NULL`,
 		time.Now().UTC().Format(time.RFC3339), id)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // Worker runs due jobs one at a time, preferring the oldest eligible job.

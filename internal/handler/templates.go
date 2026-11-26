@@ -230,6 +230,7 @@ var notices = map[string]string{
 	"unrecorded":              "Recorded leave removed. It no longer counts against their balance.",
 	"holidays-generated":      "Public holidays generated.",
 	"retried":                 "Queued for another attempt.",
+	"retry-stale":             "No job was retried. It may have already been retried or delivered.",
 	"shutdown-created":        "Shutdown created, and everyone has been sent their pre-filled requests.",
 	"drafts-generated":        "Requests created for anyone who did not have them yet.",
 	"shutdown-deleted":        "Shutdown deleted, with its unsubmitted requests.",

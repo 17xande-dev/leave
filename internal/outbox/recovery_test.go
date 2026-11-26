@@ -39,8 +39,8 @@ func TestRetryOnlyDeadJobs(t *testing.T) {
 		if err := d.QueryRowContext(ctx, `SELECT next_attempt_at FROM outbox WHERE id = ?`, id).Scan(&before); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Retry(ctx, id); err != nil {
-			t.Fatal(err)
+		if retried, err := s.Retry(ctx, id); err != nil || retried {
+			t.Fatalf("retry unresolved job %d: retried=%t err=%v", id, retried, err)
 		}
 		if err := d.QueryRowContext(ctx, `SELECT attempts, next_attempt_at FROM outbox WHERE id = ?`, id).Scan(&attempts, &after); err != nil {
 			t.Fatal(err)
