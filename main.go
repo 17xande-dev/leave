@@ -258,7 +258,7 @@ func newDirectory(c config.Directory) (directory.Directory, error) {
 		return directory.LoadFake(c.FakeFile)
 	}
 	return directory.NewLDAP(directory.LDAPConfig{
-		URL: c.URL, BindDN: c.BindDN, BindPassword: c.BindPassword, BaseDN: c.BaseDN,
+		URL: c.URL, BindDN: c.BindDN, BindPassword: c.BindPassword.Reveal(), BaseDN: c.BaseDN,
 		UserFilter: c.UserFilter, AdminGroup: c.AdminGroup, TeamsBaseDN: c.TeamsBaseDN, CAFile: c.CAFile,
 		InsecureSkipVerify: c.InsecureSkipVerify,
 	})

@@ -4,14 +4,14 @@
 package config
 
 import (
-	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/17xande-dev/env"
 	"github.com/17xande-dev/websec/csrf"
 )
 
@@ -64,7 +64,7 @@ type Directory struct {
 
 	URL          string // ldaps://dc1.example.local:636 or ldap://…:389 (StartTLS is then required)
 	BindDN       string
-	BindPassword string
+	BindPassword env.Secret
 	BaseDN       string
 	// UserFilter restricts which accounts are people who take leave. The
 	// default excludes disabled accounts and non-person objects.
@@ -92,7 +92,7 @@ type DevSMTP struct {
 type Graph struct {
 	TenantID     string
 	ClientID     string
-	ClientSecret string
+	ClientSecret env.Secret
 	// From is the mailbox notifications are sent as.
 	From string
 	// CalendarMailbox owns the shared leave calendar; CalendarID picks a
@@ -103,79 +103,94 @@ type Graph struct {
 
 // Configured reports whether Graph can be used at all.
 func (g Graph) Configured() bool {
-	return g.TenantID != "" && g.ClientID != "" && g.ClientSecret != ""
+	return g.TenantID != "" && g.ClientID != "" && g.ClientSecret.IsSet()
 }
+
+const defaultDBPath = "data/leave.db"
 
 // DatabasePath reads the shared database location without requiring server
 // credentials, so migration status also works in an operator's local shell.
 func DatabasePath() string {
-	return getenv("DB_PATH", "data/leave.db")
+	if path := strings.TrimSpace(os.Getenv("DB_PATH")); path != "" {
+		return path
+	}
+	return defaultDBPath
 }
 
 // Load reads the environment. SESSION_TTL is retired: session lifetime comes
 // from websec's session.Default, and a leftover SESSION_TTL is ignored.
-func Load() (Config, error) {
-	// Booleans are exactly true or false. A typo must stop start-up: read as
-	// "anything but true is false", COOKIE_SECURE=ture served non-Secure
-	// cookies and turned off the DIRECTORY=fake guard below.
-	cookieSecure, err := boolean("COOKIE_SECURE", true)
-	if err != nil {
-		return Config{}, err
-	}
-	skipVerify, err := boolean("LDAP_INSECURE_SKIP_VERIFY", false)
-	if err != nil {
-		return Config{}, err
-	}
+func Load() (Config, error) { return load(os.LookupEnv) }
 
+func load(lookup env.Lookup) (Config, error) {
+	r := env.New(func(key string) (string, bool) {
+		value, ok := lookup(key)
+		// These settings historically trimmed operator whitespace before
+		// applying their defaults. Booleans and credentials keep exact input.
+		switch key {
+		case "LISTEN_ADDR", "DB_PATH", "BACKUP_DIR", "BACKUP_KEEP", "BASE_URL",
+			"DIRECTORY", "FAKE_DIRECTORY_FILE", "LDAP_URL", "LDAP_BIND_DN", "LDAP_BASE_DN",
+			"LDAP_USER_FILTER", "LDAP_ADMIN_GROUP", "LDAP_TEAMS_BASE_DN", "LDAP_CA_FILE",
+			"DIRECTORY_SYNC_INTERVAL", "GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "EMAIL_FROM",
+			"LEAVE_CALENDAR_MAILBOX", "LEAVE_CALENDAR_ID", "DEV_SMTP_HOST", "DEV_SMTP_PORT", "TZ_NAME":
+			value = strings.TrimSpace(value)
+		}
+		return value, ok
+	})
+	from := r.String("EMAIL_FROM", "")
 	c := Config{
-		ListenAddr:     getenv("LISTEN_ADDR", ":8080"),
-		DBPath:         DatabasePath(),
-		BaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/"),
-		CookieSecure:   cookieSecure,
-		TrustedProxies: parseList(os.Getenv("TRUSTED_PROXIES")),
+		ListenAddr:     r.String("LISTEN_ADDR", ":8080"),
+		DBPath:         r.String("DB_PATH", defaultDBPath),
+		BaseURL:        strings.TrimRight(r.String("BASE_URL", ""), "/"),
+		CookieSecure:   r.Bool("COOKIE_SECURE", true),
+		TrustedProxies: r.List("TRUSTED_PROXIES", nil),
+		BackupKeep:     r.Int("BACKUP_KEEP", 14, 0, math.MaxInt),
 		Directory: Directory{
-			Kind:               getenv("DIRECTORY", "ldap"),
-			FakeFile:           getenv("FAKE_DIRECTORY_FILE", "testdata/directory.json"),
-			URL:                strings.TrimSpace(os.Getenv("LDAP_URL")),
-			BindDN:             strings.TrimSpace(os.Getenv("LDAP_BIND_DN")),
-			BindPassword:       os.Getenv("LDAP_BIND_PASSWORD"),
-			BaseDN:             strings.TrimSpace(os.Getenv("LDAP_BASE_DN")),
-			UserFilter:         getenv("LDAP_USER_FILTER", "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"),
-			AdminGroup:         strings.TrimSpace(os.Getenv("LDAP_ADMIN_GROUP")),
-			TeamsBaseDN:        strings.TrimSpace(os.Getenv("LDAP_TEAMS_BASE_DN")),
-			CAFile:             strings.TrimSpace(os.Getenv("LDAP_CA_FILE")),
-			InsecureSkipVerify: skipVerify,
+			Kind:               r.String("DIRECTORY", "ldap"),
+			FakeFile:           r.String("FAKE_DIRECTORY_FILE", "testdata/directory.json"),
+			URL:                r.String("LDAP_URL", ""),
+			BindDN:             r.String("LDAP_BIND_DN", ""),
+			BindPassword:       r.Secret("LDAP_BIND_PASSWORD"),
+			BaseDN:             r.String("LDAP_BASE_DN", ""),
+			UserFilter:         r.String("LDAP_USER_FILTER", "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"),
+			AdminGroup:         r.String("LDAP_ADMIN_GROUP", ""),
+			TeamsBaseDN:        r.String("LDAP_TEAMS_BASE_DN", ""),
+			CAFile:             r.String("LDAP_CA_FILE", ""),
+			InsecureSkipVerify: r.Bool("LDAP_INSECURE_SKIP_VERIFY", false),
+			SyncInterval:       r.Duration("DIRECTORY_SYNC_INTERVAL", time.Hour, time.Nanosecond, 0),
 		},
 		Graph: Graph{
-			TenantID:        strings.TrimSpace(os.Getenv("GRAPH_TENANT_ID")),
-			ClientID:        strings.TrimSpace(os.Getenv("GRAPH_CLIENT_ID")),
-			ClientSecret:    os.Getenv("GRAPH_CLIENT_SECRET"),
-			From:            strings.TrimSpace(os.Getenv("EMAIL_FROM")),
-			CalendarMailbox: strings.TrimSpace(os.Getenv("LEAVE_CALENDAR_MAILBOX")),
-			CalendarID:      strings.TrimSpace(os.Getenv("LEAVE_CALENDAR_ID")),
+			TenantID:        r.String("GRAPH_TENANT_ID", ""),
+			ClientID:        r.String("GRAPH_CLIENT_ID", ""),
+			ClientSecret:    r.Secret("GRAPH_CLIENT_SECRET"),
+			From:            from,
+			CalendarMailbox: r.String("LEAVE_CALENDAR_MAILBOX", ""),
+			CalendarID:      r.String("LEAVE_CALENDAR_ID", ""),
+		},
+		DevSMTP: DevSMTP{
+			Host: r.String("DEV_SMTP_HOST", ""),
+			Port: r.Int("DEV_SMTP_PORT", 1025, 0, math.MaxInt),
+			From: from,
 		},
 	}
-
-	// The same rules csrf.New applies, checked here so a bad BASE_URL stops
-	// start-up before db.Open creates and migrates the database. The error
-	// names the key and never repeats the value.
-	if err := csrf.ValidateOrigin(c.BaseURL, !c.CookieSecure); err != nil {
-		return Config{}, fmt.Errorf("config: BASE_URL: %w", err)
+	if c.DevSMTP.From == "" {
+		c.DevSMTP.From = "leave@localhost"
 	}
-	if c.Directory.SyncInterval, err = duration("DIRECTORY_SYNC_INTERVAL", time.Hour); err != nil {
-		return Config{}, err
+	c.BackupDir = r.String("BACKUP_DIR", filepath.Join(filepath.Dir(c.DBPath), "backups"))
+	location, err := time.LoadLocation(r.String("TZ_NAME", "Africa/Johannesburg"))
+	if err != nil {
+		r.Fail("TZ_NAME", "must be a known time zone")
+	}
+	c.Location = location
+
+	// A bad origin must stop startup before db.Open creates or migrates the database.
+	if err := csrf.ValidateOrigin(c.BaseURL, !c.CookieSecure); err != nil {
+		r.Fail("BASE_URL", "must be a canonical origin (HTTPS when COOKIE_SECURE is true)")
 	}
 	for _, cidr := range c.TrustedProxies {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
-			return Config{}, fmt.Errorf("config: TRUSTED_PROXIES: %w", err)
+			r.Fail("TRUSTED_PROXIES", "must be a comma-separated list of valid CIDRs")
+			break
 		}
-	}
-	c.BackupDir = getenv("BACKUP_DIR", filepath.Join(filepath.Dir(c.DBPath), "backups"))
-	if c.BackupKeep, err = integer("BACKUP_KEEP", 14); err != nil {
-		return Config{}, err
-	}
-	if c.Location, err = time.LoadLocation(getenv("TZ_NAME", "Africa/Johannesburg")); err != nil {
-		return Config{}, fmt.Errorf("config: TZ_NAME: %w", err)
 	}
 
 	switch c.Directory.Kind {
@@ -185,92 +200,29 @@ func Load() (Config, error) {
 		// is every real deployment -- keeps a copied dev .env from quietly
 		// opening the door.
 		if c.CookieSecure {
-			return Config{}, fmt.Errorf("config: DIRECTORY=fake accepts any password and is " +
-				"only allowed with COOKIE_SECURE=false (local development)")
+			r.Fail("DIRECTORY", "DIRECTORY=fake accepts any password and requires COOKIE_SECURE=false (local development)")
 		}
 	case "ldap":
 		d := c.Directory
-		if d.URL == "" || d.BindDN == "" || d.BindPassword == "" || d.BaseDN == "" {
-			return Config{}, fmt.Errorf("config: LDAP_URL, LDAP_BIND_DN, LDAP_BIND_PASSWORD " +
-				"and LDAP_BASE_DN are required when DIRECTORY=ldap")
+		if d.URL == "" || d.BindDN == "" || !d.BindPassword.IsSet() || d.BaseDN == "" {
+			r.Fail("DIRECTORY", "LDAP_URL, LDAP_BIND_DN, LDAP_BIND_PASSWORD and LDAP_BASE_DN are required for LDAP")
 		}
 	default:
-		return Config{}, fmt.Errorf("config: DIRECTORY must be ldap or fake, got %q", c.Directory.Kind)
+		r.Fail("DIRECTORY", "must be ldap or fake")
 	}
 
 	// Graph is all or nothing: a half-configured registration is caught at
 	// boot rather than at the first approval nobody hears about.
 	g := c.Graph
-	if (g.TenantID != "" || g.ClientID != "" || g.ClientSecret != "") && !g.Configured() {
-		return Config{}, fmt.Errorf("config: GRAPH_TENANT_ID, GRAPH_CLIENT_ID and " +
-			"GRAPH_CLIENT_SECRET must all be set, or none of them")
+	if (g.TenantID != "" || g.ClientID != "" || g.ClientSecret.IsSet()) && !g.Configured() {
+		r.Fail("GRAPH_CLIENT_SECRET", "GRAPH_TENANT_ID, GRAPH_CLIENT_ID and GRAPH_CLIENT_SECRET must all be set, or none of them")
 	}
 	if g.Configured() && (g.From == "" || g.CalendarMailbox == "") {
-		return Config{}, fmt.Errorf("config: EMAIL_FROM and LEAVE_CALENDAR_MAILBOX are " +
-			"required when Graph is configured")
+		r.Fail("EMAIL_FROM", "EMAIL_FROM and LEAVE_CALENDAR_MAILBOX are required when Graph is configured")
 	}
 
-	c.DevSMTP.Host = strings.TrimSpace(os.Getenv("DEV_SMTP_HOST"))
-	c.DevSMTP.From = getenv("EMAIL_FROM", "leave@localhost")
-	if c.DevSMTP.Port, err = integer("DEV_SMTP_PORT", 1025); err != nil {
+	if err := r.Err(); err != nil {
 		return Config{}, err
 	}
-
 	return c, nil
-}
-
-func getenv(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// boolean reads a setting that is exactly "true" or "false". Unset or empty
-// means fallback; no trimming and no case folding. The error names the key
-// only: a typo may be another setting's value pasted into the wrong line.
-func boolean(key string, fallback bool) (bool, error) {
-	switch v := os.Getenv(key); v {
-	case "":
-		return fallback, nil
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	}
-	return false, fmt.Errorf("config: %s must be exactly true or false", key)
-}
-
-func duration(key string, fallback time.Duration) (time.Duration, error) {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("config: %s must be a positive duration like 8h, got %q", key, v)
-	}
-	return d, nil
-}
-
-func integer(key string, fallback int) (int, error) {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback, nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("config: %s must be a non-negative integer, got %q", key, v)
-	}
-	return n, nil
-}
-
-func parseList(s string) []string {
-	var out []string
-	for p := range strings.SplitSeq(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

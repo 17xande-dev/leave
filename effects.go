@@ -41,7 +41,7 @@ func graphTokens(cfg config.Config) (mailer.TokenSource, error) {
 	if !cfg.Graph.Configured() {
 		return nil, nil
 	}
-	return msauth.New(cfg.Graph.TenantID, cfg.Graph.ClientID, cfg.Graph.ClientSecret,
+	return msauth.New(cfg.Graph.TenantID, cfg.Graph.ClientID, cfg.Graph.ClientSecret.Reveal(),
 		msauth.WithScope(msauth.ScopeGraph))
 }
 
