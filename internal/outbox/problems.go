@@ -51,6 +51,12 @@ func Problems(ctx context.Context, q *Queue) ([]outbox.Info, error) {
 func Summary(job outbox.Info) string {
 	switch job.Kind {
 	case KindEmail:
+		// Delegation mails have no request, and neither do imported legacy ones.
+		number, ok := strings.CutPrefix(job.Subject, "request:")
+		number, isEmail := strings.CutSuffix(number, ":email")
+		if id, err := strconv.ParseInt(number, 10, 64); ok && isEmail && err == nil && id > 0 {
+			return fmt.Sprintf("Email about request %d", id)
+		}
 		return "Email notification"
 	case KindCalendarCreate, KindCalendarDelete:
 		number, ok := strings.CutPrefix(job.Subject, "request:")

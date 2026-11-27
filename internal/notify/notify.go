@@ -423,12 +423,18 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			return err
 		}
 		m.To = []string{p.Email}
-		if err := outbox.Enqueue(ctx, n.queue, tx, outbox.KindEmail, "", m); err != nil {
+		// Not the calendar's "request:<id>": RetrySubject and DeleteSubject match
+		// the subject exactly, so retrying a request's calendar jobs must not
+		// resend its emails. The id still shows who the mail was for.
+		if err := outbox.Enqueue(ctx, n.queue, tx, outbox.KindEmail, EmailSubject(r.ID), m); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+// EmailSubject is the queue subject of a request's notification emails.
+func EmailSubject(requestID int64) string { return fmt.Sprintf("request:%d:email", requestID) }
 
 func (n *Notifier) render(tmpl string, d any, link, linkText string) (mailer.Message, error) {
 	own, ok := textTmpls[tmpl]

@@ -64,6 +64,9 @@ func TestSummaryUsesCalendarReference(t *testing.T) {
 		{leaveoutbox.KindCalendarDelete, "request:7", "Remove request 7 on the shared calendar"},
 		{leaveoutbox.KindCalendarCreate, "7", "calendar_create"},
 		{leaveoutbox.KindEmail, "", "Email notification"},
+		{leaveoutbox.KindEmail, "request:7:email", "Email about request 7"},
+		{leaveoutbox.KindEmail, "request:7", "Email notification"},
+		{leaveoutbox.KindEmail, "request:x:email", "Email notification"},
 	} {
 		if got := leaveoutbox.Summary(outbox.Info{Kind: tc.kind, Subject: tc.subject}); got != tc.want {
 			t.Errorf("Summary(%s, %s) = %q, want %q", tc.kind, tc.subject, got, tc.want)

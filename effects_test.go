@@ -218,6 +218,16 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	if jobs := outboxtest.Enqueued(t, w, sharedoutbox.Filter{Kind: outbox.KindCalendarCreate}); len(jobs) != 1 || jobs[0].Subject != calendarSubject {
 		t.Fatalf("approval's calendar job did not reference %s: %+v", calendarSubject, jobs)
 	}
+	emailSubject := notify.EmailSubject(r.ID)
+	emails := outboxtest.Enqueued(t, w, sharedoutbox.Filter{Kind: outbox.KindEmail})
+	if len(emails) == 0 {
+		t.Fatal("no email jobs were enqueued")
+	}
+	for _, j := range emails {
+		if j.Subject != emailSubject || j.Subject == calendarSubject {
+			t.Fatalf("email job subject %q; want %q, which must differ from the calendar's %q", j.Subject, emailSubject, calendarSubject)
+		}
+	}
 	w.RunDue(ctx)
 
 	if len(mail.To("boss@x.test")) != 1 || len(mail.To("s@x.test")) != 1 {
