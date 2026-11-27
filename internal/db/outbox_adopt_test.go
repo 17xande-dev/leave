@@ -210,3 +210,43 @@ func TestOutboxAdoptionRedeployAfterRollbackImportsOnce(t *testing.T) {
 		again.Close()
 	}
 }
+
+func TestOutboxAdoptionRefusesUnreadableLegacyTimestamps(t *testing.T) {
+	for _, tc := range []struct{ column, next, created, failed string }{
+		{"next_attempt_at", "garbage", "2026-01-01T00:00:00Z", ""},
+		{"created_at", "2026-01-01T00:00:00Z", "garbage", ""},
+		{"failed_at", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "garbage"},
+	} {
+		t.Run(tc.column, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "test.db")
+			d, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			contractExec(t, d, `INSERT INTO outbox (id, kind, payload, next_attempt_at, created_at, failed_at)
+				VALUES (3, 'email', '{"secret":"SECRETPAYLOAD"}', ?, ?, NULLIF(?, ''))`, tc.next, tc.created, tc.failed)
+			contractExec(t, d, `INSERT INTO outbox (id, kind, payload, next_attempt_at, created_at)
+				VALUES (4, 'email', '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+			opened, err := Open(path)
+			if err == nil {
+				opened.Close()
+				t.Fatal("startup accepted an unreadable legacy timestamp")
+			}
+			if !strings.Contains(err.Error(), "row 3 has an unreadable "+tc.column) || strings.Contains(err.Error(), "SECRETPAYLOAD") || strings.Contains(err.Error(), "constraint") {
+				t.Errorf("error = %q; want the row and column, class only", err)
+			}
+			// Nothing is skipped: the good row is not imported either.
+			if got := contractRows(t, d, `SELECT count(*) FROM outbox_jobs`); !reflect.DeepEqual(got, [][]any{{int64(0)}}) {
+				t.Errorf("rows imported despite the failure: %v", got)
+			}
+			// A done row's timestamps are never read, so marking it done unblocks startup.
+			contractExec(t, d, `UPDATE outbox SET done_at = '2026-01-02T00:00:00Z' WHERE id = 3`)
+			again, err := Open(path)
+			if err != nil {
+				t.Fatalf("marking the row done did not unblock startup: %v", err)
+			}
+			again.Close()
+		})
+	}
+}

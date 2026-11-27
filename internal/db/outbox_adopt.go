@@ -3,15 +3,42 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
+// importLegacyOutbox runs on every start, not once. It is safe only because
+// nothing deletes outbox_jobs rows: its dedup is the unique key of a row that
+// still exists, so a purged job whose legacy row is unfinished would be
+// imported and delivered again. Never call Purge or DeleteSubject while the
+// legacy outbox table exists; drop the table and this import together.
 func importLegacyOutbox(ctx context.Context, d *sql.DB) error {
+	// An unreadable timestamp must stop startup naming the row. Skipping it
+	// would drop a job silently, and a raw NOT NULL failure names nothing.
+	var id int64
+	var column string
+	err := d.QueryRowContext(ctx, `
+		SELECT id, CASE
+				WHEN strftime('%Y-%m-%dT%H:%M:%S.000000Z', next_attempt_at) IS NULL THEN 'next_attempt_at'
+				WHEN strftime('%Y-%m-%dT%H:%M:%S.000000Z', created_at) IS NULL THEN 'created_at'
+				ELSE 'failed_at' END
+		FROM outbox
+		WHERE done_at IS NULL AND (
+			strftime('%Y-%m-%dT%H:%M:%S.000000Z', next_attempt_at) IS NULL
+			OR strftime('%Y-%m-%dT%H:%M:%S.000000Z', created_at) IS NULL
+			OR (failed_at IS NOT NULL AND strftime('%Y-%m-%dT%H:%M:%S.000000Z', failed_at) IS NULL))
+		ORDER BY id LIMIT 1`).Scan(&id, &column)
+	if err == nil {
+		return fmt.Errorf("import legacy outbox: row %d has an unreadable %s: fix it or mark the row done before upgrading", id, column)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("import legacy outbox: check timestamps: %w", err)
+	}
 	// Leave stored plaintext JSON and UTC timestamps to whole seconds. The
 	// module needs BLOBs and fixed-width microsecond timestamps to order jobs.
 	// Do not carry leases across the stopped-worker cutover: keep the charged
 	// attempt, so an interrupted final attempt cannot deliver again.
-	_, err := d.ExecContext(ctx, `
+	_, err = d.ExecContext(ctx, `
 		INSERT INTO outbox_jobs (
 			kind, subject, unique_key, payload, state, attempts, max_attempts,
 			run_at, last_error, created_at, updated_at, finished_at
