@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/17xande-dev/outbox/sqlitestore"
 	"github.com/17xande-dev/sqlitekit"
 	"github.com/17xande-dev/sqlitekit/goosestrict"
 	"github.com/pressly/goose/v3"
@@ -42,9 +43,9 @@ func Open(path string) (*sql.DB, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if _, err = p.Up(ctx); err != nil {
+	if err := migrate(ctx, d, p); err != nil {
 		d.Close()
-		return nil, fmt.Errorf("apply database migrations: %w", err)
+		return nil, err
 	}
 	return d, nil
 }
@@ -172,8 +173,8 @@ func Migrate(ctx context.Context, path string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, err := p.Up(ctx); err != nil {
-		return fmt.Errorf("apply database migrations: %w", err)
+	if err := migrate(ctx, d, p); err != nil {
+		return err
 	}
 	after, _, err := p.GetVersions(ctx)
 	if err != nil {
@@ -183,6 +184,18 @@ func Migrate(ctx context.Context, path string, w io.Writer) error {
 		return err
 	}
 	return writeStatus(ctx, p, w)
+}
+
+// Both entry points hold the same migration lock through the import. On a
+// fresh DB the app must create its goose history before any module tables.
+func migrate(ctx context.Context, d *sql.DB, p *goose.Provider) error {
+	if _, err := p.Up(ctx); err != nil {
+		return fmt.Errorf("apply database migrations: %w", err)
+	}
+	if err := sqlitestore.Migrate(ctx, d); err != nil {
+		return fmt.Errorf("apply outbox migrations: %w", err)
+	}
+	return importLegacyOutbox(ctx, d)
 }
 
 func writeStatus(ctx context.Context, p *goose.Provider, w io.Writer) error {

@@ -69,7 +69,7 @@ func contractFixture(t *testing.T) (*sql.DB, *goose.Provider, string) {
 		(5,'2026-11-09','2026-11-10',''),(5,'2026-11-13','2026-11-13','')`,
 		`UPDATE settings SET half_days_enabled=1,updated_by_id=1,updated_at='original'`,
 		`INSERT INTO balance_adjustments(user_id,type_id,cycle_start,days_x100,reason,by_user_id,created_at) VALUES(1,1,'2026-01-01',125,'original',1,'original')`,
-		`INSERT INTO outbox(kind,payload,next_attempt_at,created_at) VALUES('calendar_create','{"request_id":1}','original','original')`,
+		`INSERT INTO outbox(kind,payload,next_attempt_at,created_at) VALUES('calendar_create','{"request_id":1}','2026-01-02T00:00:00Z','2026-01-01T00:00:00Z')`,
 	} {
 		contractExec(t, d, q)
 	}

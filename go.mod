@@ -5,8 +5,9 @@ go 1.27.4
 require (
 	github.com/17xande-dev/env v0.1.0
 	github.com/17xande-dev/mailer v0.3.0
+	github.com/17xande-dev/outbox v0.1.0
 	github.com/17xande-dev/ratelimit v0.2.0
-	github.com/17xande-dev/sqlitekit v0.2.0
+	github.com/17xande-dev/sqlitekit v0.3.0
 	github.com/17xande-dev/websec v0.5.1
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/google/jsonschema-go v0.4.3

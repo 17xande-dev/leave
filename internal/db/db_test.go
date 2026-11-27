@@ -45,8 +45,8 @@ func TestEveryTableIsStrict(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Count application tables and migration tracking so the check cannot pass vacuously.
-	if n != 24 {
-		t.Fatalf("found %d tables, want 23 application tables and goose_db_version", n)
+	if n != 26 {
+		t.Fatalf("found %d tables, want 23 application tables, goose_db_version and two module tables", n)
 	}
 }
 
@@ -393,7 +393,7 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 func applicationRows(t *testing.T, d *sql.DB) map[string][32]byte {
 	t.Helper()
 	// Baseline hashes deliberately omit added tables, as they omit added columns.
-	tables, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('goose_db_version','request_ranges','request_corrections','approval_delegations') ORDER BY name`)
+	tables, err := d.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('goose_db_version','request_ranges','request_corrections','approval_delegations','outbox_jobs','outbox_goose_version') ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}
