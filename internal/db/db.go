@@ -142,7 +142,7 @@ func Status(ctx context.Context, path string, w io.Writer) error {
 		return err
 	}
 	defer d.Close()
-	return writeStatus(ctx, p, w)
+	return writeStatus(ctx, d, p, w)
 }
 
 // Migrate applies pending migrations with the same safeguards as Open, then
@@ -183,7 +183,7 @@ func Migrate(ctx context.Context, path string, w io.Writer) error {
 	if _, err := fmt.Fprintf(w, "migrating %s: %d -> %d\n", path, before, after); err != nil {
 		return err
 	}
-	return writeStatus(ctx, p, w)
+	return writeStatus(ctx, d, p, w)
 }
 
 // Both entry points hold the same migration lock through the import. On a
@@ -198,7 +198,7 @@ func migrate(ctx context.Context, d *sql.DB, p *goose.Provider) error {
 	return importLegacyOutbox(ctx, d)
 }
 
-func writeStatus(ctx context.Context, p *goose.Provider, w io.Writer) error {
+func writeStatus(ctx context.Context, d *sql.DB, p *goose.Provider, w io.Writer) error {
 	statuses, err := p.Status(ctx)
 	if err != nil {
 		return err
@@ -208,5 +208,5 @@ func writeStatus(ctx context.Context, p *goose.Provider, w io.Writer) error {
 			return err
 		}
 	}
-	return nil
+	return writeOutboxStatus(ctx, d, w)
 }

@@ -313,3 +313,79 @@ func TestNoPurgeWhileLegacyOutboxExists(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOutboxStatusInMigrateAndStatus(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, p, err := openProvider(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Up(ctx); err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	var out strings.Builder
+	if err := Status(ctx, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), "outbox 0001 pending\n") {
+		t.Errorf("status before the module migration:\n%s", &out)
+	}
+	if got := contractRowsAt(t, path, `SELECT count(*) FROM sqlite_schema WHERE name GLOB 'outbox_*'`); got != 0 {
+		t.Errorf("-migrate-status created %d module objects", got)
+	}
+	out.Reset()
+	if err := Migrate(ctx, path, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "11 -> 11\n") || !strings.HasSuffix(out.String(), "outbox 0001 applied\n") {
+		t.Errorf("migrate output:\n%s", &out)
+	}
+	out.Reset()
+	if err := Status(ctx, path, &out); err != nil || !strings.HasSuffix(out.String(), "outbox 0001 applied\n") {
+		t.Errorf("status after: %v\n%s", err, &out)
+	}
+}
+
+// outboxLatest is what -migrate-status claims the module ships; the library's
+// own history must agree, or a bump of outbox would be reported as pending.
+func TestOutboxStatusMatchesTheLibrary(t *testing.T) {
+	d, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	got := contractRows(t, d, `SELECT max(version_id) FROM outbox_goose_version WHERE is_applied = 1`)
+	if !reflect.DeepEqual(got, [][]any{{outboxLatest}}) {
+		t.Errorf("library's newest outbox migration = %v; outboxLatest = %d", got, outboxLatest)
+	}
+}
+
+func TestOutboxStatusRefusesNewerModuleHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractExec(t, d, `INSERT INTO outbox_goose_version (version_id, is_applied) VALUES (2, 1)`)
+	d.Close()
+	var out strings.Builder
+	if err := Status(context.Background(), path, &out); err == nil || !strings.Contains(err.Error(), "outbox migration 2 is newer") {
+		t.Errorf("status error = %v", err)
+	}
+}
+
+func contractRowsAt(t *testing.T, path, q string) int64 {
+	t.Helper()
+	d, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var n int64
+	if err := d.QueryRow(q).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}

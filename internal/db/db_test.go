@@ -56,7 +56,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n0010 pending 0010_session_last_seen.sql\n0011 pending 0011_outbox_lease.sql\n" {
+	if got := out.String(); got != "0001 pending 0001_baseline.sql\n0002 pending 0002_half_days_enabled.sql\n0003 pending 0003_halves_audit.sql\n0004 pending 0004_request_ranges.sql\n0005 pending 0005_type_show_balance.sql\n0006 pending 0006_contract_request_ranges.sql\n0007 pending 0007_type_staff_can_apply.sql\n0008 pending 0008_request_corrections.sql\n0009 pending 0009_approval_delegations.sql\n0010 pending 0010_session_last_seen.sql\n0011 pending 0011_outbox_lease.sql\noutbox 0001 pending\n" {
 		t.Fatalf("before Open: %q", got)
 	}
 	d, err := Open(path)
@@ -68,7 +68,7 @@ func TestMigrationStatus(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\noutbox 0001 applied\n" {
 		t.Fatalf("after Open: %q", got)
 	}
 }
@@ -385,7 +385,7 @@ func TestAdoptBaselinePreservesData(t *testing.T) {
 	if err := Status(context.Background(), path, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\n" {
+	if got := out.String(); got != "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\noutbox 0001 applied\n" {
 		t.Fatalf("after adoption: %q", got)
 	}
 }

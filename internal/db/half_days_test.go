@@ -59,7 +59,7 @@ func TestHalfDaysMigration(t *testing.T) {
 			if err := Migrate(ctx, path, &out); err != nil {
 				t.Fatal(err)
 			}
-			const applied = "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\n"
+			const applied = "0001 applied 0001_baseline.sql\n0002 applied 0002_half_days_enabled.sql\n0003 applied 0003_halves_audit.sql\n0004 applied 0004_request_ranges.sql\n0005 applied 0005_type_show_balance.sql\n0006 applied 0006_contract_request_ranges.sql\n0007 applied 0007_type_staff_can_apply.sql\n0008 applied 0008_request_corrections.sql\n0009 applied 0009_approval_delegations.sql\n0010 applied 0010_session_last_seen.sql\n0011 applied 0011_outbox_lease.sql\noutbox 0001 applied\n"
 			beforeVersion := 0
 			if fromV1 {
 				beforeVersion = 1
