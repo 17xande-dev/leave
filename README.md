@@ -794,39 +794,112 @@ legacy jobs under one lock. Pending jobs keep their schedule and attempts;
 failed jobs become dead with their last error and failure time. Legacy
 completed jobs stay in `outbox`, which remains untouched for one release.
 Drop the legacy table in a later release only after the rollout is confirmed.
-New successful jobs have their payload cleared. Payloads remain plaintext
-JSON, so no key or payload conversion is required beyond SQLite's TEXT/BLOB
-types. Imported job IDs in the new queue can differ from the old IDs.
-Calendar failures still identify the request. Email failures use a generic
-summary, and calendar correction summaries omit counts of old events,
-because the admin and MCP readers now use queue metadata. Both still show
-the stored delivery error.
+If a legacy row has a timestamp that cannot be read, startup and `-migrate`
+stop with `row N has an unreadable <column>` and import nothing; fix the row or
+mark it done, then retry. New successful jobs have their payload cleared.
+Payloads remain plaintext JSON, so no key or payload conversion is required
+beyond SQLite's TEXT/BLOB types. Imported job IDs in the new queue can differ
+from the old IDs. The admin page and MCP summary say "Email about request N"
+for request emails and "Add/Remove request N on the shared calendar" for
+calendar jobs; delegation mails and imported legacy mails read "Email
+notification". Calendar correction summaries omit counts of old events,
+because the readers now use queue metadata. All still show the stored
+delivery error. Request emails use the subject `request:<id>:email`, apart
+from the calendar jobs' `request:<id>`, so retrying or deleting one of them by
+subject never touches the other.
+
+**The import runs on every start.** It is safe only while nothing deletes
+`outbox_jobs` rows: it skips a legacy row by finding that row's job, so a
+purged job whose legacy row is unfinished would be imported and delivered
+again. Do not add `Purge`, `DeleteSubject` or any delete of `outbox_jobs`
+while the old `outbox` table exists (`TestNoPurgeWhileLegacyOutboxExists`
+fails the build if one appears). Drop the table and the import together.
+
+**Expected downtime: about 1-2 minutes** (stop, backup, `-migrate`, check,
+start and healthcheck). Write down the stop time and the healthy time.
+
+**Never start the server against production data or a copy of it.** Its
+worker would send real email and calendar updates. Only `-migrate`,
+`-migrate-status` and `--entrypoint sqlite3` may touch the database or the
+copy, and nothing in this section starts the server except the final
+`kamal deploy`.
 
 **Before downtime**, run the gate and the migration/rollback rehearsal.
-The rehearsal uses a fresh copy of a synthetic schema-0011 database: one pass
-uses the migration command's path and the second uses the server's open path.
-It verifies the second pass does not duplicate or overwrite jobs. No worker
-or production data is involved.
 
 ```sh
 VERSION=$(git rev-parse HEAD)
+OLD=c0c8ae5eccf63644321d7221e72b66acdeb09f3a
 git diff --quiet HEAD -- &&
   make check &&
-  go test -count=1 -run '^TestOutboxAdoption(Rehearsal|Rollback)$' ./internal/db &&
+  go test -count=1 -run '^TestOutboxAdoption' ./internal/db &&
   bin/check-env &&
   kamal build push --version "$VERSION" &&
   kamal build pull --version "$VERSION" &&
   kamal app version
 ```
 
-Confirm the running version is `c0c8ae5eccf63644321d7221e72b66acdeb09f3a`.
-Take a backup while the old app is still serving. Confirm `ok` and no
-foreign-key rows before stopping it:
+Confirm the running version is `$OLD`. Check free space: the plan makes three
+full copies of `leave.db` in the volume (pre-adoption, rehearsal, stop-time),
+and a rollback adds a fourth. The free space must be several times the file
+size:
 
 ```sh
-kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-outbox-adoption.db"' &&
-  kamal app exec --reuse 'sqlite3 -readonly -bail /data/leave-pre-outbox-adoption.db "PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --entrypoint sh ghcr.io/17xande-dev/leave:$VERSION -c 'du -h /data/leave.db*; df -h /data'"
 ```
+
+Take a backup while the old app is still serving and record the counts (counts
+only; they are the reference for every later check). `LEGACY` works on any
+copy, before or after adoption or undo; `MODULE` only after `-migrate`:
+
+```sh
+LEGACY='SELECT max(version_id) FROM goose_db_version WHERE is_applied=1; SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM requests); SELECT count(*), coalesce(sum(done_at IS NULL AND failed_at IS NULL),0), coalesce(sum(done_at IS NULL AND failed_at IS NOT NULL),0), coalesce(sum(done_at IS NOT NULL),0) FROM outbox; PRAGMA integrity_check; PRAGMA foreign_key_check;'
+MODULE='SELECT max(version_id) FROM outbox_goose_version WHERE is_applied=1; SELECT state, count(*) FROM outbox_jobs GROUP BY state;'
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-outbox-adoption.db"' &&
+  kamal app exec --reuse "sqlite3 -readonly -bail /data/leave-pre-outbox-adoption.db '$LEGACY'"
+```
+
+The `LEGACY` output is: goose version `11`; users and requests; legacy outbox
+total, pending, failed and done; `ok`; and no foreign-key rows. Production had
+0 pending and 0 failed legacy rows when this was written; if they are not 0
+the import matters and the counts below must match them.
+
+**Rehearse on an in-volume copy of the backup.** This runs the real file, the
+image's `sqlite3` and the old image. Stop before any downtime if any output
+differs from what is described after the block.
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave-pre-outbox-adoption.db ".backup /data/leave-rehearsal-outbox.db"'
+R="docker run --rm -v leave-data:/data --user 10001"
+ssh sdt-vm-docker02 "$R --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-outbox.db '$LEGACY'"
+ssh sdt-vm-docker02 "$R -e DB_PATH=/data/leave-rehearsal-outbox.db ghcr.io/17xande-dev/leave:$VERSION -migrate-status"
+ssh sdt-vm-docker02 "$R -e DB_PATH=/data/leave-rehearsal-outbox.db ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "$R -e DB_PATH=/data/leave-rehearsal-outbox.db ghcr.io/17xande-dev/leave:$VERSION -migrate"
+ssh sdt-vm-docker02 "$R --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-outbox.db '$LEGACY $MODULE'"
+ssh sdt-vm-docker02 "$R -i --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-outbox.db" < internal/db/testdata/undo_outbox_adoption.sql
+ssh sdt-vm-docker02 "$R -i --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-outbox.db" < internal/db/testdata/undo_outbox_adoption.sql
+ssh sdt-vm-docker02 "$R -e DB_PATH=/data/leave-rehearsal-outbox.db ghcr.io/17xande-dev/leave:$OLD -migrate-status"
+ssh sdt-vm-docker02 "$R -e DB_PATH=/data/leave-rehearsal-outbox.db ghcr.io/17xande-dev/leave:$OLD -migrate"
+ssh sdt-vm-docker02 "$R --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave-rehearsal-outbox.db '$LEGACY'"
+```
+
+Expect: `-migrate-status` shows `outbox 0001 pending`; both `-migrate` runs print
+`11 -> 11` and end with `outbox 0001 applied` (the first imports, the second
+changes nothing); the `LEGACY` counts equal the backup's; `MODULE` shows
+version `1` and one row per state equal to the legacy pending (`pending`) and
+failed (`dead`) counts, so no rows at all while both are 0; the undo runs twice
+without error (it is re-runnable); the old image's `-migrate-status` lists
+everything through 0011 as applied and its `-migrate` prints `11 -> 11`; the
+last `LEGACY` counts equal the backup's again. Every integrity check must
+return `ok` and every foreign-key check no rows.
+
+Then list the rehearsal files, and delete exactly those, nothing else:
+
+```sh
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --entrypoint sh ghcr.io/17xande-dev/leave:$VERSION -c 'ls -l /data/leave-rehearsal-outbox.db*'"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint rm ghcr.io/17xande-dev/leave:$VERSION -f /data/leave-rehearsal-outbox.db /data/leave-rehearsal-outbox.db-wal /data/leave-rehearsal-outbox.db-shm /data/leave-rehearsal-outbox.db.migrate-lock"
+```
+
+Keep `leave-pre-outbox-adoption.db`.
 
 Stop the old app first: it ignores both module tables and would continue
 writing and delivering from `outbox`. With both binaries running, an imported
@@ -846,15 +919,24 @@ ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoi
   ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$VERSION -migrate"
 ```
 
-Expect `11 -> 11` (this reports the app's version). Before starting the app,
-verify the separate module version is `1`, the imported counts match the legacy
-pending/failed counts, integrity returns `ok` and the foreign-key check
-returns no rows:
+Expect `11 -> 11` and a last line `outbox 0001 applied`. Before starting the
+app, run the counts again on the live file and compare them with the
+backup's `LEGACY` output and the rehearsal:
 
 ```sh
-CHECK='SELECT max(version_id) FROM outbox_goose_version WHERE is_applied=1; SELECT count(*) FROM outbox WHERE done_at IS NULL AND failed_at IS NULL; SELECT count(*) FROM outbox WHERE done_at IS NULL AND failed_at IS NOT NULL; SELECT state,count(*) FROM outbox_jobs GROUP BY state; PRAGMA integrity_check; PRAGMA foreign_key_check;'
-ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -readonly -bail /data/leave.db '$CHECK'"
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -readonly -bail /data/leave.db '$LEGACY $MODULE'"
 ```
+
+The goose version is `11`, users, requests and the legacy counts are
+unchanged, the module version is `1`, the imported jobs match the legacy
+pending/failed counts (`outbox_jobs` is empty if those are 0), integrity is
+`ok` and the foreign-key check returns no rows.
+
+**If any count does not match, do not start the app.** The app is still
+stopped, so: keep it stopped; make a safety copy as in the rollback below;
+either run the undo (which empties the new queue and is safe to repeat) or
+restore `leave-stop-outbox-adoption.db` over `leave.db`; verify with
+`LEGACY` and the old image's `-migrate-status`; then `kamal rollback "$OLD"`.
 
 Only if those checks pass, start the already-built image:
 
@@ -867,7 +949,7 @@ the signed-in admin outbox page (GET only):
 
 ```sh
 curl -fsS https://leave.rivers.tools/healthz
-kamal app logs --since 10m | grep -E 'job (transition|claim failed|processing failed|callback panicked)'
+kamal app logs --since 10m | grep -E 'job (transition|claim failed|processing failed|callback panicked)|dead hook failed'
 ```
 
 A quiet queue may have no transitions. Queue transition logs include the
@@ -877,8 +959,8 @@ the worker records the result can repeat it. Calendar events use idempotent
 Graph transaction IDs.
 
 **Rollback, undo SQL before the old binary.** Stop the new app and verify
-no `leave-web` container is running. Back up again, then run the undo once
-via SQLite with the app still stopped:
+no `leave-web` container is running. Back up again, then run the undo via
+SQLite with the app still stopped:
 
 ```sh
 kamal app stop && kamal app details
@@ -887,21 +969,23 @@ kamal app stop && kamal app details
 ```sh
 ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-before-undo-outbox-adoption.db'" &&
   ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db" < internal/db/testdata/undo_outbox_adoption.sql &&
-  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'"
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '$LEGACY'"
 ```
 
-Require `ok` and no foreign-key rows before running:
+Require `ok` and no foreign-key rows before running (use the old image's
+`-migrate-status` too: 0011 applied, nothing newer):
 
 ```sh
 kamal rollback c0c8ae5eccf63644321d7221e72b66acdeb09f3a
 ```
 
 Undo brings back new pending, running and dead jobs, and updates imported
-jobs' legacy rows so already delivered work stays done. The old app ignores
-the module tables, which are left in place. Keep the pre-undo backup; a new
-adoption after rollback needs to reconcile the two queues before starting
-another module worker, or jobs delivered by the old app could run again.
-Do not repeat the undo against the same database.
+jobs' legacy rows so already delivered work stays done. It then empties
+`outbox_jobs`: the undo empties the new queue, so it is safe to re-run, and a
+later redeploy re-imports cleanly (unfinished legacy jobs come back once,
+and jobs the old app finished stay finished). The old app ignores the module
+tables, which are left in place, with `outbox_goose_version`. Keep the
+pre-undo backup as the audit trail.
 Never run `kamal app exec` without `--reuse` to invoke SQLite: it would use
 the `leave` entrypoint and start a real worker. For the stopped-app steps,
 use the explicit `--entrypoint sqlite3`.
