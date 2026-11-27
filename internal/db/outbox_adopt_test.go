@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -248,5 +249,67 @@ func TestOutboxAdoptionRefusesUnreadableLegacyTimestamps(t *testing.T) {
 			}
 			again.Close()
 		})
+	}
+}
+
+func TestOutboxAdoptionStartupNeverDeletesJobs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	contractExec(t, d, `INSERT INTO outbox (id, kind, payload, next_attempt_at, created_at) VALUES
+		(1, 'email', '{}', '2001-01-01T00:00:00Z', '2001-01-01T00:00:00Z'),
+		(2, 'email', '{}', '2001-01-01T00:00:00Z', '2001-01-01T00:00:00Z')`)
+	for range 3 {
+		opened, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opened.Close()
+		// An ancient finished imported job is the one a purge would take.
+		contractExec(t, d, `UPDATE outbox_jobs SET state = 'done', payload = x'', finished_at = '2001-01-02T00:00:00.000000Z'
+			WHERE unique_key = 'legacy:outbox:1'`)
+	}
+	got := contractRows(t, d, `SELECT unique_key, state FROM outbox_jobs ORDER BY id`)
+	want := [][]any{{"legacy:outbox:1", "done"}, {"legacy:outbox:2", "pending"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("jobs after repeated startups = %v; want %v", got, want)
+	}
+}
+
+// Dedup of the legacy import lives in rows that must still exist, so the
+// program may not purge or delete jobs while the legacy table does.
+func TestNoPurgeWhileLegacyOutboxExists(t *testing.T) {
+	root := filepath.Join("..", "..")
+	err := filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() && (e.Name() == ".git" || e.Name() == "node_modules") {
+			return fs.SkipDir
+		}
+		if e.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, call := range []string{".Purge(", ".DeleteSubject(", "DELETE FROM outbox_jobs"} {
+			if strings.Contains(string(src), call) {
+				t.Errorf("%s calls %s: that re-imports purged legacy jobs; drop the legacy outbox table and importLegacyOutbox first", p, call)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
