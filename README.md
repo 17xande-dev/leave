@@ -592,9 +592,9 @@ less South African public holidays, so its day counts can differ from payroll's.
 
 **Email and calendar** go through an outbox. Each is a database row written in the
 same transaction as the change that causes it. A background worker then sends it,
-retrying for about a day. Graph being down never blocks an approval, and nothing
-is lost. Anything that still hasn't gone through shows on **Admin → Outbox** with a
-Retry button.
+retrying for about a day. Graph being down never blocks an approval. Jobs with
+past failures appear on **Admin → Outbox**; once a job exhausts its attempts,
+an administrator can retry it.
 
 ## AI assistants (MCP)
 
@@ -783,8 +783,130 @@ answers. It refuses to run with uncommitted changes, because Kamal builds from `
 **Deploys requiring a stop:** do not use `make deploy` after stopping the
 app. Run the gate and `kamal build push` while the old app is still serving.
 Then stop it before deploying with `kamal deploy --skip-push`. See the 0011
-runbook above for the full outbox rollout, and the WAL instructions below
+runbook above for that schema change, and the WAL instructions below
 if moving from a pre-WAL image.
+
+#### First release using the shared outbox
+
+The app still uses schema 0011. The module adds `outbox_jobs` and its own
+`outbox_goose_version`. Startup applies migrations and copies unfinished
+legacy jobs under one lock. Pending jobs keep their schedule and attempts;
+failed jobs become dead with their last error and failure time. Legacy
+completed jobs stay in `outbox`, which remains untouched for one release.
+Drop the legacy table in a later release only after the rollout is confirmed.
+New successful jobs have their payload cleared. Payloads remain plaintext
+JSON, so no key or payload conversion is required beyond SQLite's TEXT/BLOB
+types. Imported job IDs in the new queue can differ from the old IDs.
+Calendar failures still identify the request. Email failures use a generic
+summary, and calendar correction summaries omit counts of old events,
+because the admin and MCP readers now use queue metadata. Both still show
+the stored delivery error.
+
+**Before downtime**, run the gate and the migration/rollback rehearsal.
+The rehearsal uses a fresh copy of a synthetic schema-0011 database: one pass
+uses the migration command's path and the second uses the server's open path.
+It verifies the second pass does not duplicate or overwrite jobs. No worker
+or production data is involved.
+
+```sh
+VERSION=$(git rev-parse HEAD)
+git diff --quiet HEAD -- &&
+  make check &&
+  go test -count=1 -run '^TestOutboxAdoption(Rehearsal|Rollback)$' ./internal/db &&
+  bin/check-env &&
+  kamal build push --version "$VERSION" &&
+  kamal build pull --version "$VERSION" &&
+  kamal app version
+```
+
+Confirm the running version is `c0c8ae5eccf63644321d7221e72b66acdeb09f3a`.
+Take a backup while the old app is still serving. Confirm `ok` and no
+foreign-key rows before stopping it:
+
+```sh
+kamal app exec --reuse 'sqlite3 -bail /data/leave.db ".backup /data/leave-pre-outbox-adoption.db"' &&
+  kamal app exec --reuse 'sqlite3 -readonly -bail /data/leave-pre-outbox-adoption.db "PRAGMA integrity_check; PRAGMA foreign_key_check;"'
+```
+
+Stop the old app first: it ignores both module tables and would continue
+writing and delivering from `outbox`. With both binaries running, an imported
+job could be delivered twice and older requests could enqueue jobs after the
+import. Verify `kamal app details` shows no running `leave-web` container
+before proceeding.
+
+```sh
+kamal app stop && kamal app details
+```
+
+With the app stopped, take a final SQLite backup and migrate without starting
+a worker. Stop if the backup or migration fails:
+
+```sh
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-stop-outbox-adoption.db'" &&
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 ghcr.io/17xande-dev/leave:$VERSION -migrate"
+```
+
+Expect `11 -> 11` (this reports the app's version). Before starting the app,
+verify the separate module version is `1`, the imported counts match the legacy
+pending/failed counts, integrity returns `ok` and the foreign-key check
+returns no rows:
+
+```sh
+CHECK='SELECT max(version_id) FROM outbox_goose_version WHERE is_applied=1; SELECT count(*) FROM outbox WHERE done_at IS NULL AND failed_at IS NULL; SELECT count(*) FROM outbox WHERE done_at IS NULL AND failed_at IS NOT NULL; SELECT state,count(*) FROM outbox_jobs GROUP BY state; PRAGMA integrity_check; PRAGMA foreign_key_check;'
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -readonly -bail /data/leave.db '$CHECK'"
+```
+
+Only if those checks pass, start the already-built image:
+
+```sh
+kamal deploy --skip-push --version "$VERSION"
+```
+
+After the app starts, check the health endpoint, queue transition logs and
+the signed-in admin outbox page (GET only):
+
+```sh
+curl -fsS https://leave.rivers.tools/healthz
+kamal app logs --since 10m | grep -E 'job (transition|claim failed|processing failed|callback panicked)'
+```
+
+A quiet queue may have no transitions. Queue transition logs include the
+error class; delivery details are stored for admins. Delivery remains at
+least once: a crash after an external service accepts an email and before
+the worker records the result can repeat it. Calendar events use idempotent
+Graph transaction IDs.
+
+**Rollback, undo SQL before the old binary.** Stop the new app and verify
+no `leave-web` container is running. Back up again, then run the undo once
+via SQLite with the app still stopped:
+
+```sh
+kamal app stop && kamal app details
+```
+
+```sh
+ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db '.backup /data/leave-before-undo-outbox-adoption.db'" &&
+  ssh sdt-vm-docker02 "docker run --rm -i -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db" < internal/db/testdata/undo_outbox_adoption.sql &&
+  ssh sdt-vm-docker02 "docker run --rm -v leave-data:/data --user 10001 --entrypoint sqlite3 ghcr.io/17xande-dev/leave:$VERSION -bail /data/leave.db 'PRAGMA integrity_check; PRAGMA foreign_key_check;'"
+```
+
+Require `ok` and no foreign-key rows before running:
+
+```sh
+kamal rollback c0c8ae5eccf63644321d7221e72b66acdeb09f3a
+```
+
+Undo brings back new pending, running and dead jobs, and updates imported
+jobs' legacy rows so already delivered work stays done. The old app ignores
+the module tables, which are left in place. Keep the pre-undo backup; a new
+adoption after rollback needs to reconcile the two queues before starting
+another module worker, or jobs delivered by the old app could run again.
+Do not repeat the undo against the same database.
+Never run `kamal app exec` without `--reuse` to invoke SQLite: it would use
+the `leave` entrypoint and start a real worker. For the stopped-app steps,
+use the explicit `--entrypoint sqlite3`.
+
+#### Standard Kamal setup
 
 One-time setup, on your workstation:
 
