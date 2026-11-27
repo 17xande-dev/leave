@@ -1,4 +1,4 @@
--- Run once, with the app stopped. Both goose histories stay in place.
+-- Run with the app stopped; safe to re-run. Both goose histories stay in place.
 -- SQLite's legacy queue compares timestamps as whole-second UTC text.
 BEGIN IMMEDIATE;
 
@@ -39,5 +39,10 @@ SELECT kind, CAST(payload AS TEXT), attempts,
 	CASE WHEN state = 'dead' THEN substr(finished_at, 1, 19) || 'Z' END,
 	substr(created_at, 1, 19) || 'Z'
 FROM native ORDER BY id;
+
+-- Everything unfinished now lives in `outbox`. Emptying the new queue makes a
+-- second run a no-op (no native job is copied twice) and makes a later redeploy
+-- re-import only what the old binary left unfinished. Done rows hold no payload.
+DELETE FROM outbox_jobs;
 
 COMMIT;

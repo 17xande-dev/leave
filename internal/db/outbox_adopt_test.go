@@ -124,13 +124,15 @@ func TestOutboxAdoptionRehearsal(t *testing.T) {
 	}
 }
 
-func TestOutboxAdoptionRollback(t *testing.T) {
+// rollbackFixture is a database after cut-over: legacy rows 1 (imported, now
+// done) and 2 (historic), plus native jobs of every unfinished state.
+func rollbackFixture(t *testing.T) (*sql.DB, string, string) {
 	path := filepath.Join(t.TempDir(), "test.db")
 	d, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { d.Close() })
 	contractExec(t, d, `INSERT INTO outbox (id, kind, payload, attempts, next_attempt_at, created_at, done_at) VALUES
 		(1, 'email', '{"fixture":"imported"}', 2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
 		(2, 'email', '{"fixture":"historic"}', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
@@ -144,7 +146,12 @@ func TestOutboxAdoptionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contractExec(t, d, string(script))
+	return d, path, string(script)
+}
+
+func TestOutboxAdoptionRollback(t *testing.T) {
+	d, _, script := rollbackFixture(t)
+	contractExec(t, d, script)
 	want := [][]any{
 		{int64(1), "email", `{"fixture":"imported"}`, int64(3), "2026-01-01T00:00:00Z", "", "2026-01-02T00:00:00Z", nil, "2026-01-01T00:00:00Z", nil, nil},
 		{int64(2), "email", `{"fixture":"historic"}`, int64(1), "2026-01-01T00:00:00Z", "", "2026-01-01T00:00:00Z", nil, "2026-01-01T00:00:00Z", nil, nil},
@@ -155,8 +162,8 @@ func TestOutboxAdoptionRollback(t *testing.T) {
 	if got := contractRows(t, d, legacyOutboxRows); !reflect.DeepEqual(got, want) {
 		t.Errorf("rollback rows = %v; want %v", got, want)
 	}
-	if got := contractRows(t, d, `SELECT count(*) FROM outbox_jobs`); !reflect.DeepEqual(got, [][]any{{int64(5)}}) {
-		t.Errorf("rollback changed module job count: %v", got)
+	if got := contractRows(t, d, `SELECT count(*) FROM outbox_jobs`); !reflect.DeepEqual(got, [][]any{{int64(0)}}) {
+		t.Errorf("rollback left module jobs behind: %v", got)
 	}
 	if got := contractRows(t, d, `SELECT max(version_id) FROM goose_db_version WHERE is_applied = 1`); !reflect.DeepEqual(got, [][]any{{int64(11)}}) {
 		t.Errorf("rollback changed app version: %v", got)
@@ -166,5 +173,40 @@ func TestOutboxAdoptionRollback(t *testing.T) {
 	}
 	if got := contractRows(t, d, `PRAGMA foreign_key_check`); len(got) != 0 {
 		t.Errorf("foreign key check: %v", got)
+	}
+}
+
+func TestOutboxAdoptionRollbackIsRerunnable(t *testing.T) {
+	d, _, script := rollbackFixture(t)
+	contractExec(t, d, script)
+	first := contractRows(t, d, legacyOutboxRows)
+	contractExec(t, d, script)
+	if second := contractRows(t, d, legacyOutboxRows); !reflect.DeepEqual(first, second) {
+		t.Errorf("second undo changed the legacy table (duplicate rows?):\n%v\n%v", first, second)
+	}
+}
+
+func TestOutboxAdoptionRedeployAfterRollbackImportsOnce(t *testing.T) {
+	d, path, script := rollbackFixture(t)
+	contractExec(t, d, script)
+	// The old binary meanwhile delivers legacy 3 (a native pending job copied by
+	// the undo) and legacy 1 stays done; 4 (dead) and 5 (running) remain open.
+	contractExec(t, d, `UPDATE outbox SET done_at = '2026-01-03T00:00:00Z' WHERE id = 3`)
+	before := contractRows(t, d, `SELECT id, done_at FROM outbox ORDER BY id`)
+	d.Close()
+	for range 2 { // a restart must not import twice either
+		again, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := contractRows(t, again, `SELECT unique_key, state FROM outbox_jobs ORDER BY id`)
+		want := [][]any{{"legacy:outbox:4", "dead"}, {"legacy:outbox:5", "pending"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("module jobs after redeploy = %v; want %v", got, want)
+		}
+		if after := contractRows(t, again, `SELECT id, done_at FROM outbox ORDER BY id`); !reflect.DeepEqual(before, after) {
+			t.Errorf("redeploy changed done rows in the legacy table: %v -> %v", before, after)
+		}
+		again.Close()
 	}
 }
