@@ -13,6 +13,7 @@ import (
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
+	sharedoutbox "github.com/17xande-dev/outbox"
 	"github.com/17xande-dev/websec"
 )
 
@@ -87,7 +88,7 @@ func (h *Handler) AdminHome(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, err)
 		return
 	}
-	problems, err := h.outbox.Problems(r.Context())
+	problems, err := outbox.Problems(r.Context(), h.outbox)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
@@ -829,19 +830,20 @@ func (h *Handler) AdminDeleteHoliday(w http.ResponseWriter, r *http.Request) {
 // --- Outbox --------------------------------------------------------------
 
 type outboxRow struct {
-	Job     outbox.Job
+	Job     sharedoutbox.Info
 	Summary string
+	Dead    bool
 }
 
 func (h *Handler) AdminOutbox(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.outbox.Problems(r.Context())
+	jobs, err := outbox.Problems(r.Context(), h.outbox)
 	if err != nil {
 		h.serverError(w, r, err)
 		return
 	}
 	rows := make([]outboxRow, 0, len(jobs))
 	for _, j := range jobs {
-		rows = append(rows, outboxRow{Job: j, Summary: outbox.Summary(j)})
+		rows = append(rows, outboxRow{Job: j, Summary: outbox.Summary(j), Dead: j.State == sharedoutbox.StateDead})
 	}
 	h.render(w, r, http.StatusOK, "admin_outbox.html", view{Title: "Outbox", Data: rows})
 }
@@ -852,7 +854,7 @@ func (h *Handler) AdminRetry(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	retried, err := h.outbox.Retry(r.Context(), id)
+	retried, err := h.outbox.Retry(r.Context(), id, fmt.Sprintf("user:%d", currentUser(r).ID))
 	if err != nil {
 		h.serverError(w, r, err)
 		return
@@ -861,6 +863,5 @@ func (h *Handler) AdminRetry(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/outbox?notice=retry-stale", http.StatusSeeOther)
 		return
 	}
-	h.kick()
 	http.Redirect(w, r, "/admin/outbox?notice=retried", http.StatusSeeOther)
 }

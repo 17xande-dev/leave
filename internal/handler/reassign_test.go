@@ -174,7 +174,7 @@ func TestMissingReassignmentSubjects(t *testing.T) {
 func TestReassignNotification(t *testing.T) {
 	hs := newHarness(t)
 	path := hs.apply(hs.signIn("staff1"), "annual", "2026-10-12", "2026-10-12")
-	hs.svc.OnEvent(notify.New("https://leave.test").Hook)
+	hs.svc.OnEvent(notify.New("https://leave.test", hs.h.outbox).Hook)
 	action := "/admin/requests" + strings.TrimPrefix(path, "/leave") + "/reassign"
 	hr := hs.signIn("hr")
 	for _, target := range []string{"staff2", "staff1", "hr"} {
@@ -183,7 +183,7 @@ func TestReassignNotification(t *testing.T) {
 			t.Fatal(res.StatusCode)
 		}
 		var count int
-		if err := hs.db.QueryRow(`SELECT count(*) FROM outbox`).Scan(&count); err != nil {
+		if err := hs.db.QueryRow(`SELECT count(*) FROM outbox_jobs`).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if target != "hr" && count != 0 {
@@ -194,7 +194,7 @@ func TestReassignNotification(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("jobs=%d", count)
 			}
-			if err := hs.db.QueryRow(`SELECT payload FROM outbox`).Scan(&payload); err != nil {
+			if err := hs.db.QueryRow(`SELECT payload FROM outbox_jobs`).Scan(&payload); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(payload, "hr@example.test") || !strings.Contains(payload, "reassigned to you") {

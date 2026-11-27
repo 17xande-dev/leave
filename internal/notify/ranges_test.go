@@ -37,12 +37,12 @@ func TestSingleRangeMessageUnchanged(t *testing.T) {
 			t.Fatalf("single-range dates changed: %q != %q", got, wantDates)
 		}
 		d := msgData{To: "Olivia", Request: r, Dates: wantDates, Days: days(r)}
-		want, err := New("https://leave.test").render("submitted", d, "https://leave.test/leave/1", "Review the request")
+		want, err := New("https://leave.test", nil).render("submitted", d, "https://leave.test/leave/1", "Review the request")
 		if err != nil {
 			t.Fatal(err)
 		}
 		d.Dates = RangesText(r)
-		got, err := New("https://leave.test").render("submitted", d, "https://leave.test/leave/1", "Review the request")
+		got, err := New("https://leave.test", nil).render("submitted", d, "https://leave.test/leave/1", "Review the request")
 		if err != nil {
 			t.Fatal(err)
 		}

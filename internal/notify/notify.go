@@ -56,10 +56,15 @@ type CalendarJob struct {
 
 type Notifier struct {
 	baseURL string
+	queue   *outbox.Queue
 }
 
-func New(baseURL string) *Notifier {
-	return &Notifier{baseURL: strings.TrimRight(baseURL, "/")}
+func New(baseURL string, queue *outbox.Queue) *Notifier {
+	return &Notifier{baseURL: strings.TrimRight(baseURL, "/"), queue: queue}
+}
+
+func (n *Notifier) enqueueCalendar(ctx context.Context, tx *sql.Tx, kind string, job CalendarJob) error {
+	return outbox.Enqueue(ctx, n.queue, tx, kind, fmt.Sprintf("request:%d", job.RequestID), job)
 }
 
 // recipient is someone to email. StandInFor and StandInUntil are set when they
@@ -111,18 +116,18 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			func(d *msgData) { d.Shortfall = daysOf(e.Shortfall, r.TypeUnit) }); err != nil {
 			return err
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
+		if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventImported:
 		// A back-filled log: no email (hundreds of messages about leave
 		// payroll already has), but every entry goes on the shared calendar.
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
+		if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventUnimported:
 		// Correcting the bulk import: the calendar event goes, nobody is told.
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
+		if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventRevoked:
@@ -130,7 +135,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 			func(d *msgData) { d.Actor = e.Actor.Name }); err != nil {
 			return err
 		}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
+		if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: r.ID}); err != nil {
 			return err
 		}
 	case leave.EventEdited:
@@ -183,7 +188,7 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		// events and creates the corrected ones (the type is in the subject,
 		// so even a type-only change recreates them).
 		if r.Status == leave.StatusApproved {
-			if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID, DeleteEventIDs: e.StaleEventIDs}); err != nil {
+			if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID, DeleteEventIDs: e.StaleEventIDs}); err != nil {
 				return err
 			}
 		}
@@ -206,11 +211,11 @@ func (n *Notifier) Hook(ctx context.Context, tx *sql.Tx, e leave.Event) error {
 		}
 		if r.Status == leave.StatusApproved {
 			if r.IsCancellation() && e.Cancelled != nil {
-				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: e.Cancelled.ID}); err != nil {
+				if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarDelete, CalendarJob{RequestID: e.Cancelled.ID}); err != nil {
 					return err
 				}
 			} else if !r.IsCancellation() {
-				if err := outbox.Enqueue(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
+				if err := n.enqueueCalendar(ctx, tx, outbox.KindCalendarCreate, CalendarJob{RequestID: r.ID}); err != nil {
 					return err
 				}
 			}
@@ -322,7 +327,7 @@ func (n *Notifier) delegationMail(ctx context.Context, tx *sql.Tx, e leave.Event
 			return err
 		}
 		m.To = []string{email}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindEmail, m); err != nil {
+		if err := outbox.Enqueue(ctx, n.queue, tx, outbox.KindEmail, "", m); err != nil {
 			return err
 		}
 	}
@@ -418,7 +423,7 @@ func (n *Notifier) send(ctx context.Context, tx *sql.Tx, tmpl string, to []recip
 			return err
 		}
 		m.To = []string{p.Email}
-		if err := outbox.Enqueue(ctx, tx, outbox.KindEmail, m); err != nil {
+		if err := outbox.Enqueue(ctx, n.queue, tx, outbox.KindEmail, "", m); err != nil {
 			return err
 		}
 	}

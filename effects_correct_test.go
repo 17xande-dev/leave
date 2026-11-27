@@ -121,7 +121,7 @@ func newCorrectRig(t *testing.T) *correctRig {
 	for _, ty := range types {
 		ids[ty.Code] = ty.ID
 	}
-	svc.OnEvent(notify.New("https://leave.test").Hook)
+	svc.OnEvent(notify.New("https://leave.test", dbtest.Outbox(t, d)).Hook)
 	cal := newGraphLike()
 	create, remove := calendarHandlers(cal, svc)
 	return &correctRig{t: t, ctx: ctx, db: d, svc: svc, cal: cal, create: create, remove: remove,
@@ -133,7 +133,7 @@ func newCorrectRig(t *testing.T) *correctRig {
 // a worker race the next step.
 func (r *correctRig) jobs() []job {
 	r.t.Helper()
-	rows, err := r.db.QueryContext(r.ctx, `SELECT id, kind, payload FROM outbox WHERE id > ? AND kind <> 'email' ORDER BY id`, r.seen)
+	rows, err := r.db.QueryContext(r.ctx, `SELECT id, kind, payload FROM outbox_jobs WHERE id > ? AND kind <> 'email' ORDER BY id`, r.seen)
 	if err != nil {
 		r.t.Fatal(err)
 	}

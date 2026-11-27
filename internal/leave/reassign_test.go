@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+
+	"github.com/17xande-dev/leave/internal/dbtest"
+	leaveoutbox "github.com/17xande-dev/leave/internal/outbox"
 )
 
 func TestReassignTargets(t *testing.T) {
@@ -54,10 +57,10 @@ func TestReassignTargets(t *testing.T) {
 			f.events = nil
 			// Write a real transactional notification stand-in so refusals also
 			// prove that no outbox job leaked.
+			queue := dbtest.Outbox(t, f.db)
 			f.svc.OnEvent(func(ctx context.Context, tx *sql.Tx, e Event) error {
 				f.events = append(f.events, e)
-				_, err := tx.ExecContext(ctx, `INSERT INTO outbox (kind, payload, created_at, next_attempt_at) VALUES ('email', '{}', '2026-10-05', '2026-10-05')`)
-				return err
+				return leaveoutbox.Enqueue(ctx, queue, tx, leaveoutbox.KindEmail, "", struct{}{})
 			})
 			_, err := f.svc.Reassign(f.ctx, actor, r.ID, target)
 			if tc.notAllowed {
@@ -81,7 +84,7 @@ func TestReassignTargets(t *testing.T) {
 				want, events = r.ApproverID, 0
 			}
 			var jobs int
-			if err := f.db.QueryRow(`SELECT count(*) FROM outbox`).Scan(&jobs); err != nil {
+			if err := f.db.QueryRow(`SELECT count(*) FROM outbox_jobs`).Scan(&jobs); err != nil {
 				t.Fatal(err)
 			}
 			if got.ApproverID != want || len(f.events) != events || jobs != events {

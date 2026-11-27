@@ -7,14 +7,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/17xande-dev/mailer"
+	sharedoutbox "github.com/17xande-dev/outbox"
+	"github.com/17xande-dev/outbox/outboxtest"
 
 	"github.com/17xande-dev/leave/internal/calendar"
+	"github.com/17xande-dev/leave/internal/db"
 	"github.com/17xande-dev/leave/internal/dbtest"
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/leave"
@@ -197,16 +201,23 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	mail := mailer.NewFake()
 	cal := &calendar.Log{}
 	create, remove := calendarHandlers(cal, svc)
-	w := outbox.NewWorker(outbox.NewStore(d), map[string]outbox.Handler{
+	w, err := outbox.New(d, map[string]outbox.Handler{
 		outbox.KindEmail: emailHandler(mail), outbox.KindCalendarCreate: create, outbox.KindCalendarDelete: remove,
-	})
-	svc.OnEvent(notify.New("https://leave.test").Hook)
+	}, sharedoutbox.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.OnEvent(notify.New("https://leave.test", w).Hook)
 
 	r, err := svc.Submit(ctx, staff, leave.Input{TypeID: types[0].ID, Start: "2026-10-12", End: "2026-10-16"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc.Decide(ctx, boss, r.ID, true, "")
+	calendarSubject := fmt.Sprintf("request:%d", r.ID)
+	if jobs := outboxtest.Enqueued(t, w, sharedoutbox.Filter{Kind: outbox.KindCalendarCreate}); len(jobs) != 1 || jobs[0].Subject != calendarSubject {
+		t.Fatalf("approval's calendar job did not reference %s: %+v", calendarSubject, jobs)
+	}
 	w.RunDue(ctx)
 
 	if len(mail.To("boss@x.test")) != 1 || len(mail.To("s@x.test")) != 1 {
@@ -232,6 +243,9 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 
 	c, _ := svc.RequestCancellation(ctx, staff, r.ID, "")
 	svc.Decide(ctx, boss, c.ID, true, "")
+	if jobs := outboxtest.Enqueued(t, w, sharedoutbox.Filter{Kind: outbox.KindCalendarDelete}); len(jobs) != 1 || jobs[0].Subject != calendarSubject {
+		t.Fatalf("cancellation's calendar job did not reference %s: %+v", calendarSubject, jobs)
+	}
 	w.RunDue(ctx)
 	if len(cal.Events) != 0 {
 		t.Fatalf("event survived the cancellation: %+v", cal.Events)
@@ -317,6 +331,44 @@ func TestSideEffectsEndToEnd(t *testing.T) {
 	}
 }
 
+func TestImportedOutboxDeliversLegacyEmailAndClearsPayload(t *testing.T) {
+	ctx := t.Context()
+	path := filepath.Join(t.TempDir(), "test.db")
+	d, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, errInsert := d.ExecContext(ctx, `INSERT INTO outbox (id, kind, payload, next_attempt_at, created_at)
+		VALUES (5, 'email', '{"To":["fixture@example.test"],"Subject":"Fixture","Text":"Fixture body"}',
+			'2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`)
+	if err := errors.Join(errInsert, d.Close()); err != nil {
+		t.Fatal(err)
+	}
+	d, err = db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	mail := mailer.NewFake()
+	clock := outboxtest.NewClock(time.Time{})
+	q, err := outbox.New(d, map[string]outbox.Handler{outbox.KindEmail: emailHandler(mail)}, sharedoutbox.Options{Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran := outboxtest.Drain(t, q); ran != 1 {
+		t.Fatalf("imported email claims = %d, want 1", ran)
+	}
+	if msgs := mail.To("fixture@example.test"); len(msgs) != 1 || msgs[0].Subject != "Fixture" || msgs[0].Text != "Fixture body" {
+		t.Fatal("legacy email did not deliver with its original recipient, subject and body")
+	}
+	// Payloads are not exposed by the admin API; look at the persisted BLOB.
+	var size int
+	if err := d.QueryRowContext(ctx, `SELECT length(payload) FROM outbox_jobs WHERE unique_key = 'legacy:outbox:5' AND state = 'done'`).
+		Scan(&size); err != nil || size != 0 {
+		t.Fatalf("completed import left payload bytes: size=%d err=%v", size, err)
+	}
+}
+
 // A stand-in's approval is written on the shared calendar as such: "Approved
 // by B for A.", so whoever reads the event knows the approver was away.
 func TestCalendarBodyNamesTheApproverStoodInFor(t *testing.T) {
@@ -333,10 +385,13 @@ func TestCalendarBodyNamesTheApproverStoodInFor(t *testing.T) {
 
 	cal := &calendar.Log{}
 	create, remove := calendarHandlers(cal, svc)
-	w := outbox.NewWorker(outbox.NewStore(d), map[string]outbox.Handler{
+	w, err := outbox.New(d, map[string]outbox.Handler{
 		outbox.KindEmail: emailHandler(mailer.NewFake()), outbox.KindCalendarCreate: create, outbox.KindCalendarDelete: remove,
-	})
-	svc.OnEvent(notify.New("https://leave.test").Hook)
+	}, sharedoutbox.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.OnEvent(notify.New("https://leave.test", w).Hook)
 
 	if _, err := svc.Delegate(ctx, boss, boss.ID, deputy.ID, "2026-10-05", "2026-10-09", ""); err != nil {
 		t.Fatal(err)

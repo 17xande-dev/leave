@@ -36,7 +36,7 @@ import (
 type Config struct {
 	Leave  *leave.Service
 	Users  *users.Store
-	Outbox *outbox.Store
+	Outbox *outbox.Queue
 	// Verifier checks bearer tokens; see oauth.Server.Verify.
 	Verifier auth.TokenVerifier
 	// ResourceMetadataURL goes in the WWW-Authenticate header of a 401, which is
@@ -75,7 +75,7 @@ func New(cfg Config) http.Handler {
 type deps struct {
 	leave  *leave.Service
 	users  *users.Store
-	outbox *outbox.Store
+	outbox *outbox.Queue
 }
 
 // userError is a message meant for the person, whole.

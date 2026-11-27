@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	sharedoutbox "github.com/17xande-dev/outbox"
 	"github.com/17xande-dev/websec/csrf"
 	"github.com/17xande-dev/websec/session"
 
@@ -112,21 +113,23 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 		return err
 	}
 	calCreate, calDelete := calendarHandlers(newCalendar(cfg, tokens), leaveSvc)
-	jobs := outbox.NewStore(database)
-	worker := outbox.NewWorker(jobs, map[string]outbox.Handler{
+	jobs, err := outbox.New(database, map[string]outbox.Handler{
 		outbox.KindEmail:          emailHandler(sender),
 		outbox.KindCalendarCreate: calCreate,
 		outbox.KindCalendarDelete: calDelete,
-	})
-	leaveSvc.OnEvent(notify.New(cfg.BaseURL).Hook)
-	leaveSvc.OnCommit(worker.Kick)
+	}, sharedoutbox.Options{})
+	if err != nil {
+		return err
+	}
+	leaveSvc.OnEvent(notify.New(cfg.BaseURL, jobs).Hook)
+	leaveSvc.OnCommit(jobs.Wake)
 
 	oauthSrv, mcpHandler, err := assistant(cfg, database, userStore, leaveSvc, jobs)
 	if err != nil {
 		return err
 	}
 	app, err := newApp(cfg, handler.Deps{Users: userStore, Sessions: sessions, Directory: dir, Leave: leaveSvc,
-		Outbox: jobs, Kick: worker.Kick, TeamsEnabled: teamsSource(cfg.Directory) != "", OAuth: oauthSrv, MCP: mcpHandler})
+		Outbox: jobs, TeamsEnabled: teamsSource(cfg.Directory) != "", OAuth: oauthSrv, MCP: mcpHandler})
 	if err != nil {
 		return err
 	}
@@ -144,7 +147,7 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 	}
 	// Replace startup-only cleanup. There must not be a fallback Close
 	// after the worker starts, since it might not join by the deadline.
-	shutdown = startOutbox(ctx, worker, srv.Shutdown, database.Close)
+	shutdown = startOutbox(ctx, jobs, srv.Shutdown, database.Close)
 
 	backup := backupJob(database, cfg)
 	go every(ctx, cfg.Directory.SyncInterval, func() { syncDirectory(ctx, dir, userStore, teamsSource(cfg.Directory)) })
@@ -179,21 +182,21 @@ func serve(ctx context.Context, cfg config.Config) (err error) {
 	return nil
 }
 
-func startOutbox(ctx context.Context, worker *outbox.Worker, shutdownHTTP func(context.Context) error, closeDB func() error) func() error {
-	stop := worker.Start(ctx, 30*time.Second)
+func startOutbox(ctx context.Context, jobs *outbox.Queue, shutdownHTTP func(context.Context) error, closeDB func() error) func() error {
+	jobs.Start(ctx)
 	return func() error {
-		return shutdownService(shutdownHTTP, stop, closeDB)
+		return shutdownService(shutdownHTTP, jobs.Stop, closeDB)
 	}
 }
 
-func shutdownService(shutdownHTTP, stopWorker func(context.Context) error, closeDB func() error) error {
+func shutdownService(shutdownHTTP func(context.Context) error, stopWorker, closeDB func() error) error {
 	// Drain HTTP and join the worker concurrently on a fresh budget: the
 	// signal has already canceled the service context. Leave time for Close
 	// and for the process to exit before Kamal's 20-second stop timeout.
 	wait, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	stopped := make(chan error, 1)
-	go func() { stopped <- stopWorker(wait) }()
+	go func() { stopped <- stopWorker() }()
 	httpErr := shutdownHTTP(wait)
 	if errors.Is(httpErr, http.ErrServerClosed) {
 		httpErr = nil
@@ -217,7 +220,7 @@ func shutdownService(shutdownHTTP, stopWorker func(context.Context) error, close
 
 // assistant builds the AI-assistant side: the OAuth server that signs people
 // in and the MCP endpoint that accepts what it issues.
-func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.Service, jobs *outbox.Store) (*oauth.Server, http.Handler, error) {
+func assistant(cfg config.Config, database *sql.DB, us *users.Store, svc *leave.Service, jobs *outbox.Queue) (*oauth.Server, http.Handler, error) {
 	source, err := middleware.ClientIPSource(cfg.TrustedProxies)
 	if err != nil {
 		return nil, nil, err

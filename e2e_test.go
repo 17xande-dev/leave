@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -27,7 +28,6 @@ import (
 	"github.com/17xande-dev/leave/internal/handler"
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/notify"
-	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
 
@@ -183,8 +183,8 @@ func newE2EConfig(t *testing.T, adjust func(*config.Config)) *e2e {
 		// Use TLS so the cookie jar can send Secure cookies on the return trip.
 		cfg.BaseURL = "https://" + srv.Listener.Addr().String()
 	}
-	svc.OnEvent(notify.New(cfg.BaseURL).Hook) // as main wires it, so actions leave their mail and calendar jobs
-	jobs := outbox.NewStore(d)
+	jobs := dbtest.Outbox(t, d)
+	svc.OnEvent(notify.New(cfg.BaseURL, jobs).Hook) // as main wires it, so actions leave their mail and calendar jobs
 	oa, mcpHandler, err := assistant(cfg, d, us, svc, jobs)
 	if err != nil {
 		t.Fatal(err)
@@ -526,9 +526,25 @@ func TestEndToEndAdminToolsForAdmins(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("all_requests as admin: %v %v", err, res)
 	}
+	if _, err := e.db.ExecContext(t.Context(), `INSERT INTO outbox_jobs
+		(kind, subject, payload, state, attempts, max_attempts, run_at, created_at, updated_at, finished_at, last_error)
+		VALUES ('calendar_create','request:42',x'7b7d','dead',12,12,'2026-01-01T00:00:00.000000Z',
+			'2026-01-01T00:00:00.000000Z','2026-01-02T00:00:00.000000Z','2026-01-02T00:00:00.000000Z','fixture failure')`); err != nil {
+		t.Fatal(err)
+	}
 	res, err = call(t, cs, "outbox_problems", nil)
 	if err != nil || res.IsError {
 		t.Fatalf("outbox_problems as admin: %v %v", err, res)
+	}
+	got, _ := json.Marshal(res.StructuredContent)
+	for _, field := range []string{`"summary":"Add request 42 on the shared calendar"`, `"last_error":"fixture failure"`,
+		`"created_at":"2026-01-01T00:00:00Z"`, `"gave_up":true`, `"attempts":12`} {
+		if !strings.Contains(string(got), field) {
+			t.Errorf("missing %s in outbox_problems: %s", field, got)
+		}
+	}
+	if _, err := e.db.ExecContext(t.Context(), `DELETE FROM outbox_jobs WHERE subject = 'request:42'`); err != nil {
+		t.Fatal(err)
 	}
 	// The admin actions run through the real notifier hook and outbox.
 	for tool, args := range map[string]map[string]any{
@@ -544,9 +560,9 @@ func TestEndToEndAdminToolsForAdmins(t *testing.T) {
 	// Recording leave tells the person and queues the calendar event; removing
 	// it tells them again and queues the event's deletion.
 	jobs := func(kind string) (n int) {
-		e.db.QueryRow(`SELECT count(*) FROM outbox WHERE kind = ? AND payload LIKE '%' || ? || '%'`, kind, "staff1@example.test").Scan(&n)
+		e.db.QueryRow(`SELECT count(*) FROM outbox_jobs WHERE kind = ? AND CAST(payload AS TEXT) LIKE '%' || ? || '%'`, kind, "staff1@example.test").Scan(&n)
 		if kind != "email" {
-			e.db.QueryRow(`SELECT count(*) FROM outbox WHERE kind = ?`, kind).Scan(&n)
+			e.db.QueryRow(`SELECT count(*) FROM outbox_jobs WHERE kind = ?`, kind).Scan(&n)
 		}
 		return n
 	}

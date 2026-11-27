@@ -134,7 +134,7 @@ func TestImport2026DryRunWritesNothing(t *testing.T) {
 	want(t, out, "DRY RUN", "OK  row 2  ext_id=S1 sick 2026-03-04..2026-03-04 (1 working day)",
 		"OK  row 3  ext_id=S1 annual 2026-05-04..2026-05-08 (4.5 working days)",
 		"Leave:    4 imported, 6 skipped, 0 errors", "Balances: 3 applied, 1 skipped, 0 held for review, 0 errors", "Verification: 3 balances equal the file exactly.")
-	for _, table := range []string{"requests", "balance_adjustments", "outbox"} {
+	for _, table := range []string{"requests", "balance_adjustments", "outbox_jobs"} {
 		if n := e.count(`SELECT count(*) FROM ` + table); n != 0 {
 			t.Errorf("dry run left %d rows in %s", n, table)
 		}
@@ -176,10 +176,10 @@ func TestImport2026Apply(t *testing.T) {
 		t.Errorf("%d imported requests with note and marker, want 4", n)
 	}
 	// Calendar only: one job per entry, never an email.
-	if n := e.count(`SELECT count(*) FROM outbox WHERE kind = 'calendar_create'`); n != 4 {
+	if n := e.count(`SELECT count(*) FROM outbox_jobs WHERE kind = 'calendar_create'`); n != 4 {
 		t.Errorf("%d calendar jobs, want 4", n)
 	}
-	if n := e.count(`SELECT count(*) FROM outbox WHERE kind <> 'calendar_create'`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM outbox_jobs WHERE kind <> 'calendar_create'`); n != 0 {
 		t.Errorf("%d non-calendar jobs: someone was emailed", n)
 	}
 	if n := e.count(`SELECT count(*) FROM balance_adjustments WHERE reason LIKE 'Opening balance from payroll, October 2026: D = %.'`); n != 3 {
@@ -470,10 +470,10 @@ func TestImport2026UnrecordRemovesQuietly(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM requests WHERE status = 'approved'`); n != 2 {
 		t.Errorf("%d approved left, want 2", n)
 	}
-	if n := e.count(`SELECT count(*) FROM outbox WHERE kind = 'calendar_delete'`); n != 2 {
+	if n := e.count(`SELECT count(*) FROM outbox_jobs WHERE kind = 'calendar_delete'`); n != 2 {
 		t.Errorf("%d calendar_delete jobs, want 2", n)
 	}
-	if n := e.count(`SELECT count(*) FROM outbox WHERE kind NOT IN ('calendar_create', 'calendar_delete')`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM outbox_jobs WHERE kind NOT IN ('calendar_create', 'calendar_delete')`); n != 0 {
 		t.Errorf("%d other jobs: someone was emailed", n)
 	}
 }
@@ -535,7 +535,7 @@ func TestImport2026UnrecordTwiceIsSafe(t *testing.T) {
 // A dry run reports the removals and changes nothing.
 func TestImport2026UnrecordDryRunChangesNothing(t *testing.T) {
 	e := unrecordEnv(t)
-	jobs := e.count(`SELECT count(*) FROM outbox`)
+	jobs := e.count(`SELECT count(*) FROM outbox_jobs`)
 	code, out := e.unrecord("row,ext_id\n3,S1\n8,S2\n")
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
@@ -544,7 +544,7 @@ func TestImport2026UnrecordDryRunChangesNothing(t *testing.T) {
 	if n := e.count(removed); n != 0 {
 		t.Errorf("dry run removed %d", n)
 	}
-	if n := e.count(`SELECT count(*) FROM outbox`); n != jobs {
+	if n := e.count(`SELECT count(*) FROM outbox_jobs`); n != jobs {
 		t.Errorf("dry run changed the outbox from %d to %d", jobs, n)
 	}
 }

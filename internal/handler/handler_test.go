@@ -25,7 +25,6 @@ import (
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/mcpserver"
 	"github.com/17xande-dev/leave/internal/oauth"
-	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
 
@@ -75,7 +74,7 @@ func newHarness(t *testing.T) *harness {
 	if err := svc.SaveSettings(context.Background(), hr, st); err != nil {
 		t.Fatal(err)
 	}
-	jobs := outbox.NewStore(d)
+	jobs := dbtest.Outbox(t, d)
 	oa := oauth.New(d, oauth.Config{BaseURL: "http://leave.test"})
 	sessions, err := auth.NewSessions(d, session.Default)
 	if err != nil {

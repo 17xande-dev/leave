@@ -17,7 +17,6 @@ import (
 	"github.com/17xande-dev/leave/internal/dbtest"
 	"github.com/17xande-dev/leave/internal/directory"
 	"github.com/17xande-dev/leave/internal/leave"
-	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
 
@@ -70,7 +69,7 @@ func newFixture(t *testing.T) *fixture {
 		return &auth.TokenInfo{UserID: fmt.Sprint(u.ID), Scopes: []string{"leave"}, Expiration: time.Now().Add(time.Hour)}, nil
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", New(Config{Leave: svc, Users: us, Outbox: outbox.NewStore(d), Verifier: verify,
+	mux.Handle("/mcp", New(Config{Leave: svc, Users: us, Outbox: dbtest.Outbox(t, d), Verifier: verify,
 		ResourceMetadataURL: "http://leave.test/.well-known/oauth-protected-resource", Scopes: []string{"leave"}}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

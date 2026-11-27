@@ -1,29 +1,34 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"testing"
 
+	"github.com/17xande-dev/outbox"
 	"github.com/17xande-dev/websec/webtest"
 )
 
 func TestAdminOutboxRetryReportsStalePage(t *testing.T) {
 	hs := newHarness(t)
-	var kicks atomic.Int32
-	hs.h.kick = func() { kicks.Add(1) }
-	if _, err := hs.db.ExecContext(t.Context(), `INSERT INTO outbox
-		(id,kind,payload,attempts,next_attempt_at,created_at,failed_at,last_error)
-		VALUES (42,'email','{}',12,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','fixture failure')`); err != nil {
+	if _, err := hs.db.ExecContext(t.Context(), `INSERT INTO outbox_jobs
+		(id,kind,payload,state,attempts,max_attempts,run_at,created_at,updated_at,finished_at,last_error)
+		VALUES (42,'email',x'7b7d','dead',12,12,'2026-01-01T00:00:00.000000Z','2026-01-01T00:00:00.000000Z',
+			'2026-01-02T00:00:00.000000Z','2026-01-02T00:00:00.000000Z','fixture failure')`); err != nil {
+		t.Fatal(err)
+	}
+	hr, err := hs.us.ByUsername(t.Context(), "hr")
+	if err != nil {
 		t.Fatal(err)
 	}
 	c := webtest.NewServer(t, hs.srv)
 	c.PostForm("/login", url.Values{"username": {"hr"}, "password": {"fixture"}}).WantStatus(http.StatusSeeOther)
 	const path = "/admin/outbox/42/retry"
-	if page := c.Get("/admin/outbox"); page.Status != http.StatusOK || !strings.Contains(page.Body, `action="`+path+`"`) {
-		t.Fatal("dead job has no retry form")
+	if page := c.Get("/admin/outbox"); page.Status != http.StatusOK || !strings.Contains(page.Body, `action="`+path+`"`) ||
+		!strings.Contains(page.Body, "fixture failure") || !strings.Contains(page.Body, "queued 2026-01-01T00:00:00Z") {
+		t.Fatal("dead job is missing its retry form, timestamp or failure detail")
 	}
 	first := c.PostForm(path, nil)
 	first.WantRedirect(http.StatusSeeOther, "/admin/outbox?notice=retried")
@@ -37,7 +42,9 @@ func TestAdminOutboxRetryReportsStalePage(t *testing.T) {
 		!strings.Contains(page.Body, "No job was retried. It may have already been retried or delivered.") {
 		t.Fatal("stale retry did not render the no-op notice")
 	}
-	if got := kicks.Load(); got != 1 {
-		t.Fatalf("worker kicked %d times, want one kick for the successful retry", got)
+	job, err := hs.h.outbox.Get(t.Context(), 42)
+	if err != nil || job.State != outbox.StatePending || job.Attempts != 0 || job.RetryCount != 1 ||
+		job.RetriedBy != fmt.Sprintf("user:%d", hr.ID) {
+		t.Fatalf("retry should requeue and audit exactly once: %+v (%v)", job, err)
 	}
 }

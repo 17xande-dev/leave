@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/17xande-dev/leave/internal/db"
+	"github.com/17xande-dev/leave/internal/outbox"
 )
 
 func New(t testing.TB) *sql.DB {
@@ -18,4 +19,14 @@ func New(t testing.TB) *sql.DB {
 	}
 	t.Cleanup(func() { d.Close() })
 	return d
+}
+
+// Outbox attaches a queue with delivery disabled to a fixture database.
+func Outbox(t testing.TB, d *sql.DB) *outbox.Queue {
+	t.Helper()
+	q, err := outbox.NewEnqueuer(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return q
 }

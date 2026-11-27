@@ -9,12 +9,12 @@
   <tbody>
   {{range .}}
     <tr>
-      <td>{{.Summary}}<br><small>queued {{.Job.CreatedAt}} (UTC)</small></td>
+      <td>{{.Summary}}<br><small>queued {{.Job.CreatedAt.UTC.Format "2006-01-02T15:04:05Z"}} (UTC)</small></td>
       <td class="num">{{.Job.Attempts}}</td>
       <td><small>{{.Job.LastError}}</small></td>
-      <td>{{if .Job.FailedAt}}
+      <td>{{if .Dead}}
         <form method="post" action="/admin/outbox/{{.Job.ID}}/retry">{{template "csrf" $.CSRF}}<button type="submit" class="quiet">Retry</button></form>
-      {{else}}<small>retrying, next {{.Job.NextAttempt}} (UTC)</small>{{end}}</td>
+      {{else}}<small>retrying, next {{.Job.RunAt.UTC.Format "2006-01-02T15:04:05Z"}} (UTC)</small>{{end}}</td>
     </tr>
   {{end}}
   </tbody>

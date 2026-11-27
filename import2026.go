@@ -41,6 +41,7 @@ import (
 	"github.com/17xande-dev/leave/internal/db"
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/notify"
+	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
 )
 
@@ -130,7 +131,11 @@ func runImport2026(args []string, stdout io.Writer, now func() time.Time) int {
 	us := users.NewStore(database)
 	svc := leave.New(database, us, leave.Config{Location: cfg.Location})
 	svc.Now = now
-	svc.OnEvent(notify.New(cfg.BaseURL).Hook)
+	jobs, err := outbox.NewEnqueuer(database)
+	if err != nil {
+		return fail("%v", err)
+	}
+	svc.OnEvent(notify.New(cfg.BaseURL, jobs).Hook)
 	ctx := context.Background()
 	if err := svc.SeedTypes(ctx); err != nil {
 		return fail("%v", err)

@@ -46,7 +46,7 @@ type Deps struct {
 	Sessions  *auth.Sessions
 	Directory directory.Directory
 	Leave     *leave.Service
-	Outbox    *outbox.Store
+	Outbox    *outbox.Queue
 	// TeamsEnabled is whether a team source is configured; the Teams page
 	// says so when it is not.
 	TeamsEnabled bool
@@ -55,8 +55,6 @@ type Deps struct {
 	// is the bearer-protected tool endpoint.
 	OAuth *oauth.Server
 	MCP   http.Handler
-	// Kick wakes the outbox worker after an admin retries a job.
-	Kick func()
 }
 
 type Handler struct {
@@ -66,11 +64,10 @@ type Handler struct {
 	sessions  *auth.Sessions
 	directory directory.Directory
 	leave     *leave.Service
-	outbox    *outbox.Store
+	outbox    *outbox.Queue
 	teamsOn   bool
 	oauth     *oauth.Server
 	mcp       http.Handler
-	kick      func()
 
 	pages    map[string]*template.Template
 	partials *template.Template
@@ -93,9 +90,6 @@ func New(cfg Config, d Deps) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d.Kick == nil {
-		d.Kick = func() {}
-	}
 	a, err := loadAssets()
 	if err != nil {
 		return nil, err
@@ -107,7 +101,7 @@ func New(cfg Config, d Deps) (*Handler, error) {
 	}
 	return &Handler{
 		cfg: cfg, cookie: sessionCookie, users: d.Users, sessions: d.Sessions, directory: d.Directory, leave: d.Leave,
-		outbox: d.Outbox, teamsOn: d.TeamsEnabled, oauth: d.OAuth, mcp: d.MCP, kick: d.Kick,
+		outbox: d.Outbox, teamsOn: d.TeamsEnabled, oauth: d.OAuth, mcp: d.MCP,
 		pages: pages, partials: partials,
 		// Five tries per username per 15 minutes -- below AD's usual lockout
 		// threshold, so a guesser meets this wall before a colleague is locked

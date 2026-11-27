@@ -31,7 +31,7 @@ func setup(t *testing.T) *env {
 	us := users.NewStore(d)
 	svc := leave.New(d, us, leave.Config{Location: time.UTC})
 	svc.Now = func() time.Time { return time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC) }
-	svc.OnEvent(New("https://leave.test").Hook)
+	svc.OnEvent(New("https://leave.test", dbtest.Outbox(t, d)).Hook)
 	e := &env{ctx: ctx, db: d, svc: svc, people: map[string]users.User{}}
 	for _, p := range []struct {
 		name, full, manager, email string
@@ -71,7 +71,7 @@ type job struct {
 
 // drain returns and clears the outbox.
 func (e *env) drain(t *testing.T) []job {
-	rows, err := e.db.Query(`SELECT kind, payload FROM outbox ORDER BY id`)
+	rows, err := e.db.Query(`SELECT kind, payload FROM outbox_jobs ORDER BY id`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +79,17 @@ func (e *env) drain(t *testing.T) []job {
 	var out []job
 	for rows.Next() {
 		var j job
-		rows.Scan(&j.kind, &j.payload)
+		if err := rows.Scan(&j.kind, &j.payload); err != nil {
+			t.Fatal(err)
+		}
 		out = append(out, j)
 	}
-	e.db.Exec(`DELETE FROM outbox`)
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`DELETE FROM outbox_jobs`); err != nil {
+		t.Fatal(err)
+	}
 	return out
 }
 

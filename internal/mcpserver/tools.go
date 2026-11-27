@@ -11,6 +11,7 @@ import (
 	"github.com/17xande-dev/leave/internal/leave"
 	"github.com/17xande-dev/leave/internal/outbox"
 	"github.com/17xande-dev/leave/internal/users"
+	sharedoutbox "github.com/17xande-dev/outbox"
 )
 
 // listCap bounds what one tool call returns: a model reads every row, and a
@@ -951,14 +952,15 @@ func (d *deps) outboxProblems(ctx context.Context, u users.User, _ none) (Outbox
 	if err := requireAdmin(u); err != nil {
 		return OutboxOut{}, "", err
 	}
-	js, err := d.outbox.Problems(ctx)
+	js, err := outbox.Problems(ctx, d.outbox)
 	if err != nil {
 		return OutboxOut{}, "", err
 	}
 	out := OutboxOut{Problems: make([]ProblemJob, 0, len(js))}
 	for _, j := range js {
 		out.Problems = append(out.Problems, ProblemJob{ID: j.ID, Kind: j.Kind, Summary: outbox.Summary(j),
-			Attempts: j.Attempts, LastError: j.LastError, CreatedAt: j.CreatedAt, GaveUp: j.FailedAt != ""})
+			Attempts: j.Attempts, LastError: j.LastError, CreatedAt: j.CreatedAt.UTC().Format(time.RFC3339),
+			GaveUp: j.State == sharedoutbox.StateDead})
 	}
 	return out, fmt.Sprintf("%d %s.", len(out.Problems), plural(len(out.Problems), "problem", "problems")), nil
 }
