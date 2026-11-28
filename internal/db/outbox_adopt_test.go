@@ -348,17 +348,21 @@ func TestOutboxStatusInMigrateAndStatus(t *testing.T) {
 	}
 }
 
-// outboxLatest is what -migrate-status claims the module ships; the library's
-// own history must agree, or a bump of outbox would be reported as pending.
-func TestOutboxStatusMatchesTheLibrary(t *testing.T) {
+func TestOutboxStatusPrintsRecordedVersion(t *testing.T) {
 	d, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	got := contractRows(t, d, `SELECT max(version_id) FROM outbox_goose_version WHERE is_applied = 1`)
-	if !reflect.DeepEqual(got, [][]any{{outboxLatest}}) {
-		t.Errorf("library's newest outbox migration = %v; outboxLatest = %d", got, outboxLatest)
+	// Like Migrate, the library counts a recorded version even if the row
+	// has is_applied=false. The copied status helper reported it as pending.
+	contractExec(t, d, `UPDATE outbox_goose_version SET is_applied = 0 WHERE version_id = 1`)
+	var out strings.Builder
+	if err := writeOutboxStatus(t.Context(), d, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "outbox 0001 applied\n" {
+		t.Errorf("outbox status = %q, want %q", got, "outbox 0001 applied\n")
 	}
 }
 
@@ -371,8 +375,9 @@ func TestOutboxStatusRefusesNewerModuleHistory(t *testing.T) {
 	contractExec(t, d, `INSERT INTO outbox_goose_version (version_id, is_applied) VALUES (2, 1)`)
 	d.Close()
 	var out strings.Builder
-	if err := Status(context.Background(), path, &out); err == nil || !strings.Contains(err.Error(), "outbox migration 2 is newer") {
-		t.Errorf("status error = %v", err)
+	const want = "outbox: migration 2 is newer than this build's 1; use a newer build"
+	if err := Status(context.Background(), path, &out); err == nil || err.Error() != want {
+		t.Errorf("status error = %v, want %q", err, want)
 	}
 }
 
